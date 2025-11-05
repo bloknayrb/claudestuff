@@ -61,6 +61,9 @@ You can also install a specific plugin directly:
 
 Standalone skills that can be used independently or as part of plugins:
 
+### Skill Creation
+Expert guidance for creating efficient, comprehensive, and well-structured Claude Code skills. Covers progressive disclosure principles, YAML frontmatter best practices, content organization, code examples, validation checklists, and common mistakes to avoid. Essential for skill authors.
+
 ### Testing Best Practices
 Comprehensive testing strategies including unit tests, integration tests, test patterns (AAA, mocks, stubs), and coverage guidelines.
 
@@ -135,6 +138,7 @@ plugins/your-plugin-name/
 │   ├── example-plugin/
 │   └── your-plugin/
 ├── skills/                   # Standalone skills directory
+│   ├── skill-creation/
 │   ├── testing-best-practices/
 │   ├── api-design/
 │   ├── security-review/
