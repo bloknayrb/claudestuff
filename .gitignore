@@ -1,0 +1,32 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Node modules (if MCP servers use npm)
+node_modules/
+package-lock.json
+
+# Python virtual environments
+venv/
+env/
+__pycache__/
+*.pyc
+
+# Local configuration overrides
+.env
+.env.local

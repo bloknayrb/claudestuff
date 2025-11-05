@@ -1,0 +1,9 @@
+{
+  "hooks": [
+    {
+      "event": "PostToolUse",
+      "command": "echo '✓ Tool execution completed'",
+      "description": "Display a confirmation message after tool execution"
+    }
+  ]
+}
