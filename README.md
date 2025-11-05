@@ -57,6 +57,19 @@ You can also install a specific plugin directly:
 - Post-tool execution hook
 - Example MCP server configuration
 
+## Available Skills
+
+Standalone skills that can be used independently or as part of plugins:
+
+### Testing Best Practices
+Comprehensive testing strategies including unit tests, integration tests, test patterns (AAA, mocks, stubs), and coverage guidelines.
+
+### API Design
+RESTful API design principles covering resource-oriented design, HTTP methods, status codes, versioning, pagination, security, and performance.
+
+### Security Review
+Security vulnerability detection and secure coding practices based on OWASP Top 10, including injection prevention, authentication, encryption, and security headers.
+
 ## Creating Your Own Plugins
 
 ### Plugin Structure
@@ -121,8 +134,22 @@ plugins/your-plugin-name/
 ├── plugins/                  # Plugin directory
 │   ├── example-plugin/
 │   └── your-plugin/
+├── skills/                   # Standalone skills directory
+│   ├── testing-best-practices/
+│   ├── api-design/
+│   ├── security-review/
+│   └── your-skill/
 └── README.md                 # This file
 ```
+
+### Skills Directory
+
+The `skills/` directory contains standalone skills - packaged knowledge and capabilities that can be:
+- Used independently through the `/skill` command
+- Included in plugins
+- Shared across multiple plugins
+
+Each skill is a directory containing a `SKILL.md` file with structured knowledge, patterns, and best practices.
 
 ## Documentation
 
@@ -136,6 +163,8 @@ plugins/your-plugin-name/
 
 Contributions are welcome! Please:
 
+### Adding Plugins
+
 1. Fork this repository
 2. Create your plugin following the structure above
 3. Test thoroughly
@@ -143,6 +172,28 @@ Contributions are welcome! Please:
    - Plugin code
    - Updated marketplace.json
    - Description of what your plugin does
+
+### Adding Skills
+
+1. Create a new directory in `skills/` with a descriptive name
+2. Add a `SKILL.md` file following the skill format:
+   ```markdown
+   ---
+   name: skill-name
+   description: Brief description
+   version: 1.0.0
+   tags: [tag1, tag2]
+   ---
+
+   # Skill Name
+
+   [Your skill content with knowledge, patterns, examples]
+   ```
+3. Test your skill
+4. Submit a pull request with:
+   - Skill directory and SKILL.md
+   - Updated README listing the new skill
+   - Clear description of the knowledge/capabilities provided
 
 ## License
 
