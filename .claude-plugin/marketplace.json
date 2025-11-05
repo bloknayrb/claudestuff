@@ -1,0 +1,17 @@
+{
+  "name": "claudestuff-marketplace",
+  "metadata": {
+    "description": "A curated marketplace for Claude Code plugins",
+    "version": "0.1.0"
+  },
+  "owner": {
+    "name": "bloknayrb"
+  },
+  "plugins": [
+    {
+      "name": "example-plugin",
+      "source": "./plugins/example-plugin",
+      "description": "An example plugin demonstrating all component types (commands, agents, skills, hooks, MCP)"
+    }
+  ]
+}
