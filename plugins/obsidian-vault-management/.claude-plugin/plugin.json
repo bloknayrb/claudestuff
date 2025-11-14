@@ -1,0 +1,24 @@
+{
+  "name": "obsidian-vault-management",
+  "version": "1.0.0",
+  "description": "Comprehensive vault management skills for Obsidian: maintenance, email triage, tracking updates, and timesheet generation. Optimized for large vaults with Windows/PowerShell support.",
+  "author": "Bryan Kolb",
+  "components": {
+    "skills": ["skills/**/SKILL.md"]
+  },
+  "keywords": [
+    "obsidian",
+    "vault",
+    "maintenance",
+    "productivity",
+    "email",
+    "tracking",
+    "timesheet",
+    "windows"
+  ],
+  "requirements": {
+    "platform": "Windows (PowerShell required for temporal filtering)",
+    "tools": ["Read", "Grep", "Glob", "Bash"]
+  },
+  "repository": "https://github.com/bkolb/claudestuff"
+}

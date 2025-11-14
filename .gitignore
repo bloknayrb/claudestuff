@@ -30,3 +30,6 @@ __pycache__/
 # Local configuration overrides
 .env
 .env.local
+
+# Claude Code local settings
+.claude/

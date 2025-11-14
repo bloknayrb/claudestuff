@@ -78,6 +78,30 @@ You can also install a specific plugin directly:
 - Technical and executive report generation
 - OpenMemory integration for pattern storage
 
+### Obsidian Vault Management
+
+**Description:** Comprehensive vault management skills for Obsidian with adaptive performance paths and parallel agent architecture
+
+**Components:**
+- Vault Sweeping Skill - 5 parallel agents for comprehensive vault analysis
+- Agent specifications and detection patterns
+- Validation rules and error handling
+- PowerShell temporal filtering support
+
+**Features:**
+- File organization analysis (Type property vs folder location)
+- Template compliance validation
+- Project status update detection
+- Metadata validation
+- Cleanup opportunity identification
+- Adaptive paths: Quick (30s) / Standard (60s) / Deep (120s)
+- Optimized for large vaults (25,000+ files)
+- Windows/PowerShell support
+
+**Requirements:**
+- Windows platform (PowerShell required)
+- Obsidian vault with YAML frontmatter
+
 ## Available Skills
 
 Standalone skills that can be used independently or as part of plugins:

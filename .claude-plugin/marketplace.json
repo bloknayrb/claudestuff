@@ -17,6 +17,11 @@
       "name": "transaction-analysis",
       "source": "./plugins/transaction-analysis",
       "description": "Comprehensive toll transaction data analysis with automatic client detection (VDOT, DelDOT, MDTA, DRPA), specialized agents, and integrated reporting"
+    },
+    {
+      "name": "obsidian-vault-management",
+      "source": "./plugins/obsidian-vault-management",
+      "description": "Comprehensive vault management skills for Obsidian: maintenance, email triage, tracking updates, and timesheet generation. Optimized for large vaults with Windows/PowerShell support"
     }
   ]
 }
