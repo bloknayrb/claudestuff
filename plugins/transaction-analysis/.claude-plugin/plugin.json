@@ -4,8 +4,5 @@
   "description": "Comprehensive toll transaction data analysis plugin with automatic client detection (VDOT, DelDOT, MDTA, DRPA), specialized agents for analysis and validation, and integrated reporting capabilities",
   "author": {
     "name": "bloknayrb"
-  },
-  "commands": ["./commands/*.md"],
-  "agents": ["./agents/*.md"],
-  "hooks": "./hooks/hooks.json"
+  }
 }

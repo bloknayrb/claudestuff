@@ -4,8 +4,5 @@
   "description": "An example plugin demonstrating all component types",
   "author": {
     "name": "Your Name"
-  },
-  "commands": ["./commands/*.md"],
-  "agents": ["./agents/*.md"],
-  "hooks": "./hooks/hooks.json"
+  }
 }

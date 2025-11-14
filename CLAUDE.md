@@ -41,7 +41,45 @@ This is a Claude Code plugin marketplace repository that serves as a central hub
 - **Hooks**: Event-triggered automation (stored in hooks.json)
 - **MCP Servers**: Model Context Protocol integrations (configured in .mcp.json)
 
-Each plugin has a `plugin.json` manifest that declares which components it provides using glob patterns.
+Each plugin has a `plugin.json` manifest. **Important**: Standard component locations are auto-discovered and should NOT be declared in the manifest.
+
+### Auto-Discovery of Standard Locations
+
+Claude Code automatically discovers components in standard directories:
+- `commands/` - All `*.md` files are auto-loaded as slash commands
+- `agents/` - All `*.md` files are auto-loaded as specialized agents
+- `hooks/hooks.json` - Automatically loaded if present
+- `skills/` - All `**/SKILL.md` files are auto-loaded as skills
+
+**Critical**: The manifest fields (`commands`, `agents`, `hooks`, `skills`) should ONLY be used to reference *additional* non-standard locations. If you use standard directories, leave these fields out of plugin.json entirely.
+
+#### Minimal plugin.json Example (Standard Locations)
+```json
+{
+  "name": "my-plugin",
+  "version": "1.0.0",
+  "description": "Plugin description",
+  "author": {
+    "name": "Your Name"
+  }
+}
+```
+
+#### Extended plugin.json Example (Additional Locations)
+```json
+{
+  "name": "my-plugin",
+  "version": "1.0.0",
+  "description": "Plugin with custom locations",
+  "author": {
+    "name": "Your Name"
+  },
+  "commands": ["./custom-commands/*.md"],
+  "hooks": "./extra-hooks/additional-hooks.json"
+}
+```
+
+**Common Error**: Specifying standard locations in the manifest causes "duplicate file" or "path not found" errors because the system tries to load them twice.
 
 ### Skills vs Agents vs Commands
 
@@ -73,11 +111,17 @@ When users run `/plugin`, Claude Code reads this file to display available plugi
 ### Adding a New Plugin
 
 1. Create plugin directory structure in `plugins/your-plugin-name/`
-2. Create `.claude-plugin/plugin.json` with metadata and component glob patterns
-3. Add plugin components (commands, agents, skills, hooks, MCP config)
+2. Create `.claude-plugin/plugin.json` with metadata only (name, version, description, author)
+3. Add plugin components to standard directories:
+   - `commands/` for slash commands (*.md)
+   - `agents/` for specialized agents (*.md)
+   - `hooks/hooks.json` for event hooks
+   - `skills/` for plugin-specific skills (**/SKILL.md)
 4. Add entry to `.claude-plugin/marketplace.json`
 5. Update README.md to list the new plugin
 6. Test locally before committing
+
+**Important**: Do NOT add `commands`, `agents`, `hooks`, or `skills` fields to plugin.json unless using non-standard locations. Standard directories are auto-discovered.
 
 ### Adding a Standalone Skill
 
