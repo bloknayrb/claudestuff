@@ -2,11 +2,10 @@
   "name": "example-plugin",
   "version": "0.1.0",
   "description": "An example plugin demonstrating all component types",
-  "author": "Your Name",
-  "components": {
-    "commands": ["commands/*.md"],
-    "agents": ["agents/*.md"],
-    "skills": ["skills/**/SKILL.md"],
-    "hooks": ["hooks/hooks.json"]
-  }
+  "author": {
+    "name": "Your Name"
+  },
+  "commands": ["./commands/*.md"],
+  "agents": ["./agents/*.md"],
+  "hooks": "./hooks/hooks.json"
 }
