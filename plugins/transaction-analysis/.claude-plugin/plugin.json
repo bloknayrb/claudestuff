@@ -1,0 +1,12 @@
+{
+  "name": "transaction-analysis",
+  "version": "1.0.0",
+  "description": "Comprehensive toll transaction data analysis plugin with automatic client detection (VDOT, DelDOT, MDTA, DRPA), specialized agents for analysis and validation, and integrated reporting capabilities",
+  "author": "bloknayrb",
+  "components": {
+    "commands": ["commands/*.md"],
+    "agents": ["agents/*.md"],
+    "skills": ["skills/**/SKILL.md"],
+    "hooks": ["hooks/hooks.json"]
+  }
+}

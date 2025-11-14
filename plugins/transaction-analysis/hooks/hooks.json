@@ -1,0 +1,9 @@
+{
+  "hooks": [
+    {
+      "event": "PostToolUse",
+      "command": "echo '📊 Analysis step completed'",
+      "description": "Progress indicator for transaction analysis workflow steps"
+    }
+  ]
+}

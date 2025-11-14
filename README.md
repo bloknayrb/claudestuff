@@ -57,6 +57,27 @@ You can also install a specific plugin directly:
 - Post-tool execution hook
 - Example MCP server configuration
 
+### Transaction Analysis
+
+**Description:** Comprehensive toll transaction data analysis with automatic client detection (VDOT, DelDOT, MDTA, DRPA), specialized agents, and integrated reporting
+
+**Components:**
+- `/analyze-transactions` - Full analysis workflow with validation and reporting
+- Transaction Analyst Agent - Main analysis agent with client detection and framework selection
+- Data Quality Validator Agent - Pre-analysis validation and quality checks
+- Analyzing Transactions Skill - Complete transaction analysis knowledge base with client-specific frameworks
+- Post-tool execution hook - Progress indicators for analysis steps
+
+**Features:**
+- Automatic client type detection from dataset characteristics
+- Data quality validation before analysis
+- Client-specific analysis frameworks (VDOT, DelDOT, MDTA, DRPA)
+- Collection rate, reject rate, at-risk rate calculations
+- Pattern recognition and anomaly detection
+- Root cause analysis (system vs data vs equipment)
+- Technical and executive report generation
+- OpenMemory integration for pattern storage
+
 ## Available Skills
 
 Standalone skills that can be used independently or as part of plugins:

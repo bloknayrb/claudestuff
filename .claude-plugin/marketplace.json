@@ -12,6 +12,11 @@
       "name": "example-plugin",
       "source": "./plugins/example-plugin",
       "description": "An example plugin demonstrating all component types (commands, agents, skills, hooks, MCP)"
+    },
+    {
+      "name": "transaction-analysis",
+      "source": "./plugins/transaction-analysis",
+      "description": "Comprehensive toll transaction data analysis with automatic client detection (VDOT, DelDOT, MDTA, DRPA), specialized agents, and integrated reporting"
     }
   ]
 }
