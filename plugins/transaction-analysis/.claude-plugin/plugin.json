@@ -5,7 +5,7 @@
   "author": {
     "name": "bloknayrb"
   },
-  "commands": ["./commands/*.md"],
-  "agents": ["./agents/*.md"],
-  "hooks": "./hooks/hooks.json"
+  "commands": ["commands/*.md"],
+  "agents": ["agents/*.md"],
+  "hooks": "hooks/hooks.json"
 }
