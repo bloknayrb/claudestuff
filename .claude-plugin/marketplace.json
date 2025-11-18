@@ -22,6 +22,11 @@
       "name": "obsidian-vault-management",
       "source": "./plugins/obsidian-vault-management",
       "description": "Comprehensive vault management skills for Obsidian: maintenance, email triage, tracking updates, and timesheet generation. Optimized for large vaults with Windows/PowerShell support"
+    },
+    {
+      "name": "ms-office-suite",
+      "source": "./plugins/ms-office-suite",
+      "description": "Office document creation and editing skills for Claude Code - PPTX, DOCX, XLSX, and PDF workflows with automation support"
     }
   ]
 }
