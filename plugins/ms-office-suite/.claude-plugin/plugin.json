@@ -1,0 +1,12 @@
+{
+  "name": "ms-office-suite",
+  "version": "1.0.0",
+  "description": "Office document creation and editing skills for Claude Code - PPTX, DOCX, XLSX, and PDF workflows with automation support",
+  "author": {
+    "name": "tfriedel"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tfriedel/claude-office-skills"
+  }
+}

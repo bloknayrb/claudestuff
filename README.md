@@ -102,6 +102,50 @@ You can also install a specific plugin directly:
 - Windows platform (PowerShell required)
 - Obsidian vault with YAML frontmatter
 
+### MS Office Suite
+
+**Description:** Office document creation and editing skills for Claude Code - PPTX, DOCX, XLSX, and PDF workflows with automation support
+
+**Components:**
+- **PPTX Skill** - PowerPoint presentation creation and editing with html2pptx workflow, template-based generation, and OOXML direct editing
+- **DOCX Skill** - Word document workflows with tracked changes, redlining, comments, and format preservation
+- **XLSX Skill** - Excel spreadsheet operations with formulas, financial modeling standards, and zero-error validation
+- **PDF Skill** - PDF manipulation including text/table extraction, merging, splitting, form filling, and conversion
+
+**Features:**
+
+*PowerPoint (PPTX):*
+- HTML to PowerPoint conversion with design palette selection
+- Template-based presentation generation with inventory extraction
+- Slide rearrangement, duplication, and text replacement
+- Visual thumbnail grids for review
+- Direct OOXML editing for advanced customization
+
+*Word (DOCX):*
+- Document creation with docx-js library
+- Professional redlining workflow for collaborative editing
+- Tracked changes and comment management
+- Conversion to images via LibreOffice
+
+*Excel (XLSX):*
+- Formula-based spreadsheets (no hardcoded values)
+- Financial model standards (color coding, formatting conventions)
+- Automatic formula recalculation and error detection
+- Zero-tolerance error validation (#REF!, #DIV/0!, #VALUE!, #N/A, #NAME?)
+
+*PDF:*
+- Text and table extraction with layout preservation
+- Document merging, splitting, and rotation
+- Form filling and field validation
+- OCR for scanned documents
+- Password protection and watermarking
+
+**Requirements:**
+- Python packages: markitdown, pandoc, openpyxl, pypdf, pdfplumber, reportlab
+- Node.js for html2pptx conversion
+- LibreOffice for document conversion
+- Poppler utilities for PDF operations
+
 ## Available Skills
 
 Standalone skills that can be used independently or as part of plugins:
