@@ -109,6 +109,7 @@ You can also install a specific plugin directly:
 **Components:**
 - **PPTX Skill** - PowerPoint presentation creation and editing with html2pptx workflow, template-based generation, and OOXML direct editing
 - **DOCX Skill** - Word document workflows with tracked changes, redlining, comments, and format preservation
+- **Word Styles Skill** - Style-based document design with paragraph/character/linked styles, inheritance patterns, theme colors, and utility scripts
 - **XLSX Skill** - Excel spreadsheet operations with formulas, financial modeling standards, and zero-error validation
 - **PDF Skill** - PDF manipulation including text/table extraction, merging, splitting, form filling, and conversion
 
@@ -126,6 +127,17 @@ You can also install a specific plugin directly:
 - Professional redlining workflow for collaborative editing
 - Tracked changes and comment management
 - Conversion to images via LibreOffice
+
+*Word Styles:*
+- Style-based document formatting (paragraph, character, linked, table styles)
+- Style hierarchy and inheritance (based-on relationships)
+- List and numbering style definitions with multi-level lists
+- Theme colors and fonts integration
+- Paragraph formatting (spacing, indentation, pagination control)
+- Character formatting (fonts, effects, colors)
+- Direct formatting to styles conversion
+- Utility scripts: inspect_styles.py (dump all styles), apply_style_template.py (copy styles between documents)
+- Troubleshooting style conflicts and inheritance issues
 
 *Excel (XLSX):*
 - Formula-based spreadsheets (no hardcoded values)
