@@ -49,6 +49,8 @@ For script development guidance, see [[EXTRACTION-GUIDE.md]].
 - **Expected Volume**: ~41,409 records per analysis period
 - **Deliverable**: Power BI dashboard with agency filtering, Excel backup
 
+> **Note**: For `IAGPostingStatus*.xlsx` workbooks specifically, use the [[iag-posting-analysis]] skill which provides configurable analysis windows (7/14/30/60/90 days), agency-level rejection metrics, and plate-specific analysis with both markdown and Excel output.
+
 #### DelDOT Analysis Framework
 **Focus**: Disposition lifecycle and payment cohort tracking
 - **Key Metrics**:
