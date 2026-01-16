@@ -21,9 +21,32 @@ Trigger this skill when:
 
 - [ ] Locate most recent `IAGPostingStatus*.xlsx` in data directory
 - [ ] Confirm analysis window (7, 14, 30, 60, or 90 days)
-- [ ] Run analysis script to generate metrics
+- [ ] Run analysis script: `python ~/Tools/iag_posting_analysis.py <file> --window <days>`
 - [ ] Review markdown report for key findings
 - [ ] Deliver Excel workbook with detailed breakdowns
+
+## Standalone Script
+
+The analysis script is available at:
+```
+C:\Users\bkolb\Tools\iag_posting_analysis.py
+```
+
+**Usage:**
+```bash
+# Basic analysis (30-day window)
+python ~/Tools/iag_posting_analysis.py IAGPostingStatus260114.xlsx
+
+# Custom window
+python ~/Tools/iag_posting_analysis.py IAGPostingStatus260114.xlsx --window 7
+
+# Specify output directory
+python ~/Tools/iag_posting_analysis.py IAGPostingStatus260114.xlsx --output-dir ./reports
+```
+
+**Outputs:**
+- `IAG_Posting_Analysis_YYYYMMDD_Nday.md` - Markdown report
+- `IAG_Posting_Analysis_YYYYMMDD_Nday.xlsx` - Excel workbook with 5 sheets
 
 ## Configuration Options
 
@@ -58,7 +81,7 @@ IAGPostingStatus260114.xlsx → Data as of 2026-01-14
 
 Check these directories in order:
 1. User-specified path
-2. `C:\Users\bkolb\RK&K\19088-DRPA Toll System Owners Rep - Documents\General\2. Contractor Submittals`
+2. "C:\Users\bkolb\RK&K\24029-VDOT CSC Support - Coordination\IAG Posting Status Data\IAGPostingStatus260114.xlsx"
 3. Downloads folder for recent files
 
 ### Extract Metadata from Filename
@@ -319,4 +342,4 @@ Before delivering results:
 
 ## Analysis Script
 
-See [[ANALYSIS-SCRIPT.md]] for complete Python implementation template.
+The standalone script is at `~/Tools/iag_posting_analysis.py`. See [[ANALYSIS-SCRIPT.md]] for implementation details and code documentation.
