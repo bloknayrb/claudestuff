@@ -1,0 +1,9 @@
+{
+  "name": "simplemem-memory",
+  "version": "1.0.0",
+  "description": "SimpleMem MCP integration for project-specific temporal memory - stores meeting decisions, action items, project milestones, and status changes with date context",
+  "author": {
+    "name": "bkolb"
+  },
+  "repository": "https://github.com/bloknayrb/claudestuff"
+}

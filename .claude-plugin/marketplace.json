@@ -27,6 +27,21 @@
       "name": "ms-office-suite",
       "source": "./plugins/ms-office-suite",
       "description": "Office document creation and editing skills for Claude Code - PPTX, DOCX, XLSX, and PDF workflows with automation support"
+    },
+    {
+      "name": "simplemem-memory",
+      "source": "./plugins/simplemem-memory",
+      "description": "SimpleMem MCP integration for project-specific temporal memory - stores meeting decisions, action items, project milestones, and status changes with date context"
+    },
+    {
+      "name": "professional-agents",
+      "source": "./plugins/professional-agents",
+      "description": "Professional role-based agents for software development, consulting, and domain expertise"
+    },
+    {
+      "name": "automation",
+      "source": "./plugins/automation",
+      "description": "Vault scanning and project management commands for Obsidian"
     }
   ]
 }

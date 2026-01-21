@@ -102,6 +102,65 @@ You can also install a specific plugin directly:
 - Windows platform (PowerShell required)
 - Obsidian vault with YAML frontmatter
 
+### SimpleMem Memory
+
+**Description:** SimpleMem MCP integration for project-specific temporal memory - stores meeting decisions, action items, project milestones, and status changes with date context
+
+**Components:**
+- Project Memory Skill - Temporal memory management for project context
+- MCP server configuration for SimpleMem integration
+
+**Features:**
+- Store and retrieve project-specific facts with date context
+- Track meeting decisions and action items
+- Maintain project milestone history
+- Query context for meeting preparation
+
+**Requirements:**
+- SimpleMem MCP server installed and running
+- MCP configuration in Claude Code
+
+### Professional Agents
+
+**Description:** Professional role-based agents for software development, consulting, and domain expertise
+
+**Agents:**
+- **Developer** - Code implementation, debugging, and feature development (sonnet)
+- **Tech Lead** - Architecture decisions and technical planning (sonnet)
+- **Product Owner** - Requirements analysis and user story refinement (sonnet)
+- **UX Designer** - User interface design and user experience planning (sonnet)
+- **QA Reviewer** - Code quality review and security analysis (haiku)
+- **Researcher** - Technology research and competitive analysis (sonnet)
+- **Strategic PM** - Project planning and delivery risk assessment (sonnet)
+- **Toll Consultant** - Tolling operations, systems, and policy expertise (sonnet)
+- **Toll Procurement Consultant** - RFP development and vendor evaluation (sonnet)
+- **DOCX Editor** - Word document XML structure manipulation (sonnet)
+
+**Use Cases:**
+- Proactive agent invocation based on task type
+- Specialized domain expertise for consulting projects
+- Role-based response formatting and guidelines
+
+### Automation
+
+**Description:** Vault scanning and project management commands for Obsidian
+
+**Commands:**
+- `/track` - Comprehensive task tracking with smart scanning of TaskNotes, meetings, Teams chats, and emails
+- `/update-projects` - Weekly project overview updates with parallel agent analysis
+
+**Features:**
+- Automatic TaskNote creation from detected commitments
+- Incremental scanning with timestamp-based filtering
+- Cross-project dependency tracking
+- Health score calculation per project
+- Interactive and unattended execution modes
+
+**Requirements:**
+- Obsidian vault with specific folder structure
+- TaskNotes format for task management
+- Claude-State tracking files
+
 ### MS Office Suite
 
 **Description:** Office document creation and editing skills for Claude Code - PPTX, DOCX, XLSX, and PDF workflows with automation support
@@ -174,6 +233,24 @@ RESTful API design principles covering resource-oriented design, HTTP methods, s
 ### Security Review
 Security vulnerability detection and secure coding practices based on OWASP Top 10, including injection prevention, authentication, encryption, and security headers.
 
+### Excel Analysis
+Analyze Excel spreadsheets, create pivot tables, generate charts, and perform data analysis. Includes pandas workflows for reading, writing, cleaning, merging, and visualizing Excel data.
+
+### Meeting Prep
+Proactive meeting preparation with three adaptive paths (Quick/Standard/Comprehensive). Assembles context from previous meetings, emails, tasks, and project status. Generates talking points, questions, and decision matrices.
+
+### Memory Router
+Smart memory routing to SimpleMem or OpenMemory systems. Automatically detects and stores temporal facts, preferences, lessons learned, procedural knowledge, and relationship context. Auto-invokes on detection triggers.
+
+### Semantic Search
+Semantic search across Obsidian vaults using model embeddings. Finds conceptually related content beyond keyword matching. Includes toll terminology auto-expansion and caching for performance.
+
+### Task Management
+Proactive task creation for Obsidian vault TaskNotes. Detects explicit and implicit task triggers from conversations, emails, and meeting notes. Includes duplicate prevention, SimpleMem integration, and related note tagging.
+
+### Invoice Timesheet Verification
+Update monthly progress report invoices by cross-referencing timesheet data. Prioritizes accuracy over completeness - only includes activities directly verifiable from source documents. Includes client value filtering and systematic verification workflow.
+
 ## Creating Your Own Plugins
 
 ### Plugin Structure
@@ -243,6 +320,12 @@ plugins/your-plugin-name/
 │   ├── testing-best-practices/
 │   ├── api-design/
 │   ├── security-review/
+│   ├── excel-analysis/
+│   ├── meeting-prep/
+│   ├── memory-router/
+│   ├── semantic-search/
+│   ├── task-management/
+│   ├── invoice-timesheet-verification/
 │   └── your-skill/
 └── README.md                 # This file
 ```

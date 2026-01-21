@@ -1,0 +1,9 @@
+{
+  "name": "professional-agents",
+  "version": "1.0.0",
+  "description": "Professional role-based agents: Developer, Tech Lead, Product Owner, UX Designer, QA Reviewer, Researcher, Strategic PM, and specialized Toll Consultants",
+  "author": {
+    "name": "Bryan Kolb"
+  },
+  "repository": "https://github.com/bloknayrb/claudestuff"
+}

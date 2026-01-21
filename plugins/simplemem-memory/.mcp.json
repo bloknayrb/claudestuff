@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "simplemem": {
+      "command": "node",
+      "args": ["C:\\Users\\bkolb\\Tools\\SimpleMem-MCP\\dist\\index.js"],
+      "env": {
+        "SIMPLEMEM_PATH": "C:\\Users\\bkolb\\Tools\\SimpleMem",
+        "SIMPLEMEM_DB_PATH": "C:\\Users\\bkolb\\Tools\\SimpleMem\\data\\lancedb_data",
+        "PYTHON_PATH": "C:\\Users\\bkolb\\Tools\\SimpleMem\\venv\\Scripts\\python.exe"
+      }
+    }
+  }
+}
