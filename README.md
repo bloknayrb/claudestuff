@@ -1,395 +1,239 @@
-# Claude Code Plugin Marketplace
+# claudestuff
 
-A curated marketplace for Claude Code plugins, making it easy to discover, install, and manage extensions for Claude Code.
+> This isn't a generic plugin marketplace - it's a documented snapshot of one consultant's Claude Code configuration, built collaboratively with Claude over months of real work. Study the patterns, understand the architecture, then build your own system with Claude's help.
 
-## What is This?
-
-This repository serves as a plugin marketplace for [Claude Code](https://www.anthropic.com/news/claude-code-plugins) - Anthropic's AI-powered coding assistant. Plugin marketplaces allow you to package and distribute collections of:
-
-- **Slash Commands** - Custom commands accessible via `/command-name`
-- **Agents** - Specialized AI agents with specific expertise
-- **Skills** - Packaged knowledge and capabilities
-- **Hooks** - Event-triggered automation
-- **MCP Servers** - Model Context Protocol integrations
-
-## Using This Marketplace
-
-### Installation
-
-To add this marketplace to your Claude Code installation:
+## Quick Start
 
 ```bash
+# Add the marketplace
 /plugin marketplace add bloknayrb/claudestuff
-```
 
-### Browse Available Plugins
-
-Once added, browse and install plugins using:
-
-```bash
+# Browse and install plugins
 /plugin
 ```
 
-This opens an interactive menu where you can:
-- View all available plugins
-- Install plugins with one click
-- Manage installed plugins
-- Update plugins to latest versions
+## What's Here
 
-### Manual Plugin Installation
+| Category | Description | Plugins |
+|----------|-------------|---------|
+| **Patterns** | Reusable architecture anyone can adopt | [skills/shared/](skills/) |
+| **Reference Implementations** | Working commands - study the structure | automation, obsidian-vault-management |
+| **Domain Tools** | Specialized for specific work | transaction-analysis, professional-agents |
+| **Office Automation** | Document creation and editing | ms-office-suite |
+| **Memory Integration** | Context persistence | simplemem-memory |
+| **Learning** | How plugins work | example-plugin |
 
-You can also install a specific plugin directly:
+## Plugins at a Glance
 
-```bash
-/plugin install example-plugin
-```
-
-## Available Plugins
-
-### Example Plugin
-
-**Description:** An example plugin demonstrating all component types (commands, agents, skills, hooks, MCP)
-
-**Components:**
-- `/hello` - A simple greeting command
-- Code Reviewer Agent - Reviews code for best practices
-- Example Skill - Python coding standards and patterns
-- Post-tool execution hook
-- Example MCP server configuration
-
-### Transaction Analysis
-
-**Description:** Comprehensive toll transaction data analysis with automatic client detection (VDOT, DelDOT, MDTA, DRPA), specialized agents, and integrated reporting
-
-**Components:**
-- `/analyze-transactions` - Full analysis workflow with validation and reporting
-- Transaction Analyst Agent - Main analysis agent with client detection and framework selection
-- Data Quality Validator Agent - Pre-analysis validation and quality checks
-- Analyzing Transactions Skill - Complete transaction analysis knowledge base with client-specific frameworks
-- Post-tool execution hook - Progress indicators for analysis steps
-
-**Features:**
-- Automatic client type detection from dataset characteristics
-- Data quality validation before analysis
-- Client-specific analysis frameworks (VDOT, DelDOT, MDTA, DRPA)
-- Collection rate, reject rate, at-risk rate calculations
-- Pattern recognition and anomaly detection
-- Root cause analysis (system vs data vs equipment)
-- Technical and executive report generation
-- OpenMemory integration for pattern storage
-
-### Obsidian Vault Management
-
-**Description:** Comprehensive vault management skills for Obsidian with adaptive performance paths and parallel agent architecture
-
-**Components:**
-- Vault Sweeping Skill - 5 parallel agents for comprehensive vault analysis
-- Agent specifications and detection patterns
-- Validation rules and error handling
-- PowerShell temporal filtering support
-
-**Features:**
-- File organization analysis (Type property vs folder location)
-- Template compliance validation
-- Project status update detection
-- Metadata validation
-- Cleanup opportunity identification
-- Adaptive paths: Quick (30s) / Standard (60s) / Deep (120s)
-- Optimized for large vaults (25,000+ files)
-- Windows/PowerShell support
-
-**Requirements:**
-- Windows platform (PowerShell required)
-- Obsidian vault with YAML frontmatter
-
-### SimpleMem Memory
-
-**Description:** SimpleMem MCP integration for project-specific temporal memory - stores meeting decisions, action items, project milestones, and status changes with date context
-
-**Components:**
-- Project Memory Skill - Temporal memory management for project context
-- MCP server configuration for SimpleMem integration
-
-**Features:**
-- Store and retrieve project-specific facts with date context
-- Track meeting decisions and action items
-- Maintain project milestone history
-- Query context for meeting preparation
-
-**Requirements:**
-- SimpleMem MCP server installed and running
-- MCP configuration in Claude Code
-
-### Professional Agents
-
-**Description:** Professional role-based agents for software development, consulting, and domain expertise
-
-**Agents:**
-- **Developer** - Code implementation, debugging, and feature development (sonnet)
-- **Tech Lead** - Architecture decisions and technical planning (sonnet)
-- **Product Owner** - Requirements analysis and user story refinement (sonnet)
-- **UX Designer** - User interface design and user experience planning (sonnet)
-- **QA Reviewer** - Code quality review and security analysis (haiku)
-- **Researcher** - Technology research and competitive analysis (sonnet)
-- **Strategic PM** - Project planning and delivery risk assessment (sonnet)
-- **Toll Consultant** - Tolling operations, systems, and policy expertise (sonnet)
-- **Toll Procurement Consultant** - RFP development and vendor evaluation (sonnet)
-- **DOCX Editor** - Word document XML structure manipulation (sonnet)
-
-**Use Cases:**
-- Proactive agent invocation based on task type
-- Specialized domain expertise for consulting projects
-- Role-based response formatting and guidelines
-
-### Automation
-
-**Description:** Vault scanning and project management commands for Obsidian
-
-**Commands:**
-- `/track` - Comprehensive task tracking with smart scanning of TaskNotes, meetings, Teams chats, and emails
-- `/update-projects` - Weekly project overview updates with parallel agent analysis
-
-**Features:**
-- Automatic TaskNote creation from detected commitments
-- Incremental scanning with timestamp-based filtering
-- Cross-project dependency tracking
-- Health score calculation per project
-- Interactive and unattended execution modes
-
-**Requirements:**
-- Obsidian vault with specific folder structure
-- TaskNotes format for task management
-- Claude-State tracking files
-
-### MS Office Suite
-
-**Description:** Office document creation and editing skills for Claude Code - PPTX, DOCX, XLSX, and PDF workflows with automation support
-
-**Components:**
-- **PPTX Skill** - PowerPoint presentation creation and editing with html2pptx workflow, template-based generation, and OOXML direct editing
-- **DOCX Skill** - Word document workflows with tracked changes, redlining, comments, and format preservation
-- **Word Styles Skill** - Style-based document design with paragraph/character/linked styles, inheritance patterns, theme colors, and utility scripts
-- **XLSX Skill** - Excel spreadsheet operations with formulas, financial modeling standards, and zero-error validation
-- **PDF Skill** - PDF manipulation including text/table extraction, merging, splitting, form filling, and conversion
-
-**Features:**
-
-*PowerPoint (PPTX):*
-- HTML to PowerPoint conversion with design palette selection
-- Template-based presentation generation with inventory extraction
-- Slide rearrangement, duplication, and text replacement
-- Visual thumbnail grids for review
-- Direct OOXML editing for advanced customization
-
-*Word (DOCX):*
-- Document creation with docx-js library
-- Professional redlining workflow for collaborative editing
-- Tracked changes and comment management
-- Conversion to images via LibreOffice
-
-*Word Styles:*
-- Style-based document formatting (paragraph, character, linked, table styles)
-- Style hierarchy and inheritance (based-on relationships)
-- List and numbering style definitions with multi-level lists
-- Theme colors and fonts integration
-- Paragraph formatting (spacing, indentation, pagination control)
-- Character formatting (fonts, effects, colors)
-- Direct formatting to styles conversion
-- Utility scripts: inspect_styles.py (dump all styles), apply_style_template.py (copy styles between documents)
-- Troubleshooting style conflicts and inheritance issues
-
-*Excel (XLSX):*
-- Formula-based spreadsheets (no hardcoded values)
-- Financial model standards (color coding, formatting conventions)
-- Automatic formula recalculation and error detection
-- Zero-tolerance error validation (#REF!, #DIV/0!, #VALUE!, #N/A, #NAME?)
-
-*PDF:*
-- Text and table extraction with layout preservation
-- Document merging, splitting, and rotation
-- Form filling and field validation
-- OCR for scanned documents
-- Password protection and watermarking
-
-**Requirements:**
-- Python packages: markitdown, pandoc, openpyxl, pypdf, pdfplumber, reportlab
-- Node.js for html2pptx conversion
-- LibreOffice for document conversion
-- Poppler utilities for PDF operations
-
-## Available Skills
-
-Standalone skills that can be used independently or as part of plugins:
-
-### Skill Creation
-Expert guidance for creating efficient, comprehensive, and well-structured Claude Code skills. Covers progressive disclosure principles, YAML frontmatter best practices, content organization, code examples, validation checklists, and common mistakes to avoid. Essential for skill authors.
-
-### Testing Best Practices
-Comprehensive testing strategies including unit tests, integration tests, test patterns (AAA, mocks, stubs), and coverage guidelines.
-
-### API Design
-RESTful API design principles covering resource-oriented design, HTTP methods, status codes, versioning, pagination, security, and performance.
-
-### Security Review
-Security vulnerability detection and secure coding practices based on OWASP Top 10, including injection prevention, authentication, encryption, and security headers.
-
-### Excel Analysis
-Analyze Excel spreadsheets, create pivot tables, generate charts, and perform data analysis. Includes pandas workflows for reading, writing, cleaning, merging, and visualizing Excel data.
-
-### Meeting Prep
-Proactive meeting preparation with three adaptive paths (Quick/Standard/Comprehensive). Assembles context from previous meetings, emails, tasks, and project status. Generates talking points, questions, and decision matrices.
-
-### Memory Router
-Smart memory routing to SimpleMem or OpenMemory systems. Automatically detects and stores temporal facts, preferences, lessons learned, procedural knowledge, and relationship context. Auto-invokes on detection triggers.
-
-### Semantic Search
-Semantic search across Obsidian vaults using model embeddings. Finds conceptually related content beyond keyword matching. Includes toll terminology auto-expansion and caching for performance.
-
-### Task Management
-Proactive task creation for Obsidian vault TaskNotes. Detects explicit and implicit task triggers from conversations, emails, and meeting notes. Includes duplicate prevention, SimpleMem integration, and related note tagging.
-
-### Invoice Timesheet Verification
-Update monthly progress report invoices by cross-referencing timesheet data. Prioritizes accuracy over completeness - only includes activities directly verifiable from source documents. Includes client value filtering and systematic verification workflow.
-
-## Creating Your Own Plugins
-
-### Plugin Structure
-
-Each plugin should follow this structure:
+### Which Plugin Should I Look At?
 
 ```
-plugins/your-plugin-name/
+Are you...
+├── Learning how plugins work?
+│   └── → example-plugin (shows all component types)
+│
+├── Building office document automation?
+│   └── → ms-office-suite (PPTX, DOCX, XLSX, PDF skills)
+│
+├── Looking for agent design patterns?
+│   └── → professional-agents (10 role-based agents)
+│
+├── Building Obsidian automation?
+│   ├── Want vault maintenance?
+│   │   └── → obsidian-vault-management (sweeping, validation)
+│   └── Want task/project tracking?
+│       └── → automation (/track, /update-projects)
+│
+├── Analyzing toll transaction data?
+│   └── → transaction-analysis (VDOT, DelDOT, MDTA, DRPA)
+│
+└── Adding memory to Claude Code?
+    └── → simplemem-memory (temporal project memory)
+```
+
+### Complexity Ratings
+
+| Plugin | Setup | Customization | Best For |
+|--------|-------|---------------|----------|
+| **example-plugin** | Easy | None needed | Learning plugin structure |
+| **professional-agents** | Easy | Medium | Adding role-based agents |
+| **ms-office-suite** | Medium | Low | Office document automation |
+| **simplemem-memory** | Medium | Low | Project context memory |
+| **obsidian-vault-management** | Hard | High | Obsidian vault maintenance |
+| **automation** | Hard | High | Task tracking patterns |
+| **transaction-analysis** | Low | High | Toll industry analysis |
+
+**Complexity Key:**
+- **Easy**: Install and use immediately
+- **Medium**: Requires some dependencies
+- **Hard**: Requires specific vault/file structure
+
+## Plugins
+
+### example-plugin
+
+**What**: Complete example demonstrating all component types
+
+**Components**: `/hello` command, Code Reviewer agent, Example skill, Post-tool hook, MCP config
+
+**Use for**: Learning how plugins work, starting template for new plugins
+
+---
+
+### automation
+
+**What**: Vault scanning and project management for Obsidian
+
+**Components**: `/track`, `/update-projects`
+
+**Use for**: Studying comprehensive task tracking patterns, incremental scanning logic
+
+**Note**: Reference implementation - expects specific vault structure
+
+---
+
+### ms-office-suite
+
+**What**: Office document skills for Claude Code
+
+**Skills**: PPTX, DOCX, Word Styles, XLSX, PDF
+
+**Use for**: Creating and editing Office documents programmatically
+
+**Requires**: Python packages (openpyxl, pypdf, etc.), Node.js, LibreOffice
+
+---
+
+### obsidian-vault-management
+
+**What**: Vault maintenance with parallel agent architecture
+
+**Skills**: Vault sweeping (5 parallel agents), validation rules
+
+**Use for**: Large vault maintenance, template compliance, metadata validation
+
+**Note**: Windows/PowerShell required
+
+---
+
+### professional-agents
+
+**What**: 10 role-based agents for development and consulting
+
+**Agents**: Developer, Tech Lead, Product Owner, UX Designer, QA Reviewer, Researcher, Strategic PM, Toll Consultant, Toll Procurement, DOCX Editor
+
+**Use for**: Adding specialized personas, understanding agent design patterns
+
+---
+
+### simplemem-memory
+
+**What**: SimpleMem MCP integration for project memory
+
+**Skills**: Temporal memory management, meeting context
+
+**Use for**: Storing project decisions, action items, milestones with date context
+
+**Requires**: SimpleMem MCP server
+
+---
+
+### transaction-analysis
+
+**What**: Toll transaction data analysis with auto client detection
+
+**Components**: `/analyze-transactions`, Transaction Analyst agent, Data Quality Validator agent
+
+**Use for**: VDOT, DelDOT, MDTA, DRPA transaction analysis
+
+**Note**: Domain-specific - valuable as multi-agent pattern reference
+
+## Standalone Skills
+
+Skills in the `skills/` directory work independently of plugins:
+
+| Skill | Purpose |
+|-------|---------|
+| skill-creation | Guide for creating effective skills |
+| testing-best-practices | Unit/integration test patterns |
+| api-design | RESTful API design principles |
+| security-review | OWASP-based security patterns |
+| excel-analysis | Pandas workflows for Excel |
+| meeting-prep | Context assembly for meetings |
+| memory-router | Smart routing to memory systems |
+| semantic-search | Vault search with embeddings |
+| task-management | TaskNote creation patterns |
+| invoice-timesheet-verification | Timesheet reconciliation |
+
+## Creating Your Own
+
+### Minimum Viable Plugin
+
+```
+my-plugin/
 ├── .claude-plugin/
-│   └── plugin.json           # Plugin manifest
-├── commands/                 # Slash commands (optional)
-│   └── command-name.md
-├── agents/                   # Specialized agents (optional)
-│   └── agent-name.md
-├── skills/                   # Knowledge packages (optional)
-│   └── skill-name/
-│       └── SKILL.md
-├── hooks/                    # Event hooks (optional)
-│   └── hooks.json
-└── .mcp.json                 # MCP servers (optional)
+│   └── plugin.json
+└── README.md
 ```
-
-### Plugin Manifest (plugin.json)
 
 ```json
+// plugin.json
 {
-  "name": "your-plugin-name",
+  "name": "my-plugin",
   "version": "1.0.0",
-  "description": "What your plugin does",
-  "author": "Your Name",
-  "components": {
-    "commands": ["commands/*.md"],
-    "agents": ["agents/*.md"],
-    "skills": ["skills/**/SKILL.md"],
-    "hooks": ["hooks/hooks.json"]
-  }
+  "description": "What my plugin does"
 }
 ```
 
-### Adding Your Plugin to This Marketplace
+### Adding Components
 
-1. Create your plugin in the `plugins/` directory
-2. Add an entry to `.claude-plugin/marketplace.json`:
+| Component | Location | File Format |
+|-----------|----------|-------------|
+| Commands | `commands/` | `name.md` with YAML frontmatter |
+| Agents | `agents/` | `name.md` with YAML frontmatter |
+| Skills | `skills/name/` | `SKILL.md` |
+| Hooks | `hooks/` | `hooks.json` |
+| MCP | root | `.mcp.json` |
 
-```json
-{
-  "name": "your-plugin-name",
-  "source": "./plugins/your-plugin-name",
-  "description": "Brief description of your plugin"
-}
-```
-
-3. Test your plugin locally
-4. Submit a pull request
-
-## Marketplace Structure
-
-```
-.
-├── .claude-plugin/
-│   └── marketplace.json      # Marketplace manifest
-├── plugins/                  # Plugin directory
-│   ├── example-plugin/
-│   └── your-plugin/
-├── skills/                   # Standalone skills directory
-│   ├── skill-creation/
-│   ├── testing-best-practices/
-│   ├── api-design/
-│   ├── security-review/
-│   ├── excel-analysis/
-│   ├── meeting-prep/
-│   ├── memory-router/
-│   ├── semantic-search/
-│   ├── task-management/
-│   ├── invoice-timesheet-verification/
-│   └── your-skill/
-└── README.md                 # This file
-```
-
-### Skills Directory
-
-The `skills/` directory contains standalone skills - packaged knowledge and capabilities that can be:
-- Used independently through the `/skill` command
-- Included in plugins
-- Shared across multiple plugins
-
-Each skill is a directory containing a `SKILL.md` file with structured knowledge, patterns, and best practices.
+See [example-plugin](plugins/example-plugin/) for a complete reference.
 
 ## Documentation
 
-- [Official Claude Code Plugin Documentation](https://docs.claude.com/en/docs/claude-code/plugin-marketplaces)
+| Document | Purpose |
+|----------|---------|
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute, showcase philosophy |
+| [SECURITY.md](SECURITY.md) | Security considerations for plugins |
+| [CHANGELOG.md](CHANGELOG.md) | Version history and roadmap |
+| [docs/test-protocol.md](docs/test-protocol.md) | How to test plugins |
+
+## Philosophy
+
+This repository is a **showcase**, not a product.
+
+**What that means:**
+- Personal context is intentional, not accidental
+- Plugins are reference implementations to study
+- The value is in patterns and documentation
+- Build your own system using these as guides
+
+**What contributions are welcome:**
+- Bug fixes
+- Documentation improvements
+- Pattern extraction to `skills/shared/`
+
+**What's not the goal:**
+- Making everything "plug and play"
+- Removing personal context
+- Support SLAs
+
+## External Resources
+
+- [Claude Code Documentation](https://docs.claude.com/en/docs/claude-code)
 - [Creating Commands](https://docs.claude.com/en/docs/claude-code/commands)
 - [Creating Agents](https://docs.claude.com/en/docs/claude-code/agents)
 - [Creating Skills](https://docs.claude.com/en/docs/claude-code/skills)
-- [MCP Servers](https://modelcontextprotocol.io/)
-
-## Contributing
-
-Contributions are welcome! Please:
-
-### Adding Plugins
-
-1. Fork this repository
-2. Create your plugin following the structure above
-3. Test thoroughly
-4. Submit a pull request with:
-   - Plugin code
-   - Updated marketplace.json
-   - Description of what your plugin does
-
-### Adding Skills
-
-1. Create a new directory in `skills/` with a descriptive name
-2. Add a `SKILL.md` file following the skill format:
-   ```markdown
-   ---
-   name: skill-name
-   description: Brief description
-   version: 1.0.0
-   tags: [tag1, tag2]
-   ---
-
-   # Skill Name
-
-   [Your skill content with knowledge, patterns, examples]
-   ```
-3. Test your skill
-4. Submit a pull request with:
-   - Skill directory and SKILL.md
-   - Updated README listing the new skill
-   - Clear description of the knowledge/capabilities provided
+- [MCP Protocol](https://modelcontextprotocol.io/)
 
 ## License
 
-This marketplace and example plugins are provided as-is for the Claude Code community.
-
-## Support
-
-For issues or questions:
-- Claude Code documentation: https://docs.claude.com
-- File an issue in this repository
-- Join the Claude Code community discussions
+This marketplace and plugins are provided as-is for the Claude Code community.
