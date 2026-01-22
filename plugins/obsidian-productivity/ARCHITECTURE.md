@@ -59,7 +59,7 @@ tasks_by_project:
     overdue: 1
 
 waiting_on:
-  - person: Jeremy Siviter
+  - person: {Manager Name}
     items:
       - description: Review approval
         since: 2025-01-15
@@ -246,8 +246,8 @@ vault-root/
 
 | Tier | Description | Example | Action |
 |------|-------------|---------|--------|
-| **Direct Tasks** | User is responsible | "Bryan: Draft proposal" | Create TaskNote |
-| **Managed Dependencies** | Others responsible, user needs output | "Jeremy: Approve budget (Bryan needs for planning)" | Track in state |
+| **Direct Tasks** | User is responsible | "{User}: Draft proposal" | Create TaskNote |
+| **Managed Dependencies** | Others responsible, user needs output | "{Manager}: Approve budget ({User} needs for planning)" | Track in state |
 | **Background Awareness** | External, no user impact | "Sarah: Update vendor list" | Skip (handled by /update-tracking) |
 
 ## Time Tracking Architecture

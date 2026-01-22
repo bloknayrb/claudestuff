@@ -110,9 +110,9 @@ Status: ⚠️ Check Task Scheduler configuration
 
 ---
 
-### Phase 1.3: Display Jeremy's Stated Priorities
+### Phase 1.3: Display Manager's Stated Priorities
 
-**Purpose**: Surface priorities as Jeremy stated them (not just deadline-inferred), distinguishing discussion-driven focus from system-inferred urgency.
+**Purpose**: Surface priorities as {Manager} stated them (not just deadline-inferred), distinguishing discussion-driven focus from system-inferred urgency.
 
 **Source**: `99-System/Claude-State-Tracking.md` → `stated_priorities`
 
@@ -125,7 +125,7 @@ Status: ⚠️ Check Task Scheduler configuration
 
 **Display Format** (when priorities exist and are fresh):
 ```
-┌─ 🎯 JEREMY'S STATED PRIORITIES ──────────────────────────────────────────────┐
+┌─ 🎯 MANAGER'S STATED PRIORITIES ──────────────────────────────────────────────┐
 │  Source: [source_meeting] | Valid until: [priority_valid_until]              │
 │                                                                              │
 │  1. [task description] (Due [deadline])                                      │
@@ -151,7 +151,7 @@ Status: ⚠️ Check Task Scheduler configuration
 │  Last priority discussion: [last_priority_discussion] ([X] days ago)         │
 │  Source: [source_meeting]                                                    │
 │                                                                              │
-│  Previous priorities may be outdated. Consider checking in with Jeremy       │
+│  Previous priorities may be outdated. Consider checking in with manager       │
 │  to confirm current focus areas.                                             │
 │                                                                              │
 │  Last stated priorities:                                                     │
@@ -173,7 +173,7 @@ is_stale = days_since > 7
 
 **Integration with Task List**:
 - Stated priorities section appears BEFORE the Active TaskNotes list
-- This ensures Jeremy's direction is seen first, deadline-driven list second
+- This ensures Manager's direction is seen first, deadline-driven list second
 - Items in both lists are not duplicated - stated priorities show source/context
 
 ---
@@ -250,7 +250,7 @@ is_stale = days_since > 7
 │   Last Update: [Date] | Owner: [Person/Team]                                      │
 │ [Owner/Vendor]: │
 │ • [Action/Deliverable] — Due: [date]                                             │
-│   Impact: [How it affects Bryan's work]                                           │
+│   Impact: [How it affects {User}'s work]                                           │
 │ DRPA Oversight: [X tasks, status from current_priorities]                  │
 │ VDOT Operations: [Status from current_priorities]                           │
 │ NJ EZPass ICD 1.6: [Status from current_priorities]                           │

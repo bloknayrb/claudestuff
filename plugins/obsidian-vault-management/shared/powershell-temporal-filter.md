@@ -125,19 +125,19 @@ ELSE → Deep Path
 
 **Command**:
 ```bash
-powershell -Command "\$vault = 'C:\Users\bkolb\OneDrive - RK&K\Obsidian\Obsidian'; \$lastSweep = (Get-Date '2025-11-01 10:00'); (Get-ChildItem -Path \$vault -Recurse -File | Where-Object {\$_.LastWriteTime -gt \$lastSweep}).Count"
+powershell -Command "\$vault = 'C:\Users\{username}\{OneDrive Path}\Obsidian\Obsidian'; \$lastSweep = (Get-Date '2025-11-01 10:00'); (Get-ChildItem -Path \$vault -Recurse -File | Where-Object {\$_.LastWriteTime -gt \$lastSweep}).Count"
 ```
 
 ### Email-Triaging Example
 
 **Quick Path** (3 days, critical clients):
 ```bash
-powershell -Command "\$emails = 'C:\Users\bkolb\OneDrive - RK&K\Obsidian\Obsidian\Emails'; \$threshold = (Get-Date).AddDays(-3); Get-ChildItem -Path \$emails\*.md | Where-Object {\$_.LastWriteTime -gt \$threshold}"
+powershell -Command "\$emails = 'C:\Users\{username}\{OneDrive Path}\Obsidian\Obsidian\Emails'; \$threshold = (Get-Date).AddDays(-3); Get-ChildItem -Path \$emails\*.md | Where-Object {\$_.LastWriteTime -gt \$threshold}"
 ```
 
 **Standard Path** (7 days, all clients):
 ```bash
-powershell -Command "\$emails = 'C:\Users\bkolb\OneDrive - RK&K\Obsidian\Obsidian\Emails'; \$threshold = (Get-Date).AddDays(-7); Get-ChildItem -Path \$emails\*.md | Where-Object {\$_.LastWriteTime -gt \$threshold}"
+powershell -Command "\$emails = 'C:\Users\{username}\{OneDrive Path}\Obsidian\Obsidian\Emails'; \$threshold = (Get-Date).AddDays(-7); Get-ChildItem -Path \$emails\*.md | Where-Object {\$_.LastWriteTime -gt \$threshold}"
 ```
 
 ---
@@ -214,7 +214,7 @@ Get-Date "Nov 13, 2025"            # Verbose
 Common paths in Bryan's vault:
 
 ```powershell
-$vault = "C:\Users\bkolb\OneDrive - RK&K\Obsidian\Obsidian"
+$vault = "C:\Users\{username}\{OneDrive Path}\Obsidian\Obsidian"
 $inbox = "$vault\00-Inbox"
 $fleeting = "$vault\01-Fleeting"
 $projects = "$vault\01-Projects"

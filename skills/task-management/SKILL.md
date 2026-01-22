@@ -194,7 +194,7 @@ Generate filename using kebab-case format:
 
 **Examples**:
 - "Review Host ICD comments" -> `Review-Host-ICD-comments.md`
-- "Follow up with Jeremy about cost estimate" -> `Follow-up-with-Jeremy-about-cost-estimate.md`
+- "Follow up with {Manager} about cost estimate" -> `Follow-up-with-{Manager}-about-cost-estimate.md`
 
 ---
 
@@ -249,7 +249,7 @@ If task created from:
 
 **Example Dialogue Entry**:
 ```
-Speaker: "Email from Jeremy"
+Speaker: "Email from {Manager}"
 Content: "Task created: Review Host ICD comments. Client: DRPA. Project: DRPA Oversight. Source: Email 'FW: Host ICD Review'. Due: 2025-09-15. Priority: High (deadline-driven)."
 Timestamp: "2026-01-20T21:15:00"
 ```
@@ -341,7 +341,7 @@ Next Steps: Task is now tracked in your TaskNotes system and will appear in /tas
 
 Support creating multiple related tasks:
 
-**Input**: "Create tasks for cost estimate review: 1) Prepare materials for Jeremy meeting 2) Review BLS wage data 3) Update staffing calculations"
+**Input**: "Create tasks for cost estimate review: 1) Prepare materials for {Manager} meeting 2) Review BLS wage data 3) Update staffing calculations"
 
 **Output**: Three separate TaskNote files with shared project assignment and cross-references
 

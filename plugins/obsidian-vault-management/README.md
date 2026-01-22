@@ -111,13 +111,13 @@ MIT License - See [LICENSE](LICENSE) for details
 
 ## Author
 
-Bryan Kolb - RK&K Transportation Solutions
+{Author}
 
 ## Support
 
 For issues or questions:
 - Open an issue in the repository
-- Contact via RK&K internal channels
+- Contact via internal channels
 
 ---
 

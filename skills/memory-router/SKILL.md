@@ -16,7 +16,7 @@ Invoke this skill's auto-store behavior when you detect:
 
 **Temporal Facts (-> SimpleMem)**:
 - "Project cutover is April 15"
-- "Jeremy said we should prioritize FAT"
+- "{Manager} said we should prioritize FAT"
 - "Vendor committed to deliver by Friday"
 - "Meeting scheduled for next Thursday"
 - Any statement with specific dates, deadlines, or commitments
@@ -40,7 +40,7 @@ Invoke this skill's auto-store behavior when you detect:
 - Any how-to or process documentation
 
 **Relationship Context (-> OpenMemory)**:
-- "Jeremy is the team manager"
+- "{Manager} is the team manager"
 - "John Smith is the vendor POC"
 - "Sarah handles client billing"
 - Any statement about people and their roles
@@ -137,11 +137,11 @@ mcp__openmemory__openmemory_store(
 | Content | Destination | Sector | Reason |
 |---------|-------------|--------|--------|
 | "Project cutover is April 15, 2026" | SimpleMem | - | Specific date/deadline |
-| "Jeremy said we should prioritize FAT" | SimpleMem | - | Attributed statement |
+| "{Manager} said we should prioritize FAT" | SimpleMem | - | Attributed statement |
 | "Vendor committed to deliver by Friday" | SimpleMem | - | Time-bound commitment |
 | "I prefer morning meetings" | OpenMemory | emotional | Personal preference |
 | "Always verify attachment sequences first" | OpenMemory | procedural | Procedural lesson |
-| "Jeremy is the team manager" | OpenMemory | semantic | Relationship context |
+| "{Manager} is the team manager" | OpenMemory | semantic | Relationship context |
 | "The RFP uses Attachment format" | OpenMemory | semantic | Persistent knowledge |
 | "Learned: check file format before processing" | OpenMemory | reflective | Lesson learned |
 

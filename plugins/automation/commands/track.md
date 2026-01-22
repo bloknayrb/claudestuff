@@ -94,7 +94,7 @@ Type: Command
 **Approach**: Focus on recent 2-month window for meeting discovery. Meeting notes are rarely modified after creation, so this is efficient and reliable.
 
 **Classification** (see `99-System/shared/meeting-action-parser.md`):
-- **Direct Tasks**: `**Bryan Kolb**: [action]` -> Create TaskNote
+- **Direct Tasks**: `**{Your Name}**: [action]` -> Create TaskNote
 - **Managed Dependencies**: `**Other Person**: [action] - Bryan needs output` -> Track in Claude-State
 - **Background Awareness**: External parties, no Bryan impact -> Skip (handled by /update-tracking)
 

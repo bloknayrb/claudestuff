@@ -17,9 +17,9 @@ Find files where Type property doesn't match folder location.
 
 **Step 1: Find all files with Type properties**
 ```bash
-grep -r "Type: Contact" --include="*.md" C:\Users\bkolb\OneDrive - RK&K\Obsidian\Obsidian
-grep -r "Type: Project" --include="*.md" C:\Users\bkolb\OneDrive - RK&K\Obsidian\Obsidian
-grep -r "Type: Email" --include="*.md" C:\Users\bkolb\OneDrive - RK&K\Obsidian\Obsidian
+grep -r "Type: Contact" --include="*.md" {VAULT_PATH}
+grep -r "Type: Project" --include="*.md" {VAULT_PATH}
+grep -r "Type: Email" --include="*.md" {VAULT_PATH}
 ```
 
 **Step 2: Check path against expected location**
@@ -263,7 +263,7 @@ Identify files that should be processed or archived.
 
 **PowerShell Pattern**:
 ```powershell
-$vault = "C:\Users\bkolb\OneDrive - RK&K\Obsidian\Obsidian"
+$vault = "{VAULT_PATH}"
 $inboxPath = "$vault\00-Inbox"
 $threshold = (Get-Date).AddDays(-30)
 

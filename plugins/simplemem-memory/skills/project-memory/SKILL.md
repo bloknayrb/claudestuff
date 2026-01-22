@@ -63,7 +63,7 @@ When storing temporal facts, always include:
 ### Example: Meeting Decision
 ```
 add_dialogue(
-  speaker: "Jeremy",
+  speaker: "{Manager}",
   content: "The DRPA cutover date has been moved to April 15, 2026 due to TransCore resource constraints.",
   timestamp: "2026-01-15"
 )
@@ -95,7 +95,7 @@ finalize()
 Use `ask` for semantic questions that synthesize across memories:
 ```
 ask("What decisions were made about DRPA in the last month?")
-ask("What did Jeremy say about the timeline?")
+ask("What did {Manager} say about the timeline?")
 ask("What action items are due this week?")
 ```
 

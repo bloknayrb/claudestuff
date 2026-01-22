@@ -25,8 +25,8 @@ OpenMemory continues to handle **persistent, personal context**:
 ## Installation
 
 The plugin expects SimpleMem to be installed at:
-- SimpleMem core: `C:\Users\bkolb\Tools\SimpleMem`
-- SimpleMem-MCP: `C:\Users\bkolb\Tools\SimpleMem-MCP`
+- SimpleMem core: `{TOOLS_PATH}/SimpleMem`
+- SimpleMem-MCP: `{TOOLS_PATH}/SimpleMem-MCP`
 
 ## MCP Tools
 
@@ -53,7 +53,7 @@ The plugin expects SimpleMem to be installed at:
 
 ```
 # Store a meeting decision
-add_dialogue("Jeremy", "DRPA cutover moved to April 15", "2026-01-15")
+add_dialogue("{Manager}", "DRPA cutover moved to April 15", "2026-01-15")
 finalize()
 
 # Query later

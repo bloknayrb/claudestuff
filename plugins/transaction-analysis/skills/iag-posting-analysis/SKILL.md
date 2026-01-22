@@ -29,7 +29,7 @@ Trigger this skill when:
 
 The analysis script is available at:
 ```
-C:\Users\bkolb\Tools\iag_posting_analysis.py
+C:\Users\{username}\Tools\iag_posting_analysis.py
 ```
 
 **Usage:**
@@ -81,7 +81,7 @@ IAGPostingStatus260114.xlsx → Data as of 2026-01-14
 
 Check these directories in order:
 1. User-specified path
-2. "C:\Users\bkolb\RK&K\24029-VDOT CSC Support - Coordination\IAG Posting Status Data\IAGPostingStatus260114.xlsx"
+2. "C:\Users\{username}\{Project Path}\IAG Posting Status Data\IAGPostingStatus260114.xlsx"
 3. Downloads folder for recent files
 
 ### Extract Metadata from Filename

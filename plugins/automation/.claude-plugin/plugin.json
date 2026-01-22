@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Vault scanning and project management commands: /track for task tracking, /update-projects for weekly project overview updates",
   "author": {
-    "name": "Bryan Kolb"
+    "name": "bloknayrb"
   },
   "repository": "https://github.com/bloknayrb/claudestuff"
 }

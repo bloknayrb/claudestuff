@@ -161,7 +161,7 @@ See `99-System/shared/project-keywords.md` for keyword patterns.
 - `#email-njezpass` - NJ EZPass ICD 1.6 emails
 - `#email-mdta` - MDTA ETC 4G emails
 - `#email-deldot` - DelDOT emails
-- `#email-internal` - Internal RK&K communications
+- `#email-internal - Internal company communications
 - `#email-admin` - Administrative items
 - `#email-personal` - Personal correspondence
 

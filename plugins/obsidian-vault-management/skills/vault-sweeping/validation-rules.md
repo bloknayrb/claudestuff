@@ -254,7 +254,7 @@ THEN violation detected
 **Attendees Format**:
 ```yaml
 attendees:
-  - Bryan Kolb
+  - {Your Name}
   - John Doe
   - [[Jane Smith]]  # Wikilink to contact
 ```

@@ -79,7 +79,7 @@ Type: Email
 **Approach**: Focus on recent 2-month window for meeting discovery. Meeting notes are rarely modified after creation, so this is efficient and reliable.
 
 **Classification** (see `99-System/shared/meeting-action-parser.md`):
-- **Direct Tasks**: `**Bryan Kolb**: [action]` → Create TaskNote
+- **Direct Tasks**: `**{Your Name}**: [action]` → Create TaskNote
 - **Managed Dependencies**: `**Other Person**: [action] - Bryan needs output` → Track in Claude-State
 - **Background Awareness**: External parties, no Bryan impact → Skip (handled by /update-tracking)
 
@@ -103,9 +103,9 @@ Type: Email
 Type: TeamsChat
 conversationId: "19:..."
 messageId: "1766072064363"
-sender: "Bryan Kolb"
+sender: "{Your Name}"
 timestamp: 2025-12-18T15:34:24.363Z
-conversation: "Jeremy Siviter"
+conversation: "{Manager Name}"
 teamsLink: "https://teams.microsoft.com/l/message/..."
 tags:
   - teams
@@ -211,7 +211,7 @@ Is message from Bryan?
 **Process**:
 1. Use Glob pattern for current month: `Emails/*2026-01*.md`
 2. Read emails from current and previous month (2-month window)
-3. Check frontmatter for `from: Bryan Kolb` (outgoing emails)
+3. Check frontmatter for `from: {Your Name}` (outgoing emails)
 4. Scan for commitment language patterns (similar to Teams)
 5. Extract commitments with recipient and context
 
@@ -237,8 +237,8 @@ Is message from Bryan?
 1. Use Glob pattern for current month: `Emails/*2026-01*.md`
 2. Read emails from current and previous month (2-month window)
 3. Filter for INCOMING emails where Bryan is addressee:
-   - `from:` does NOT contain "Bryan Kolb" or "bkolb@rkk.com"
-   - `to:` OR `cc:` contains "bkolb@rkk.com"
+   - `from:` does NOT contain "{Your Name}" or "{your.email@company.com}"
+   - `to:` OR `cc:` contains "{your.email@company.com}"
 4. Apply action-required detection patterns (see incoming-email-action-parser.md)
 5. Cross-reference detected items with existing TaskNotes
 6. Create/update TaskNotes for confirmed action items
@@ -286,7 +286,7 @@ Is message from Bryan?
 **Path**: `Emails/*.md`
 
 **Process**:
-1. For each OUTGOING email (from: Bryan Kolb) in last 7 days:
+1. For each OUTGOING email (from: {Your Name}) in last 7 days:
    - Extract: subject, recipients, body content, attachment names
    - Filter: Skip emails already processed in previous scans
 
@@ -391,12 +391,12 @@ This ensures newly auto-created TaskNotes are immediately connected to their con
 
 ---
 
-### Step 4.6: Extract Stated Priorities from Recent Jeremy Meetings
+### Step 4.6: Extract Stated Priorities from Recent {Manager} Meetings
 
-**Purpose**: Capture priorities as Jeremy stated them (not just deadline-inferred), enabling discussion-driven priority tracking.
+**Purpose**: Capture priorities as {Manager} stated them (not just deadline-inferred), enabling discussion-driven priority tracking.
 
 **Process**:
-1. Scan meeting notes from last 7 days matching pattern: `*Jeremy*Siviter*.md`
+1. Scan meeting notes from last 7 days matching pattern: `*{Manager}*Siviter*.md`
 2. Extract explicit priority statements and acknowledged blocked items
 3. Update `stated_priorities` structure in Claude-State-Tracking.md
 4. Preserve current priorities until new discussion occurs
@@ -426,7 +426,7 @@ This ensures newly auto-created TaskNotes are immediately connected to their con
         "tasknote": "[TaskNote filename if exists]",
         "deadline": "[ISO date if specified]",
         "context": "[Additional context from discussion]",
-        "stated_by": "Jeremy Siviter"
+        "stated_by": "{Manager Name}"
       }
     ],
     "blocked_items_acknowledged": [
@@ -444,14 +444,14 @@ This ensures newly auto-created TaskNotes are immediately connected to their con
 3. If no match → leave `tasknote` as null (priority exists but no TaskNote yet)
 
 **Priority Refresh Rules**:
-- If new Jeremy meeting found with priority discussion → REPLACE entire `stated_priorities`
+- If new {Manager} meeting found with priority discussion → REPLACE entire `stated_priorities`
 - If no new meeting but `last_priority_discussion` < 7 days → KEEP current priorities
 - If `last_priority_discussion` > 7 days → Flag as stale (handled by /daily-standup)
 
 **Staleness Detection**:
 - Calculate days since `last_priority_discussion`
 - If > 7 days: priorities are considered stale
-- /daily-standup will display warning to refresh with Jeremy
+- /daily-standup will display warning to refresh with {Manager}
 
 ---
 
@@ -512,7 +512,7 @@ Append to existing `## Notes` section:
 **Examples**:
 ```markdown
 **2026-01-14**: January RDRR batch delivered (1134, 1270, 5654) — [[DRPA Weekly Discussion_ January RDRRs]] (auto-detected)
-**2026-01-14**: Meeting confirmed ops costing review scheduled Monday — [[Meeting Note-Jeremy Siviter-2026-01-14_15-06]] (auto-detected)
+**2026-01-14**: Meeting confirmed ops costing review scheduled Monday — [[Meeting Note-{Manager Name}-2026-01-14_15-06]] (auto-detected)
 **2026-01-15**: Bryan committed to send outreach emails by 01/16 — [[19_aed84597@thread.v2-2026-01-15]] (auto-detected)
 ```
 
@@ -629,7 +629,7 @@ See `99-System/shared/meeting-action-parser.md` for classification decision tree
 
 **Assignee Detection**:
 - `**Name**:` format in action items
-- Normalize variants: "Bryan", "Bryan Kolb", "BK" → all map to Bryan
+- Normalize variants: "Bryan", "{Your Name}", "BK" → all map to Bryan
 
 **Deadline Extraction**:
 - "by Friday" → calculate date
@@ -676,7 +676,7 @@ See `99-System/shared/project-keywords.md` for keyword patterns.
 ### Step 1: Action Item Detection
 
 **Sources Scanned**:
-- Meeting notes: Look for `**Bryan Kolb**:` or `**Bryan**:` in ACTION ITEMS section
+- Meeting notes: Look for `**{Your Name}**:` or `**Bryan**:` in ACTION ITEMS section
 - Emails: Look for commitment language ("I will", "I'll send", "I can complete")
 - Teams chats: Look for Bryan's commitments
 
@@ -924,7 +924,7 @@ Next focus: [Brief statement of immediate priorities]
 **Example Storage**:
 ```
 add_dialogue("System", "TaskNote created: DRPA Chapter Review - Review SDDD chapters 12-15. Source: MeetingNotes-DRPA-Weekly-2026-01-20. Due: 2026-01-27.", "2026-01-20T16:30:00")
-add_dialogue("Jeremy", "DRPA cutover date confirmed as April 15, 2026 - no further changes expected.", "2026-01-20")
+add_dialogue("{Manager}", "DRPA cutover date confirmed as April 15, 2026 - no further changes expected.", "2026-01-20")
 add_dialogue("System", "TaskNote Review-VDOT-Documentation status changed from open to in-progress.", "2026-01-20T16:35:00")
 finalize()
 ```
@@ -941,16 +941,16 @@ finalize()
 
 **Purpose**: Index Teams messages with windowed context for enhanced semantic search across conversations.
 
-**Note**: This complements Step 6.5 (temporal facts). Step 6.5 stores discrete facts about what was discovered. This step indexes raw message content for semantic querying ("What did Jeremy say about reviews?").
+**Note**: This complements Step 6.5 (temporal facts). Step 6.5 stores discrete facts about what was discovered. This step indexes raw message content for semantic querying ("What did {Manager} say about reviews?").
 
 **Pre-checks**:
-1. Verify file exists: `C:\Users\bkolb\Tools\SimpleMem\teams_indexer.py`
+1. Verify file exists: `{TOOLS_PATH}/SimpleMem/teams_indexer.py`
 2. Verify directory exists: `TeamsChats/messages/`
 
 **Process**:
 1. Run incremental indexing with timeout:
    ```bash
-   timeout 60 python C:\Users\bkolb\Tools\SimpleMem\teams_indexer.py
+   timeout 60 python {TOOLS_PATH}/SimpleMem/teams_indexer.py
    ```
 2. Parse stdout for metrics
 3. Log results to source_summary

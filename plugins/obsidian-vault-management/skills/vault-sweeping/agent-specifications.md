@@ -31,7 +31,7 @@ MISSION: Scan vault for file organization violations
 SCOPE:
 - Files: Modified in last 7 days (from PowerShell filter)
 - Focus: Type property vs folder location mismatches
-- Vault: C:\Users\bkolb\OneDrive - RK&K\Obsidian\Obsidian
+- Vault: {VAULT_PATH}
 
 DETECTION RULES:
 
