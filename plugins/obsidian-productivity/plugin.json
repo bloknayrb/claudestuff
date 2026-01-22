@@ -1,0 +1,18 @@
+{
+  "name": "obsidian-productivity",
+  "version": "1.0.0",
+  "description": "Complete Obsidian productivity stack: task tracking, email triage, daily standups, and timesheet generation",
+  "author": {
+    "name": "Bryan Kolb"
+  },
+  "repository": "https://github.com/bloknayrb/claudestuff",
+  "components": {
+    "commands": ["commands/*.md"],
+    "skills": ["skills/**/SKILL.md"]
+  },
+  "requirements": {
+    "platform": "windows",
+    "vault_structure": "See ARCHITECTURE.md for required folder structure",
+    "plugins": ["dataview (recommended)"]
+  }
+}
