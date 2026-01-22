@@ -1,0 +1,41 @@
+name: Validate Plugins
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'plugins/**'
+      - 'skills/**'
+      - '.claude-plugin/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'plugins/**'
+      - 'skills/**'
+      - '.claude-plugin/**'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Validate all plugins
+        run: python scripts/validate-plugin.py
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Plugin Validation Results" >> $GITHUB_STEP_SUMMARY
+          if [ $? -eq 0 ]; then
+            echo "✅ All plugins validated successfully" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Validation failed - check logs for details" >> $GITHUB_STEP_SUMMARY
+          fi

@@ -4,19 +4,53 @@ All notable changes to the claudestuff marketplace will be documented in this fi
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0] - 2026-01-22
+
+First stable release with complete documentation and validation tooling.
 
 ### Added
-- CONTRIBUTING.md with showcase philosophy and local testing workflow
-- SECURITY.md documenting MCP and data handling considerations
-- CHANGELOG.md (this file)
+
+#### v1.0.0 - Quality Enforcement
+- `scripts/validate-plugin.py` - Plugin validation (JSON syntax, required fields, YAML frontmatter, directory structure, broken links)
+- `.github/workflows/validate.yml` - GitHub Actions for PR validation
+- Updated `marketplace.json` to v1.0.0 with all plugins
+
+#### v0.5.0 - Obsidian Productivity Plugin
+- **obsidian-productivity** plugin with complete productivity stack:
+  - `/track` - Comprehensive task tracking with parallel agents
+  - `/email-triage` - Email prioritization by client/urgency
+  - `/daily-standup` - Multi-layer daily dashboard
+  - `/timesheet` - Weekly time tracking rollup
+  - `/capture-time` - Manual daily time entry
+- `ARCHITECTURE.md` - System overview, data flow, vault structure
+- `state-files/` - Example state file structure
+- `skills/email-classification/` - Email categorization and priority logic
+- `skills/time-tracking/` - Multi-source time aggregation patterns
+
+#### v0.4.0 - Focus Tools Plugin
+- **focus-tools** plugin for executive function support:
+  - `/sos` command - Cut through overwhelm, identify ONE next action
+  - `HOW-IT-WORKS.md` - Deep dive into the 5-step framework
+  - `skills/executive-function-support/` - Framework and principles
+
+#### v0.3.0 - Shared Patterns Extraction
+- `skills/shared/parallel-agent-pattern/` - Multi-agent deployment strategy
+- `skills/shared/powershell-temporal-filter/` - Reliable timestamp filtering on Windows
+- `skills/shared/error-handling-protocols/` - Standard error handling, graceful failures
+- `skills/shared/output-templates/` - ASCII-bordered output formatting templates
+
+#### v0.2.0 - Infrastructure Baseline
+- `CONTRIBUTING.md` with showcase philosophy and local testing workflow
+- `SECURITY.md` documenting MCP and data handling considerations
+- `CHANGELOG.md` (this file)
 - GitHub issue templates (bug report, feature request)
 - GitHub pull request template
-- Test protocol documentation in docs/test-protocol.md
+- `docs/test-protocol.md` with pre-merge and pre-release checklists
 - README files for 5 plugins (automation, example-plugin, ms-office-suite, professional-agents, transaction-analysis)
 
 ### Changed
-- Main README.md restructured with quick start, complexity ratings, and decision tree
+- Main README.md restructured with quick start, showcase philosophy, complexity ratings, and decision tree
+- marketplace.json updated with new plugins and v1.0.0 version
 
 ## [0.1.0] - 2024-11-14
 
@@ -47,31 +81,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ---
 
-## Version Roadmap
+## Philosophy Note
 
-### v0.2.0 - Infrastructure Baseline (Current)
-Focus on documentation and professional foundation.
+This repository is a **showcase**, not a product. The personal context is intentional - these are reference implementations showing how Claude Code plugins can be built for real productivity workflows.
 
-### v0.3.0 - Shared Patterns Extraction
-Publish reusable patterns from `skills/shared/`:
-- parallel-agent-pattern
-- output-templates
-- error-handling-protocols
-- powershell-temporal-filter
-
-### v0.4.0 - Focus Tools Plugin
-New plugin showcasing executive function support patterns:
-- `/sos` command
-- Executive function support skill
-
-### v0.5.0 - Obsidian Productivity Plugin
-Complete productivity system reference implementation:
-- `/track`, `/email-triage`, `/daily-standup`, `/timesheet`, `/capture-time`
-- Architecture documentation
-- Example state files
-
-### v1.0.0 - Quality Enforcement
-Production-ready release with validation tooling:
-- Plugin validation script
-- GitHub Actions for PR validation
-- Comprehensive example plugin
+Study the patterns, understand the architecture, then build your own system with Claude's help.
