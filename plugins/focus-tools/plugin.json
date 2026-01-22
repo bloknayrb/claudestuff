@@ -1,0 +1,13 @@
+{
+  "name": "focus-tools",
+  "version": "1.0.0",
+  "description": "Executive function support for getting unstuck - cut through overwhelm and identify ONE next action",
+  "author": {
+    "name": "Bryan Kolb"
+  },
+  "repository": "https://github.com/bloknayrb/claudestuff",
+  "components": {
+    "commands": ["commands/*.md"],
+    "skills": ["skills/**/SKILL.md"]
+  }
+}
