@@ -21,6 +21,7 @@
 | **Domain Tools** | Specialized for specific work | transaction-analysis, professional-agents |
 | **Office Automation** | Document creation and editing | ms-office-suite |
 | **Memory Integration** | Context persistence | simplemem-memory |
+| **Personal Finance** | Budgeting, investing, financial planning | personal-finance |
 | **Learning** | How plugins work | example-plugin |
 
 ## Plugins at a Glance
@@ -47,6 +48,9 @@ Are you...
 ├── Analyzing toll transaction data?
 │   └── → transaction-analysis (VDOT, DelDOT, MDTA, DRPA)
 │
+├── Managing personal finances?
+│   └── → personal-finance (budgeting, investing, planning)
+│
 └── Adding memory to Claude Code?
     └── → simplemem-memory (temporal project memory)
 ```
@@ -61,6 +65,7 @@ Are you...
 | **simplemem-memory** | Medium | Low | Project context memory |
 | **obsidian-vault-management** | Hard | High | Obsidian vault maintenance |
 | **automation** | Hard | High | Task tracking patterns |
+| **personal-finance** | Easy | Low | Personal finance education |
 | **transaction-analysis** | Low | High | Toll industry analysis |
 
 **Complexity Key:**
@@ -135,6 +140,18 @@ Are you...
 **Use for**: Storing project decisions, action items, milestones with date context
 
 **Requires**: SimpleMem MCP server
+
+---
+
+### personal-finance
+
+**What**: Personal finance education — budgeting, investing, and financial planning
+
+**Skills**: Budgeting (spending analysis, debt payoff), Investing (three-fund portfolio, tax-advantaged accounts), Financial Planning (priority ladder, net worth, goal projection)
+
+**Agents**: Budget Analyst, Portfolio Analyzer
+
+**Use for**: Budget creation, transaction categorization, portfolio analysis, debt payoff comparison, retirement planning
 
 ---
 
