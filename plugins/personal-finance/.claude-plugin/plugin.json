@@ -1,0 +1,9 @@
+{
+  "name": "personal-finance",
+  "version": "1.0.0",
+  "description": "Personal finance plugin with budgeting, investing, and financial planning skills and agents. Includes transaction categorization, spending analysis, portfolio analysis, and financial calculation tools.",
+  "author": {
+    "name": "bloknayrb"
+  },
+  "repository": "https://github.com/bloknayrb/claudestuff"
+}
