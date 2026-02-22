@@ -41,9 +41,9 @@ A step-by-step checklist organized by life stage and priority. Work through sequ
 ## Tax-Advantaged Accounts (In Priority Order)
 
 - [ ] **HSA** (if eligible): Contribute to annual maximum; invest balance above $1,000–$2,000 cash buffer
-- [ ] **Roth IRA**: Open and fund annually ($7,000 in 2025)
+- [ ] **Roth IRA**: Open and fund annually ($7,500 in 2026)
   - [ ] If over income limit: set up backdoor Roth IRA (see investing skill's account-hierarchy.md)
-- [ ] **401(k) beyond match**: Increase contributions toward $23,500 limit
+- [ ] **401(k) beyond match**: Increase contributions toward $24,500 limit
   - [ ] Decide Roth vs Traditional based on current vs expected future tax bracket
 - [ ] **Mega backdoor Roth** (if available): Use after-tax 401(k) → Roth conversion
 

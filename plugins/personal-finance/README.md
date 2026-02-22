@@ -20,7 +20,7 @@ A Claude Code plugin for personal finance education — budgeting, investing, an
 
 **portfolio-analyzer** — Analyzes investment portfolios: parses holdings, calculates allocation across asset classes, compares to age-appropriate targets, evaluates expense ratios, generates rebalancing instructions. Triggers on portfolio data or allocation questions.
 
-### Scripts (5)
+### Scripts (7)
 
 | Script | Purpose |
 |--------|---------|
@@ -32,7 +32,7 @@ A Claude Code plugin for personal finance education — budgeting, investing, an
 | `financial-planning/scripts/net_worth.py` | Calculate and categorize net worth |
 | `financial-planning/scripts/goal_projector.py` | Time-to-goal or required-contribution calculator |
 
-### Reference Files (6)
+### Reference Files (8)
 
 | File | Content |
 |------|---------|
@@ -41,7 +41,7 @@ A Claude Code plugin for personal finance education — budgeting, investing, an
 | `budgeting/references/csv-formats.md` | Bank CSV format detection (9 banks) |
 | `investing/references/three-fund-portfolio.md` | Fund picks by brokerage, allocation splits |
 | `investing/references/account-hierarchy.md` | Tax-advantaged account priority, Roth vs Traditional |
-| `investing/references/contribution-limits.md` | 2025 IRS limits, phase-outs, MAGI |
+| `investing/references/contribution-limits.md` | 2026 IRS limits, phase-outs, MAGI |
 | `financial-planning/references/planning-checklist.md` | Step-by-step checklist with decision trees |
 | `financial-planning/references/professional-referral-guide.md` | When and how to find professional advisors |
 
@@ -85,19 +85,19 @@ All scripts run with `uv` and require Python 3.12+. No external dependencies.
 
 ```bash
 # Compound interest projection
-uv run scripts/compound_interest.py --principal 10000 --rate 0.07 --years 30 --contribution 500
+uv run skills/investing/scripts/compound_interest.py --principal 10000 --rate 0.07 --years 30 --contribution 500
 
 # Expense ratio comparison
-uv run scripts/expense_ratio_impact.py --portfolio 500000 --ratio-a 0.03 --ratio-b 1.0 --years 30
+uv run skills/investing/scripts/expense_ratio_impact.py --portfolio 500000 --ratio-a 0.03 --ratio-b 1.0 --years 30
 
 # Debt payoff comparison
-uv run scripts/debt_payoff.py --inline '[{"name":"CC","balance":5000,"rate":22,"minimum":100},{"name":"Car","balance":12000,"rate":5,"minimum":300}]' --extra 200
+uv run skills/budgeting/scripts/debt_payoff.py --inline '[{"name":"CC","balance":5000,"rate":22,"minimum":100},{"name":"Car","balance":12000,"rate":5,"minimum":300}]' --extra 200
 
 # Net worth calculation
-uv run scripts/net_worth.py --inline '{"assets":[{"name":"Checking","value":5000,"category":"Cash"}],"liabilities":[{"name":"CC","value":2000,"category":"Credit Cards"}]}'
+uv run skills/financial-planning/scripts/net_worth.py --inline '{"assets":[{"name":"Checking","value":5000,"category":"Cash"}],"liabilities":[{"name":"CC","value":2000,"category":"Credit Cards"}]}'
 
 # Goal projection with scenarios
-uv run scripts/goal_projector.py --current 5000 --monthly 500 --target 50000 --scenarios
+uv run skills/financial-planning/scripts/goal_projector.py --current 5000 --monthly 500 --target 50000 --scenarios
 ```
 
 ## Annual Maintenance

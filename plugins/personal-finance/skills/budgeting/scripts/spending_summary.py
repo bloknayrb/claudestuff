@@ -120,13 +120,11 @@ def load_transactions(csv_file):
                 print(f"Warning: Skipping row {row_num}, unparseable amount: {row[col_map['amount']]}", file=sys.stderr)
                 continue
 
-            # Normalize: positive = expense
-            expense = abs(amount)
-
+            # Store raw signed amount — credits (negative) offset their category totals
             transactions.append({
                 "date": date,
                 "description": row[col_map["description"]].strip(),
-                "amount": expense,
+                "amount": amount,
                 "category": row[col_map["category"]].strip(),
                 "month": date.strftime("%Y-%m"),
             })

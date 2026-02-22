@@ -1,6 +1,8 @@
 ---
 name: investing
 description: This skill should be used when the user asks about "investing", "portfolio", "asset allocation", "401k", "IRA", "HSA", "529", "index fund", "three-fund portfolio", "Bogleheads", "rebalancing", "expense ratio", "Roth vs Traditional", "tax-advantaged accounts", "dollar cost averaging", or "compound interest". Provides passive index investing guidance, tax-advantaged account strategies, and portfolio analysis tools.
+version: 1.0.0
+tags: [finance, investing, portfolio, retirement, index-funds]
 ---
 
 # Investing

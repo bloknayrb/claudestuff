@@ -1,6 +1,8 @@
 ---
 name: budgeting
 description: This skill should be used when the user asks to "create a budget", "analyze spending", "categorize transactions", "track expenses", "manage cash flow", "pay off debt", "compare debt payoff methods", or mentions budgeting frameworks like zero-based budgeting, 50/30/20, or envelope budgeting. Provides budgeting methodology, transaction categorization guidance, and spending analysis tools.
+version: 1.0.0
+tags: [finance, budgeting, spending, debt, transactions]
 ---
 
 # Budgeting

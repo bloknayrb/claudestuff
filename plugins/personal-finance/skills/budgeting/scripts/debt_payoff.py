@@ -98,6 +98,8 @@ def simulate_payoff(debts, extra_payment, strategy="avalanche", verbose=False):
     month = 0
     schedule = []
     max_months = 1200  # 100 years safety cap
+    rolled_minimums = 0.0
+    paid_off = set()
 
     while any(d["balance"] > 0 for d in debts) and month < max_months:
         month += 1
@@ -128,29 +130,21 @@ def simulate_payoff(debts, extra_payment, strategy="avalanche", verbose=False):
         else:  # snowball
             active_debts.sort(key=lambda d: d["balance"])
 
-        # Apply extra payment to target debt
-        for d in active_debts:
-            if remaining_extra <= 0:
-                break
-            payment = min(remaining_extra, d["balance"])
-            d["balance"] -= payment
-            remaining_extra -= payment
-            month_detail["payments"][d["name"]] = month_detail["payments"].get(d["name"], 0) + payment
-
-        # Also apply freed-up minimums from paid-off debts
-        freed_minimums = sum(d["minimum"] for d in debts if d["balance"] <= 0 and d.get("_active", True))
+        # Capture freed minimums from newly paid-off debts (permanent rollover)
         for d in debts:
-            if d["balance"] <= 0:
-                d["_active"] = False
+            if d["balance"] <= 0 and d["name"] not in paid_off:
+                rolled_minimums += d["minimum"]
+                paid_off.add(d["name"])
 
-        # Apply freed minimums to target
+        # Apply extra payment + all rolled minimums to target debt(s)
+        combined_extra = remaining_extra + rolled_minimums
         for d in active_debts:
-            if freed_minimums <= 0:
+            if combined_extra <= 0:
                 break
             if d["balance"] > 0:
-                payment = min(freed_minimums, d["balance"])
+                payment = min(combined_extra, d["balance"])
                 d["balance"] -= payment
-                freed_minimums -= payment
+                combined_extra -= payment
                 month_detail["payments"][d["name"]] = month_detail["payments"].get(d["name"], 0) + payment
 
         for d in debts:

@@ -1,3 +1,10 @@
+---
+name: financial-planning
+description: This skill should be used when the user asks about "financial planning", "priority ladder", "emergency fund", "net worth", "financial goals", "life event checklist", "where to start with money", or mentions prioritizing between debt, saving, and investing. Provides a goal-based financial priority framework, net worth tracking, and life event financial checklists.
+version: 1.0.0
+tags: [finance, planning, goals, emergency-fund, net-worth]
+---
+
 # Financial Planning
 
 > This is an educational financial planning framework, not personalized financial advice. For advice tailored to your complete situation, consult a fee-only fiduciary financial advisor.
@@ -21,7 +28,7 @@ Work through these stages in order. Each stage builds on the previous one — do
 
 - Pay off debt above ~6–8% interest (credit cards, personal loans, some private student loans)
 - Use avalanche method (highest rate first) for math-optimal payoff, or snowball (smallest balance first) for motivation
-- Use `scripts/debt_payoff.py` in the budgeting skill for comparison
+- Use `skills/budgeting/scripts/debt_payoff.py` for comparison
 
 ### Stage 4: Build Full Emergency Fund
 
@@ -36,7 +43,7 @@ Work through in priority order (see investing skill's account hierarchy):
 
 1. **HSA** (if eligible) — triple tax advantage, best account in the tax code
 2. **Roth IRA** (or backdoor Roth if over income limit) — tax-free growth forever
-3. **401(k) up to maximum** ($23,500 in 2025) — pre-tax or Roth depending on situation
+3. **401(k) up to maximum** ($24,500 in 2026) — pre-tax or Roth depending on situation
 4. **Mega backdoor Roth** (if employer plan allows) — after-tax 401(k) → Roth
 
 ### Stage 6: Medium-Rate Debt vs Investing

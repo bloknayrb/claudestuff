@@ -26,7 +26,7 @@ def parse_args():
     )
     parser.add_argument(
         "--contribution", type=float, default=0,
-        help="Monthly contribution amount (default: 0)",
+        help="Contribution added each compounding period (default: monthly)",
     )
     parser.add_argument(
         "--frequency", type=int, default=12,
