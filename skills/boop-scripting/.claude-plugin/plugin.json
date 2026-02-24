@@ -1,0 +1,8 @@
+{
+  "name": "boop-scripting",
+  "version": "1.1.0",
+  "description": "Woop/Boop script API reference, patterns, and template for Windows text transforms. Covers ScriptExecution API, metadata fields, V8 sandbox constraints, and ready-to-use example scripts.",
+  "author": {
+    "name": "bloknayrb"
+  }
+}

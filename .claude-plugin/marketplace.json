@@ -57,6 +57,11 @@
       "name": "personal-finance",
       "source": "./plugins/personal-finance",
       "description": "Personal finance education plugin: budgeting, investing, and financial planning grounded in Bogleheads philosophy"
+    },
+    {
+      "name": "boop-scripting",
+      "source": "./skills/boop-scripting",
+      "description": "Woop/Boop script API reference, patterns, and template for Windows text transforms"
     }
   ]
 }
