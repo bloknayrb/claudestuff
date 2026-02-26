@@ -198,6 +198,7 @@ Skills in the `skills/` directory work independently of plugins:
 | semantic-search | Vault search with embeddings |
 | task-management | TaskNote creation patterns |
 | invoice-timesheet-verification | Timesheet reconciliation |
+| boop-scripting | Woop/Boop script API, patterns, and template for Windows text transforms |
 
 ## Creating Your Own
 

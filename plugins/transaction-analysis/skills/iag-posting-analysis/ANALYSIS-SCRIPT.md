@@ -22,45 +22,88 @@ from pathlib import Path
 from datetime import datetime
 import argparse
 import sys
+import re
 
 # =============================================================================
-# AGENCY MAPPING
+# AGENCY MAPPING - loaded from Excel, not hardcoded
 # =============================================================================
 
-AGENCY_MAPPING = {
-    3: ('DRJTBC', 'Delaware River Joint Toll Bridge Commission'),
-    4: ('PTC', 'Pennsylvania Turnpike Commission'),
-    5: ('DelDOT', 'Delaware Department of Transportation'),
-    6: ('MDTA', 'Maryland Transportation Authority'),
-    8: ('NYSTA', 'New York State Thruway Authority'),
-    10: ('MTA', 'Metropolitan Transportation Authority'),
-    13: ('NJTA', 'New Jersey Turnpike Authority'),
-    15: ('SJTA', 'South Jersey Transportation Authority'),
-    16: ('DRPA', 'Delaware River Port Authority'),
-    18: ('PANYNJ', 'Port Authority of New York and New Jersey'),
-    20: ('NHDOT', 'New Hampshire Department of Transportation'),
-    22: ('MassDOT', 'Massachusetts Department of Transportation'),
-    24: ('RIDOT', 'Rhode Island Department of Transportation'),
-    26: ('MaineDOT', 'Maine Department of Transportation'),
-    28: ('WVTA', 'West Virginia Turnpike Authority'),
-    30: ('KYTC', 'Kentucky Transportation Cabinet'),
-    32: ('ITA', 'Illinois Tollway Authority'),
-    34: ('OOCEA', 'Orlando-Orange County Expressway Authority'),
-    36: ('FDOT', 'Florida Department of Transportation'),
-    38: ('CFX', 'Central Florida Expressway Authority'),
-    40: ('HCTRA', 'Harris County Toll Road Authority'),
-    42: ('NTTA', 'North Texas Tollway Authority'),
-    44: ('TxDOT', 'Texas Department of Transportation'),
-    46: ('CTRMA', 'Central Texas Regional Mobility Authority'),
-    48: ('GCRTA', 'Greater Cleveland RTA'),
-    50: ('ODOT', 'Ohio Department of Transportation'),
-    52: ('INDOT', 'Indiana Department of Transportation'),
-    54: ('NCTCOG', 'North Central Texas Council of Governments'),
-    56: ('NCTA', 'North Carolina Turnpike Authority'),
-    58: ('GDOT', 'Georgia Department of Transportation'),
-    60: ('VDOT', 'Virginia Department of Transportation'),
-    62: ('SRT', 'State Road & Tollway Authority'),
-}
+DEFAULT_AGENCY_MAPPING_PATH = (
+    r"C:\Users\bkolb\OneDrive - RK&K\Obsidian\Obsidian"
+    r"\01-Projects\VDOT\CSC Operations Support\Resources\Agency ID Mapping.xlsx"
+)
+
+
+def load_agency_mapping(excel_path: str = None) -> dict:
+    """
+    Load agency ID mapping from Agency ID Mapping.xlsx.
+
+    Reads 'NIOP Tag Agency ID' and 'Original Issuing Agency' columns.
+    Extracts agency code from parentheses at end of agency name.
+    e.g., "New Jersey Turnpike Authority (NJTA)" -> code="NJTA"
+
+    Falls back to empty dict with warning if file not found.
+    """
+    path = excel_path or DEFAULT_AGENCY_MAPPING_PATH
+
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        ws = wb.active
+
+        mapping = {}
+        header_row = True
+        col_agency_id = None
+        col_agency_name = None
+
+        for row in ws.iter_rows(values_only=True):
+            if header_row:
+                for i, cell in enumerate(row):
+                    if cell == 'NIOP Tag Agency ID':
+                        col_agency_id = i
+                    elif cell == 'Original Issuing Agency':
+                        col_agency_name = i
+                header_row = False
+                continue
+
+            if col_agency_id is None or col_agency_name is None:
+                break
+
+            agency_id = row[col_agency_id]
+            agency_name = row[col_agency_name]
+
+            if not isinstance(agency_id, int):
+                continue
+            if not isinstance(agency_name, str):
+                continue
+            if agency_name.startswith('Reserved'):
+                continue
+
+            match = re.search(r'\(([A-Za-z][A-Za-z0-9&]+)\)\s*$', agency_name.strip())
+            if match:
+                code = match.group(1)
+                full_name = agency_name[:agency_name.rfind('(')].strip()
+            else:
+                code = agency_name.split()[0].upper()
+                full_name = agency_name
+
+            mapping[agency_id] = (code, full_name)
+
+        wb.close()
+        print(f"Loaded {len(mapping)} agencies from {Path(path).name}")
+        return mapping
+
+    except FileNotFoundError:
+        print(f"WARNING: Agency mapping file not found: {path}")
+        print("Agency IDs will display as 'Unknown (ID)' in output.")
+        return {}
+    except Exception as e:
+        print(f"WARNING: Could not load agency mapping: {e}")
+        return {}
+
+
+# Load at module level
+AGENCY_MAPPING = load_agency_mapping()
 
 # Plate-related non-success status codes
 PLATE_REJECTION_CODES = ['RJPL', 'RJDP', 'INSU', 'TAGB', 'RINV', 'OLD1', 'OLD2', 'ACCB', 'NPST']
@@ -470,7 +513,8 @@ def detect_anomalies(df: pd.DataFrame, metrics_df: pd.DataFrame) -> list:
         )
 
     # Check for missing agencies (common agencies that should be present)
-    expected_agencies = [4, 5, 6, 13, 16]  # PTC, DelDOT, MDTA, NJTA, DRPA
+    # Correct NIOP IDs: PTC=6, DRPA=9, MDTA=16, DelDOT=19, DRJTBC=29
+    expected_agencies = [6, 9, 16, 19, 29]  # PTC, DRPA, MDTA, DelDOT, DRJTBC
     missing = [a for a in expected_agencies if a not in df['TagAgencyID'].unique()]
     if missing:
         missing_names = [get_agency_name(a) for a in missing]
@@ -483,7 +527,8 @@ def detect_anomalies(df: pd.DataFrame, metrics_df: pd.DataFrame) -> list:
 # MAIN ANALYSIS
 # =============================================================================
 
-def run_analysis(input_file: Path, window_days: int = 30, output_dir: Path = None):
+def run_analysis(input_file: Path, window_days: int = 30, output_dir: Path = None,
+                  agency_mapping_path: str = None):
     """
     Run complete IAG Posting Status analysis.
 
@@ -491,7 +536,12 @@ def run_analysis(input_file: Path, window_days: int = 30, output_dir: Path = Non
         input_file: Path to IAGPostingStatus*.xlsx
         window_days: Analysis window in days (7, 14, 30, 60, 90)
         output_dir: Directory for output files (default: same as input)
+        agency_mapping_path: Path to Agency ID Mapping.xlsx (overrides default vault path)
     """
+    global AGENCY_MAPPING
+    if agency_mapping_path:
+        AGENCY_MAPPING = load_agency_mapping(agency_mapping_path)
+
     # Setup output directory
     if output_dir is None:
         output_dir = input_file.parent
@@ -596,6 +646,8 @@ def main():
                         help='Analysis window in days (default: 30)')
     parser.add_argument('--output-dir', type=Path, default=None,
                         help='Output directory (default: same as input)')
+    parser.add_argument('--agency-mapping', type=str, default=None,
+                        help='Path to Agency ID Mapping.xlsx (overrides default vault path)')
 
     args = parser.parse_args()
 
@@ -603,7 +655,7 @@ def main():
         print(f"Error: File not found: {args.input_file}")
         sys.exit(1)
 
-    run_analysis(args.input_file, args.window, args.output_dir)
+    run_analysis(args.input_file, args.window, args.output_dir, args.agency_mapping)
 
 
 if __name__ == '__main__':
