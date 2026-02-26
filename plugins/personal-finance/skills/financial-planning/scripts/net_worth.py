@@ -46,7 +46,9 @@ def classify_item(name, category, category_map):
         for member in members:
             if member.lower() == category_lower:
                 return group
-    return list(category_map.keys())[-1]  # Default to last group
+    default_group = list(category_map.keys())[-1]
+    print(f"Warning: '{category}' not recognized, classified as '{default_group}'", file=sys.stderr)
+    return default_group
 
 
 def validate_data(data):
@@ -60,6 +62,17 @@ def validate_data(data):
         for item in items:
             if "name" not in item or "value" not in item:
                 print(f"Error: Each {section} item needs 'name' and 'value': {item}", file=sys.stderr)
+                sys.exit(1)
+            # Coerce string values to float (handles "$5,000" style input)
+            if isinstance(item["value"], str):
+                cleaned = item["value"].strip().replace("$", "").replace(",", "")
+                try:
+                    item["value"] = float(cleaned)
+                except ValueError:
+                    print(f"Error: Unparseable value '{item['value']}' for '{item['name']}'", file=sys.stderr)
+                    sys.exit(1)
+            elif not isinstance(item["value"], (int, float)):
+                print(f"Error: Value must be numeric for '{item['name']}', got {type(item['value']).__name__}", file=sys.stderr)
                 sys.exit(1)
             if "category" not in item:
                 item["category"] = "Other Assets" if section == "assets" else "Other Debt"

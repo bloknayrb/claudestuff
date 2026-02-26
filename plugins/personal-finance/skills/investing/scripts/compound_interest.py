@@ -77,8 +77,10 @@ def print_results(principal, annual_rate, years, monthly_contribution, frequency
     print("=" * 55)
     print("COMPOUND INTEREST PROJECTION")
     print("=" * 55)
+    freq_labels = {1: "Annual", 2: "Semi-annual", 4: "Quarterly", 12: "Monthly", 52: "Weekly"}
+    contrib_label = freq_labels.get(frequency, f"{frequency}x/year") + " contribution"
     print(f"\nInitial investment:    ${principal:>12,.2f}")
-    print(f"Monthly contribution:  ${monthly_contribution:>12,.2f}")
+    print(f"{contrib_label + ':':.<23}${monthly_contribution:>12,.2f}")
     print(f"Annual return rate:    {annual_rate * 100:>12.2f}%")
     print(f"Compounding:           {'monthly' if frequency == 12 else f'{frequency}x/year':>12}")
     print(f"Time horizon:          {years:>12} years")

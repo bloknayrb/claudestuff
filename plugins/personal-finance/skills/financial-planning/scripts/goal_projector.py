@@ -83,10 +83,11 @@ def required_monthly(current, target, months, annual_return_pct=0):
     if fv_current >= target:
         return 0  # Current savings alone will reach the goal
 
-    # Required monthly using future value of annuity formula
+    # Required monthly using future value of annuity-due formula
+    # (beginning-of-period contributions, matching months_to_goal simulation)
     remaining = target - fv_current
-    # FV of annuity: PMT * [((1+r)^n - 1) / r]
-    annuity_factor = ((1 + monthly_rate) ** months - 1) / monthly_rate
+    # FV of annuity-due: PMT * [((1+r)^n - 1) / r] * (1+r)
+    annuity_factor = ((1 + monthly_rate) ** months - 1) / monthly_rate * (1 + monthly_rate)
     return remaining / annuity_factor
 
 

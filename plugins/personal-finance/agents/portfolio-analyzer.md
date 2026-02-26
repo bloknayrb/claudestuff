@@ -64,6 +64,7 @@ For each fund, note the expense ratio if known (or look up by ticker). Flag:
 - The total portfolio weighted expense ratio
 - Dollar impact of fees using the expense ratio impact script
 
+<!-- ${CLAUDE_PLUGIN_ROOT} is injected by the Claude Code plugin runtime at execution -->
 Use `scripts/expense_ratio_impact.py` for concrete comparisons:
 ```bash
 uv run ${CLAUDE_PLUGIN_ROOT}/skills/investing/scripts/expense_ratio_impact.py --portfolio <value> --ratio-a <current> --ratio-b <alternative> --years <horizon>
