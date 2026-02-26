@@ -69,9 +69,6 @@ def detect_metrics(text):
 
 def score_situation(text):
     """Score the Situation component (context-setting)."""
-    words = text.split()
-    word_count = len(words)
-
     score = 1
     feedback = []
 
@@ -84,16 +81,6 @@ def score_situation(text):
         feedback.append("Good context-setting with time/place/role details")
     elif context_count >= 1:
         score += 0.5
-
-    # Brevity check -- situation should be concise (target: 20% of response)
-    if 20 <= word_count <= 80:
-        score += 1
-        feedback.append("Appropriate length for Situation")
-    elif word_count > 80:
-        feedback.append("Situation may be too long -- aim for 2-3 sentences")
-    elif word_count < 20:
-        score += 0.5
-        feedback.append("Situation is very brief -- add enough context for the interviewer")
 
     # Stakes/importance indicators
     stakes_words = ["critical", "urgent", "deadline", "challenge", "risk", "important", "major", "significant"]
@@ -129,14 +116,6 @@ def score_task(text):
     if count_pattern(text, responsibility_words) >= 1:
         score += 1
         feedback.append("Clearly states the specific responsibility")
-
-    # Brevity -- task should be the shortest component
-    words = text.split()
-    if len(words) <= 40:
-        score += 1
-        feedback.append("Concise Task section")
-    else:
-        feedback.append("Task section may be too long -- keep to 1-2 sentences")
 
     score = min(5, max(1, round(score)))
     return score, feedback

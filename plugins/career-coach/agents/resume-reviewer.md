@@ -3,7 +3,7 @@ name: resume-reviewer
 description: "Use PROACTIVELY when user provides a resume file (PDF, DOCX, TXT) or pastes resume content, asks for resume review or feedback, mentions ATS optimization, wants resume improvement suggestions, or provides a job description for resume tailoring. MUST BE USED when resume content is provided for analysis.\n\n<example>\nContext: User provides resume and job description for targeted review\nuser: \"Here's my resume and the JD for a senior PM role at Google — how well do I match?\"\nassistant: \"I'll use the resume-reviewer agent to analyze your resume against the job description and identify keyword gaps.\"\n<commentary>\nUser provided both resume and JD — resume-reviewer runs keyword analyzer and provides targeted feedback.\n</commentary>\n</example>\n\n<example>\nContext: User wants general resume feedback\nuser: \"Can you review my resume? I want to make sure it's strong before I start applying.\"\nassistant: \"I'll use the resume-reviewer agent to analyze your resume's structure, bullet point impact, and ATS compatibility.\"\n<commentary>\nUser wants resume review without a specific JD — resume-reviewer does structural and impact analysis.\n</commentary>\n</example>\n\n<example>\nContext: User asks about ATS optimization\nuser: \"I keep applying and not hearing back — is my resume ATS-friendly?\"\nassistant: \"I'll use the resume-reviewer agent to check your resume's ATS compatibility and identify formatting or keyword issues.\"\n<commentary>\nUser suspects ATS issues — resume-reviewer checks formatting rules and keyword density.\n</commentary>\n</example>"
 model: sonnet
 color: teal
-tools: ["Read", "Write", "Bash", "Glob", "Grep"]
+tools: ["Read", "Bash", "Glob", "Grep"]
 ---
 
 # Resume Reviewer Agent
@@ -21,9 +21,11 @@ Follow this workflow when reviewing a resume:
 ### 1. Read Resume Content
 
 Accept resume content in various formats:
-- File path (PDF, DOCX, TXT)
 - Inline text pasted by the user
+- Plain text file path (TXT, etc.)
 - Multiple versions for comparison
+
+For binary formats (PDF, DOCX): read the file yourself first (Claude handles these natively), then pass the extracted text to scripts via `--inline-resume` rather than passing the file path directly.
 
 Extract and normalize the full text content for analysis.
 

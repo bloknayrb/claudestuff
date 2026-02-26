@@ -67,6 +67,14 @@ def load_text(path=None, inline=None):
     except FileNotFoundError:
         print(f"Error: File not found: {path}", file=sys.stderr)
         sys.exit(1)
+    except UnicodeDecodeError:
+        print(
+            f"Error: Cannot read '{path}' as text (likely a PDF or DOCX).\n"
+            f"Use --inline-resume / --inline-jd with the file's text content instead,\n"
+            f"or have Claude read the file first and pass the content inline.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 def tokenize(text):

@@ -85,7 +85,7 @@ Or add to `.claude/settings.json`:
 
 ## Scripts
 
-All scripts run with `uv` and require Python 3.12+. No external dependencies.
+All scripts run with `uv` and require Python 3.12+. No external dependencies. Examples below assume the working directory is the plugin root (`plugins/career-coach/`). Agents use `${CLAUDE_PLUGIN_ROOT}` for path resolution automatically.
 
 ```bash
 # RIASEC interest assessment
