@@ -58,7 +58,10 @@ def simulate_growth(portfolio, expense_ratio_pct, return_rate_pct, years, monthl
     for year in range(1, years + 1):
         for _ in range(12):
             balance += monthly_contribution
-            # Fees are deducted from returns (reflected in lower net return)
+            # Fees are deducted from returns (reflected in lower net return).
+            # total_fees tracks the cumulative expense ratio cost: each period,
+            # the ratio is applied to the current balance, mirroring how fund
+            # expense ratios reduce NAV daily (approximated monthly here).
             fee_this_month = balance * monthly_fee_rate
             total_fees += fee_this_month
             balance *= (1 + monthly_net_return)

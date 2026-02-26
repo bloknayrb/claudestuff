@@ -1,0 +1,9 @@
+{
+  "name": "career-coach",
+  "version": "1.0.0",
+  "description": "Career development coaching plugin with career exploration, resume/ATS optimization, STAR interview practice, salary negotiation, and career pathing frameworks.",
+  "author": {
+    "name": "bloknayrb"
+  },
+  "repository": "https://github.com/bloknayrb/claudestuff"
+}

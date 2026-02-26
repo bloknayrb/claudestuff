@@ -24,7 +24,7 @@ def parse_args():
     input_group.add_argument("--csv", help="Path to CSV file with debt list")
     input_group.add_argument(
         "--inline",
-        help='Inline JSON string, e.g. \'[{"name":"CC","balance":5000,"rate":0.22,"minimum":100}]\'',
+        help='Inline JSON string. Rates can be whole numbers (22 = 22%%, auto-converted) or decimals (0.22). Example: \'[{"name":"CC","balance":5000,"rate":22,"minimum":100}]\'',
     )
     parser.add_argument(
         "--extra",

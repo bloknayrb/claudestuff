@@ -162,7 +162,7 @@ def summarize_by_month(transactions):
     return dict(sorted(monthly.items()))
 
 
-def print_category_summary(categories, total_spending, income=None, threshold=None, threshold_pct=None):
+def print_category_summary(categories, gross_spending, total_credits, net_spending, income=None, threshold=None, threshold_pct=None):
     """Print spending summary by category."""
     print("=" * 70)
     print("SPENDING SUMMARY BY CATEGORY")
@@ -175,7 +175,7 @@ def print_category_summary(categories, total_spending, income=None, threshold=No
 
     flags = []
     for name, data in categories.items():
-        pct_spend = (data["total"] / total_spending * 100) if total_spending > 0 else 0
+        pct_spend = (data["total"] / gross_spending * 100) if gross_spending > 0 else 0
         line = f"{name:<25} ${data['total']:>9,.2f} {pct_spend:>7.1f}% {data['count']:>6} ${data['avg']:>9,.2f}"
         if income:
             pct_income = data["total"] / income * 100
@@ -189,12 +189,15 @@ def print_category_summary(categories, total_spending, income=None, threshold=No
             flags.append(f"  ! {name}: {pct_spend:.1f}% exceeds {threshold_pct:.1f}% threshold")
 
     print("-" * 70)
-    print(f"{'TOTAL':<25} ${total_spending:>9,.2f} {'100.0%':>8}")
+    print(f"{'GROSS SPENDING':<25} ${gross_spending:>9,.2f} {'100.0%':>8}")
+    if total_credits < 0:
+        print(f"{'CREDITS/REFUNDS':<25} ${total_credits:>9,.2f}")
+        print(f"{'NET SPENDING':<25} ${net_spending:>9,.2f}")
     if income:
-        savings = income - total_spending
+        savings = income - net_spending
         savings_pct = savings / income * 100
         print(f"\nIncome:    ${income:>12,.2f}")
-        print(f"Spending:  ${total_spending:>12,.2f}")
+        print(f"Spending:  ${net_spending:>12,.2f}")
         print(f"Remaining: ${savings:>12,.2f} ({savings_pct:.1f}%)")
 
     if flags:
@@ -248,10 +251,12 @@ def main():
     date_range = f"{min(t['date'] for t in transactions).strftime('%Y-%m-%d')} to {max(t['date'] for t in transactions).strftime('%Y-%m-%d')}"
     print(f"Date range: {date_range}\n")
 
-    total_spending = sum(t["amount"] for t in transactions)
+    gross_spending = sum(t["amount"] for t in transactions if t["amount"] > 0)
+    total_credits = sum(t["amount"] for t in transactions if t["amount"] < 0)
+    net_spending = gross_spending + total_credits  # total_credits is negative
     categories = summarize_by_category(transactions, sort_by=args.sort)
 
-    print_category_summary(categories, total_spending, args.income, args.threshold, args.threshold_pct)
+    print_category_summary(categories, gross_spending, total_credits, net_spending, args.income, args.threshold, args.threshold_pct)
 
     # Monthly comparison if multiple months
     monthly = summarize_by_month(transactions)

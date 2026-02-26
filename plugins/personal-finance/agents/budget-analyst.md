@@ -89,6 +89,8 @@ Produce a comprehensive analysis:
 
 ### 6. Use Calculation Scripts When Appropriate
 
+<!-- ${CLAUDE_PLUGIN_ROOT} is injected by the Claude Code plugin runtime at execution -->
+
 For detailed summary output, run the spending summary script:
 ```bash
 uv run ${CLAUDE_PLUGIN_ROOT}/skills/budgeting/scripts/spending_summary.py <csv_file> --income <amount>
