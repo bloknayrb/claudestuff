@@ -22,6 +22,7 @@
 | **Office Automation** | Document creation and editing | ms-office-suite |
 | **Memory Integration** | Context persistence | simplemem-memory |
 | **Personal Finance** | Budgeting, investing, financial planning | personal-finance |
+| **Career Coaching** | Career exploration, resume review, interview prep | career-coach |
 | **Learning** | How plugins work | example-plugin |
 
 ## Plugins at a Glance
@@ -51,6 +52,9 @@ Are you...
 ├── Managing personal finances?
 │   └── → personal-finance (budgeting, investing, planning)
 │
+├── Navigating career decisions?
+│   └── → career-coach (exploration, resume review, interview prep)
+│
 └── Adding memory to Claude Code?
     └── → simplemem-memory (temporal project memory)
 ```
@@ -66,6 +70,7 @@ Are you...
 | **obsidian-vault-management** | Hard | High | Obsidian vault maintenance |
 | **automation** | Hard | High | Task tracking patterns |
 | **personal-finance** | Easy | Low | Personal finance education |
+| **career-coach** | Easy | Low | Career coaching and interview prep |
 | **transaction-analysis** | Low | High | Toll industry analysis |
 
 **Complexity Key:**
@@ -152,6 +157,18 @@ Are you...
 **Agents**: Budget Analyst, Portfolio Analyzer
 
 **Use for**: Budget creation, transaction categorization, portfolio analysis, debt payoff comparison, retirement planning
+
+---
+
+### career-coach
+
+**What**: Career development coaching — exploration, resume optimization, and interview preparation
+
+**Skills**: Career Development (GROW model, RIASEC, career ladders), Job Search (ATS optimization, resume writing, networking), Interview Prep (STAR method, mock interviews, salary negotiation)
+
+**Agents**: Career Coach (orchestrator), Resume Reviewer, Mock Interviewer
+
+**Use for**: Career direction, resume review, ATS optimization, behavioral interview practice, salary negotiation, offer comparison
 
 ---
 

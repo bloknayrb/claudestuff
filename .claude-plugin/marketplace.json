@@ -57,6 +57,11 @@
       "name": "personal-finance",
       "source": "./plugins/personal-finance",
       "description": "Personal finance education plugin: budgeting, investing, and financial planning grounded in Bogleheads philosophy"
+    },
+    {
+      "name": "career-coach",
+      "source": "./plugins/career-coach",
+      "description": "Career development coaching: GROW model, RIASEC assessment, resume/ATS optimization, STAR interview practice, and salary negotiation"
     }
   ]
 }
