@@ -197,6 +197,7 @@ Skills in the `skills/` directory work independently of plugins:
 | memory-router | Smart routing to memory systems |
 | semantic-search | Vault search with embeddings |
 | task-management | TaskNote creation patterns |
+| document-review | Toll project document review (owner's rep) |
 | invoice-timesheet-verification | Timesheet reconciliation |
 | boop-scripting | Woop/Boop script API, patterns, and template for Windows text transforms |
 
