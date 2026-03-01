@@ -1,6 +1,6 @@
 # MS Office Suite Plugin
 
-Comprehensive Office document skills for Claude Code - create, edit, and analyze PowerPoint, Word, Excel, and PDF files.
+Office document skills for Claude Code — create, edit, and analyze PowerPoint, Word, Excel, and PDF files.
 
 > **Origin**: Adapted from [tfriedel/claude-office-skills](https://github.com/tfriedel/claude-office-skills) with enhancements for automation workflows.
 

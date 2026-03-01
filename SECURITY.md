@@ -57,7 +57,7 @@ Agents defined in plugins operate within Claude Code's permission system:
 1. **Tool Access**: Agents can use any tool Claude Code has access to
 2. **No Privilege Escalation**: Agents cannot access more than Claude Code itself
 3. **Audit Trail**: All agent actions appear in the Claude Code session output
-4. **User Approval**: Sensitive operations may require user confirmation (depending on your settings)
+4. **User Approval**: Sensitive operations may prompt for confirmation depending on your Claude Code settings
 
 ## Reporting Security Issues
 
@@ -89,7 +89,7 @@ If you discover a security vulnerability in this marketplace:
 
 ### Response Timeline
 
-As this is a personal showcase repository (not a commercial product):
+This is a personal showcase, not a commercial product. Response times reflect that:
 
 - **Acknowledgment**: Within 1 week
 - **Assessment**: Within 2 weeks

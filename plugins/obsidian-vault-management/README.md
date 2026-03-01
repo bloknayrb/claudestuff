@@ -1,16 +1,16 @@
 # Obsidian Vault Management Plugin
 
-Comprehensive Claude Code skills for maintaining large Obsidian vaults with Windows/PowerShell optimization.
+Vault maintenance skills for large Obsidian vaults. Windows/PowerShell required.
 
 ## Overview
 
-This plugin provides intelligent, adaptive skills for managing complex Obsidian vaults with thousands of files. Each skill uses parallel agent architecture with Quick/Standard/Deep adaptive paths to optimize performance based on context.
+Skills for managing large Obsidian vaults. Uses parallel agent architecture with Quick/Standard/Deep adaptive paths based on scan scope.
 
 ## Skills Included
 
 ### 1. Vault Sweeping (v1.0.0)
 
-Comprehensive vault organization analysis with 5 parallel agents scanning for:
+Vault organization analysis with 5 parallel agents scanning for:
 - File organization issues (Type property vs folder location)
 - Template compliance violations
 - Project status updates needed
@@ -26,11 +26,7 @@ Comprehensive vault organization analysis with 5 parallel agents scanning for:
 - **Standard** (60s): Full validation suite, comprehensive report
 - **Deep** (120s): Historical analysis, detailed recommendations
 
-### Coming Soon
-
-- **Email Triaging** (v1.1.0): Intelligent email prioritization across clients
-- **Update Tracking** (v1.2.0): Background awareness intelligence
-- **Timesheet Generation** (v2.0.0): Weekly billing timesheet automation
+**Planned**: Email triaging, update tracking, and timesheet generation are not yet implemented.
 
 ## Installation
 
@@ -57,7 +53,7 @@ git pull
 
 ## Configuration
 
-No configuration required. Skills auto-activate based on context and user intent.
+No configuration required. Skills activate when you describe maintenance needs.
 
 ## Usage
 
@@ -109,16 +105,6 @@ See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 
 MIT License - See [LICENSE](LICENSE) for details
 
-## Author
-
-{Author}
-
-## Support
-
-For issues or questions:
-- Open an issue in the repository
-- Contact via internal channels
-
 ---
 
-**Note**: This plugin is optimized for Windows environments with PowerShell. Cross-platform support may be added in future versions.
+**Note**: This plugin requires Windows with PowerShell.

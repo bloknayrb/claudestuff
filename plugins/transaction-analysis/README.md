@@ -1,6 +1,6 @@
 # Transaction Analysis Plugin
 
-Comprehensive toll transaction data analysis with automatic client detection, specialized agents, and integrated reporting.
+Toll transaction data analysis with automatic client detection, specialized agents, and multi-format reporting.
 
 > **Domain-Specific**: This plugin is designed for toll industry transaction analysis, specifically VDOT, DelDOT, MDTA, and DRPA data formats.
 

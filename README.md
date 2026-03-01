@@ -1,6 +1,6 @@
 # claudestuff
 
-> This isn't a generic plugin marketplace - it's a documented snapshot of one consultant's Claude Code configuration, built collaboratively with Claude over months of real work. Study the patterns, understand the architecture, then build your own system with Claude's help.
+> Plugins and skills I've built for Claude Code. Install what's useful, study the patterns, build your own.
 
 ## Quick Start
 

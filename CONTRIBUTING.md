@@ -1,16 +1,12 @@
 # Contributing to claudestuff
 
-Thank you for your interest in contributing! Before you dive in, please understand what this repository is and isn't.
+Before contributing, understand what this repository is and isn't.
 
 ## What This Repository Is
 
-This isn't a generic plugin marketplace - it's a **documented snapshot of one consultant's Claude Code configuration**, built collaboratively with Claude over months of real work. The value is in the patterns and documentation, not in "drop-in" solutions.
+Plugins and skills I've built for Claude Code. Install what's useful, study the patterns, build your own.
 
-**Study the patterns, understand the architecture, then build your own system with Claude's help.**
-
-## Philosophy: Study and Adapt, Not Plug-and-Play
-
-Most plugins here are reference implementations - they show *how* something can be built, not a generic solution for everyone. The personal nature IS the showcase.
+Most plugins here are reference implementations — they show how something can be built, not a drop-in solution for everyone.
 
 | Content Type | What You'll Find | How to Use It |
 |--------------|------------------|---------------|
@@ -143,4 +139,4 @@ plugins/your-plugin/
 - **Bug reports**: Use the bug report issue template
 - **Feature ideas**: Use the feature request issue template
 
-Remember: This is a showcase, not a product. The best contribution you can make might be taking these patterns and building something great for your own workflow.
+This is a showcase, not a product. The most useful thing you can do with it is take the patterns and build your own.

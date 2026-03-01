@@ -11,7 +11,7 @@
     {
       "name": "example-plugin",
       "source": "./plugins/example-plugin",
-      "description": "An example plugin demonstrating all component types (commands, agents, skills, hooks, MCP)"
+      "description": "Example plugin showing all component types: commands, agents, skills, hooks, MCP config"
     },
     {
       "name": "focus-tools",
@@ -26,22 +26,22 @@
     {
       "name": "transaction-analysis",
       "source": "./plugins/transaction-analysis",
-      "description": "Comprehensive toll transaction data analysis with automatic client detection (VDOT, DelDOT, MDTA, DRPA), specialized agents, and integrated reporting"
+      "description": "Toll transaction data analysis with automatic client detection (VDOT, DelDOT, MDTA, DRPA), specialized agents, and multi-format reporting"
     },
     {
       "name": "obsidian-vault-management",
       "source": "./plugins/obsidian-vault-management",
-      "description": "Comprehensive vault management skills for Obsidian: maintenance, email triage, tracking updates, and timesheet generation. Optimized for large vaults with Windows/PowerShell support"
+      "description": "Vault maintenance skills for large Obsidian vaults. Parallel agent architecture. Windows/PowerShell required"
     },
     {
       "name": "ms-office-suite",
       "source": "./plugins/ms-office-suite",
-      "description": "Office document creation and editing skills for Claude Code - PPTX, DOCX, XLSX, and PDF workflows with automation support"
+      "description": "Office document skills for Claude Code — PPTX, DOCX, XLSX, and PDF workflows"
     },
     {
       "name": "simplemem-memory",
       "source": "./plugins/simplemem-memory",
-      "description": "SimpleMem MCP integration for project-specific temporal memory - stores meeting decisions, action items, project milestones, and status changes with date context"
+      "description": "SimpleMem MCP integration for project-specific temporal memory — decisions, action items, milestones with date context"
     },
     {
       "name": "professional-agents",
