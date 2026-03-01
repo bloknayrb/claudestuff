@@ -44,9 +44,14 @@
       "description": "SimpleMem MCP integration for project-specific temporal memory — decisions, action items, milestones with date context"
     },
     {
+      "name": "toll-consulting",
+      "source": "./plugins/toll-consulting",
+      "description": "Toll industry agents and skills: operations consulting, procurement, and document review"
+    },
+    {
       "name": "professional-agents",
       "source": "./plugins/professional-agents",
-      "description": "Professional role-based agents for software development, consulting, and domain expertise"
+      "description": "Professional role-based agents for software development and project management"
     },
     {
       "name": "automation",

@@ -15,8 +15,6 @@ Role-based agents for software development, consulting, and domain expertise. Th
 | QA Reviewer | haiku | Code quality, security analysis |
 | Researcher | sonnet | Technology research, competitive analysis |
 | Strategic PM | sonnet | Project planning, delivery risk |
-| Toll Consultant | sonnet | Tolling operations and systems |
-| Toll Procurement | sonnet | RFP development, vendor evaluation |
 | DOCX Editor | sonnet | Word document XML manipulation |
 
 ## Agent Details
@@ -93,33 +91,6 @@ Role-based agents for software development, consulting, and domain expertise. Th
 
 **Tools**: read, write
 
-### Toll Consultant
-**Use for**: Tolling operations, CSC systems, interoperability, enforcement
-
-**Triggering conditions**:
-- Toll road planning
-- Electronic toll collection
-- Regulatory frameworks
-
-**Domain expertise**:
-- CSC and roadside systems
-- Revenue operations
-- ETC interoperability (IAG, NIOP)
-- Enforcement models
-
-### Toll Procurement Consultant
-**Use for**: RFP development, vendor evaluation, proposal analysis
-
-**Triggering conditions**:
-- Procurement planning
-- Vendor selection
-- Contract negotiation
-
-**Domain expertise**:
-- Technical requirements development
-- Evaluation criteria
-- Pricing models
-
 ### DOCX Editor
 **Use for**: Word document XML structure manipulation
 
@@ -150,8 +121,6 @@ professional-agents/
     ├── qa-reviewer.md
     ├── researcher.md
     ├── strategic-pm.md
-    ├── toll-consultant.md
-    ├── toll-procurement-consultant.md
     └── docx-editor.md
 ```
 
@@ -194,5 +163,5 @@ To adapt these agents:
 | Aspect | Rating | Notes |
 |--------|--------|-------|
 | Setup Difficulty | Low | No dependencies, just agent definitions |
-| Customization Needed | Medium | Toll consultants are domain-specific |
+| Customization Needed | Low | Agent definitions are self-contained |
 | Value as Reference | High | Shows agent design patterns |

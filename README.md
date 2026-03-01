@@ -18,7 +18,7 @@
 |----------|-------------|---------|
 | **Patterns** | Reusable architecture anyone can adopt | [skills/shared/](skills/) |
 | **Reference Implementations** | Working commands - study the structure | automation, obsidian-vault-management |
-| **Domain Tools** | Specialized for specific work | transaction-analysis, professional-agents |
+| **Domain Tools** | Specialized for specific work | transaction-analysis, toll-consulting, professional-agents |
 | **Office Automation** | Document creation and editing | ms-office-suite |
 | **Memory Integration** | Context persistence | simplemem-memory |
 | **Personal Finance** | Budgeting, investing, financial planning | personal-finance |
@@ -38,7 +38,10 @@ Are you...
 │   └── → ms-office-suite (PPTX, DOCX, XLSX, PDF skills)
 │
 ├── Looking for agent design patterns?
-│   └── → professional-agents (10 role-based agents)
+│   └── → professional-agents (8 role-based agents)
+│
+├── Working on toll projects?
+│   └── → toll-consulting (agents + document review skill)
 │
 ├── Building Obsidian automation?
 │   ├── Want vault maintenance?
@@ -64,7 +67,8 @@ Are you...
 | Plugin | Setup | Customization | Best For |
 |--------|-------|---------------|----------|
 | **example-plugin** | Easy | None needed | Learning plugin structure |
-| **professional-agents** | Easy | Medium | Adding role-based agents |
+| **professional-agents** | Easy | Low | Adding role-based agents |
+| **toll-consulting** | Easy | Low | Toll industry consulting |
 | **ms-office-suite** | Medium | Low | Office document automation |
 | **simplemem-memory** | Medium | Low | Project context memory |
 | **obsidian-vault-management** | Hard | High | Obsidian vault maintenance |
@@ -128,11 +132,23 @@ Are you...
 
 ### professional-agents
 
-**What**: 10 role-based agents for development and consulting
+**What**: 8 role-based agents for development and project management
 
-**Agents**: Developer, Tech Lead, Product Owner, UX Designer, QA Reviewer, Researcher, Strategic PM, Toll Consultant, Toll Procurement, DOCX Editor
+**Agents**: Developer, Tech Lead, Product Owner, UX Designer, QA Reviewer, Researcher, Strategic PM, DOCX Editor
 
 **Use for**: Adding specialized personas, understanding agent design patterns
+
+---
+
+### toll-consulting
+
+**What**: Toll industry agents and document review skill
+
+**Agents**: Toll Consultant, Toll Procurement Consultant
+
+**Skills**: Document review (owner's representative perspective)
+
+**Use for**: Toll operations consulting, procurement advisory, project document review
 
 ---
 
@@ -197,7 +213,6 @@ Skills in the `skills/` directory work independently of plugins:
 | memory-router | Smart routing to memory systems |
 | semantic-search | Vault search with embeddings |
 | task-management | TaskNote creation patterns |
-| document-review | Toll project document review (owner's rep) |
 | invoice-timesheet-verification | Timesheet reconciliation |
 | boop-scripting | Woop/Boop script API, patterns, and template for Windows text transforms |
 
