@@ -122,11 +122,11 @@ Are you...
 
 **What**: Vault maintenance with parallel agent architecture
 
-**Skills**: Vault sweeping (5 parallel agents), validation rules
+**Skills**: Vault sweeping (5 parallel agents), validation rules, orphan detection
 
-**Use for**: Large vault maintenance, template compliance, metadata validation
+**Use for**: Large vault maintenance, template compliance, metadata validation, broken link detection
 
-**Note**: Windows/PowerShell required
+**Note**: Windows/PowerShell required. Obsidian CLI (v1.12.4+) optional for enhanced graph-based detection.
 
 ---
 

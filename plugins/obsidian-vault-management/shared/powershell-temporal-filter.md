@@ -6,6 +6,17 @@ Windows-specific temporal filtering for vault management skills.
 
 PowerShell provides efficient file filtering by modification time, critical for Quick and Standard paths that scan only recent changes. These patterns are optimized for Windows environments.
 
+### Relationship to Obsidian CLI
+
+As of v1.12.4, Obsidian ships an official CLI that provides runtime access to vault data (properties, links, orphans, search). However, **the CLI has no temporal filtering equivalent** — there is no `--modified-since` flag or age-based file filtering.
+
+**Agents that remain PowerShell-dependent** (no CLI replacement):
+- **Agent 3 (Project Status Updater)**: Uses `LastWriteTime` for activity detection
+- **Agent 5 (Cleanup Coordinator)**: Uses `Get-ChildItem` with `LastWriteTime` for stale inbox (Rule 18) and old fleeting notes (Rule 19)
+- **Path selection logic**: File count by modification time determines Quick/Standard/Deep path
+
+**Overnight automation** (`overnight-orchestrator.ps1`): Always uses PowerShell patterns exclusively — Obsidian is typically closed during overnight runs, so CLI is unavailable. The CLI availability check (`obsidian version`, 2s timeout) fails fast to avoid delaying automated runs.
+
 ## Common Patterns
 
 ### Pattern 1: Files Modified Since Last Scan

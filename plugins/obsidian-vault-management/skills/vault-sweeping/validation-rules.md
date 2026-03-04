@@ -378,7 +378,7 @@ THEN violation (future date)
 
 ---
 
-### Rule 13: Wikilink Validity
+### Rule 13: Wikilink Validity (Dual-Mode)
 
 **Definition**: All wikilinks must point to existing files.
 
@@ -387,17 +387,25 @@ THEN violation (future date)
 - `[[Target|Alias]]` → Look for `Target.md`, display as "Alias"
 - `[[Folder/Target]]` → Look for `Target.md` in `Folder/`
 
-**Detection**:
+**Detection (CLI mode — preferred)**:
+```bash
+obsidian unresolved format=json
 ```
-Extract all wikilinks from file content
+- Returns all unresolved links vault-wide as structured JSON
+- Handles aliases, case-insensitive linking, and block references that regex cannot
+- Filter results to files within the current scan scope (temporal filter)
+
+**Detection (Fallback mode)**:
+```
+Extract all wikilinks from file content using regex
 FOR EACH link:
-  IF target file does NOT exist in vault
+  IF target file does NOT exist in vault (checked via Glob)
   THEN broken link detected
 ```
 
 **Priority**: MEDIUM
 
-**Regex**: `\[\[([^\]|]+)(?:\|[^\]]+)?\]\]`
+**Regex** (fallback only): `\[\[([^\]|]+)(?:\|[^\]]+)?\]\]`
 
 **Remediation**:
 - Fix typo in link
@@ -405,6 +413,8 @@ FOR EACH link:
 - Remove broken link
 
 **Exceptions**: Links to sections (`[[File#Section]]`) validate file exists, ignore section
+
+**CLI Advantages**: The `obsidian unresolved` command uses Obsidian's runtime link resolver, which correctly handles alias resolution, case-insensitive matching, and block reference syntax (`[[File^block-id]]`) — all of which produce false positives/negatives with regex-based detection.
 
 ---
 
@@ -583,6 +593,7 @@ FOR EACH folder in vault:
 | Timestamp Format | Metadata | MEDIUM | Data Quality | Rare |
 | Timestamp Logic | Metadata | LOW | Accuracy | Very Rare |
 | Broken Wikilinks | Metadata | MEDIUM | Navigation | Common |
+| Orphaned Files | Metadata | LOW-HIGH | Discovery | Common |
 | Missing Tags | Metadata | LOW | Discovery | Common |
 | Active No Activity | Status | MEDIUM | Accuracy | Rare |
 | Completed With Activity | Status | HIGH | Accuracy | Rare |
@@ -593,15 +604,47 @@ FOR EACH folder in vault:
 
 ---
 
+### Rule 21: Orphaned Files (CLI-Only)
+
+**Definition**: Files with no inbound wikilinks (not referenced by any other note).
+
+**Detection (CLI mode)**:
+```bash
+obsidian orphans format=json
+```
+- Uses Obsidian's graph data — handles aliases, embeds, and block references accurately
+- Returns structured JSON with file paths
+
+**Detection (Fallback mode)**: Skipped. Regex-based orphan detection requires building a full link graph from every file in the vault, which is unreliable for aliases and block references. When CLI is unavailable, the report notes: "Orphan detection skipped — requires Obsidian CLI."
+
+**Priority**:
+- Orphaned > 365 days: HIGH (archive candidate)
+- Orphaned > 90 days: MEDIUM (likely abandoned)
+- Orphaned < 90 days: LOW (informational)
+
+**Exceptions** (not considered orphans):
+- Files in `00-Inbox/` (expected to be unlinked)
+- Files in `99-System/` (system configuration)
+- Template files (contain "template" in filename)
+- Index/MOC files (`00-Inbox.md`, `01-Projects.md`, etc.)
+- Files created < 7 days ago (recently created)
+
+**Remediation**:
+- Link from relevant notes
+- Move to appropriate location if misplaced
+- Archive if no longer needed
+
+---
+
 ## Rule Evolution
 
 Rules are living documents that evolve with vault needs:
 
 **v1.0.0**: Initial 20 rules covering core validation
+**v1.1.0**: Rule 13 updated to dual-mode (CLI + regex fallback), Rule 21 added (CLI-only orphan detection)
 **Future**: Additional rules as patterns emerge
 
 ### Proposed Future Rules:
-- **Rule 21**: Orphaned files (no inbound wikilinks)
 - **Rule 22**: Duplicate content detection
 - **Rule 23**: File naming conventions
 - **Rule 24**: Maximum file size limits

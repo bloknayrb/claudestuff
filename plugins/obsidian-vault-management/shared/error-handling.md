@@ -105,6 +105,40 @@ Robust error handling ensures skills gracefully handle edge cases, missing data,
 
 ---
 
+### 6. CLI Availability Errors (v1.1.0)
+
+**Scenario**: Obsidian CLI not available (Obsidian closed, CLI not on PATH, timeout)
+
+**Handling**:
+- Run `obsidian version` with 2-second timeout
+- If fails or times out → immediately use fallback mode (Glob/Grep/PowerShell)
+- No retries — a failed check means Obsidian isn't running
+- CLI-only features (orphan detection) noted as skipped in report
+
+**Examples**:
+```markdown
+ℹ️ INFO: Obsidian CLI not available — using fallback detection mode
+→ Orphan detection (Rule 21) will be skipped
+→ Wikilink validation will use regex (less accurate for aliases/block refs)
+→ All other checks proceed normally
+```
+
+```markdown
+ℹ️ INFO: Obsidian CLI available — using enhanced detection mode
+→ Graph-based orphan detection enabled
+→ Runtime link resolution for wikilink validation
+→ Structured property reads for template compliance
+```
+
+**Stale Index Warning** (CLI is available but vault is indexing/syncing):
+```markdown
+⚠️ WARNING: Obsidian may be indexing — CLI results could be incomplete
+→ Files created in the last 60 seconds may not appear in orphan/unresolved results
+→ Recommendation: Re-run sweep after indexing completes for accurate results
+```
+
+---
+
 ## Error Handling Patterns
 
 ### Pattern 1: Graceful Degradation
@@ -150,8 +184,9 @@ BEFORE launching agents:
 1. Validate vault path exists
 2. Check for required permissions
 3. Verify PowerShell available (Windows check)
-4. Confirm file count within reasonable range
-5. Test read access to sample files
+4. Check Obsidian CLI availability (`obsidian version`, 2s timeout)
+5. Confirm file count within reasonable range
+6. Test read access to sample files
 
 IF validation fails:
   - Report specific issue
@@ -242,12 +277,16 @@ AFTER processing:
 - Folder structure doesn't exist (project moved/deleted)
 - YAML frontmatter incomplete
 - File referenced in wikilinks doesn't exist
+- Obsidian CLI unavailable (Obsidian closed, PATH not registered)
+- CLI returns stale data (vault indexing/syncing)
 
 **Handling**:
 - Type property missing → Flag as "No Type property" (not error)
 - Folder missing → Flag as "Orphaned file" (Critical)
 - YAML incomplete → Flag per field (Important)
 - Broken wikilink → Flag as "Broken link" (Important)
+- CLI unavailable → Use fallback mode, skip orphan detection, note in report
+- CLI command fails mid-run → Fall back to regex for that specific check, continue
 
 ---
 
@@ -374,6 +413,9 @@ IF processing incomplete:
 6. **Broken wikilinks**: Create links to non-existent files
 7. **Missing Type property**: File without Type field
 8. **Date parse failure**: Filename with invalid date format
+9. **CLI unavailable**: Close Obsidian, run sweep — verify fallback within 2 seconds
+10. **CLI available**: Open Obsidian, run sweep — verify orphan detection runs
+11. **CLI mid-run failure**: Disconnect CLI mid-sweep — verify graceful fallback per-check
 
 ### Expected Behavior
 
