@@ -60,12 +60,26 @@ DETECTION RULES:
    - Should have Type property
    - Priority: LOW (recommendation, not violation)
 
-SEARCH STRATEGY:
+SEARCH STRATEGY (dual-mode):
 
+CLI mode (when CLI available — passed as parameter from coordinator):
+Step 1: Use `obsidian files folder=X format=json` for bulk file listing per folder
+Step 2: Filter file list to those in scan scope (temporal filter)
+Step 3: Only for files needing deeper validation, call `obsidian properties file="X" format=json`
+        to read Type property (avoid per-file calls when folder location alone suffices)
+Step 4: Compare Type property against folder location rules
+Step 5: Check MeetingNotes-* filename pattern against folder
+
+Fallback mode (Obsidian closed or CLI unavailable):
 Step 1: Use Grep to find Type: Contact, Type: Project, Type: Email
 Step 2: Check if file path matches expected location
 Step 3: Use Grep to find MeetingNotes-* pattern
 Step 4: Check if in correct meeting folder
+
+Note: CLI mode benefits Agent 1 via structured JSON output (faster parsing, no regex
+needed for YAML), not bulk scanning speed — the Type-property-to-path comparison logic
+is identical in both modes. Use bulk `obsidian files` for listing, then targeted
+`obsidian properties` only for ambiguous cases.
 
 REQUIRED OUTPUT:
 
@@ -160,12 +174,22 @@ TEMPLATE REQUIREMENTS:
    - due_date (date)
    - effort (string)
 
-DETECTION STRATEGY:
+DETECTION STRATEGY (dual-mode):
 
-Step 1: Read file YAML frontmatter
+CLI mode (when CLI available — passed as parameter from coordinator):
+Step 1: Use `obsidian properties file="X" format=json` to read frontmatter as structured JSON
+Step 2: Determine template type from Type property or file location
+Step 3: Check for required fields (JSON key presence — no YAML parsing needed)
+Step 4: Validate field formats (dates as YYYY-MM-DD, enum values, etc.)
+
+Fallback mode (Obsidian closed or CLI unavailable):
+Step 1: Read file YAML frontmatter via Read tool
 Step 2: Determine template type from Type property or file location
 Step 3: Check for required fields
 Step 4: Validate field formats (dates as YYYY-MM-DD, etc.)
+
+Note: CLI mode eliminates YAML parsing edge cases (multiline values, special characters,
+nested lists). Field-level validation logic (required fields, enum checks) is identical in both modes.
 
 REQUIRED OUTPUT:
 
@@ -333,22 +357,34 @@ VALIDATION RULES:
    - Both <= today's date
    - Priority if violated: LOW
 
-4. Wikilink Validity
-   - Pattern: [[link]] or [[link|alias]]
-   - Target file must exist in vault
+4. Wikilink Validity (Rule 13 — dual-mode)
+   - **CLI mode**: Run `obsidian unresolved format=json` — returns all broken links vault-wide
+     - Handles aliases, case-insensitive linking, block references that regex cannot
+     - Filter results to files in scan scope (temporal filter)
+   - **Fallback mode**: Regex pattern `\[\[([^\]|]+)(?:\|[^\]]+)?\]\]`, verify targets exist via Glob
    - Priority if broken: MEDIUM
 
-5. Required Tags (by Type)
+5. Orphaned Files (Rule 21 — CLI-only)
+   - **CLI mode**: Run `obsidian orphans format=json` — returns files with no inbound links
+     - Uses Obsidian's graph data — accurate for aliases, embeds, block refs
+     - Filter out exceptions: Inbox, Templates, System files, files < 7 days old
+   - **Fallback mode**: Skip this check (regex-based orphan detection is unreliable at scale)
+     - Note in report: "Orphan detection skipped — requires Obsidian CLI"
+   - Priority: LOW (informational), MEDIUM if >90 days old
+
+6. Required Tags (by Type)
    - Email files: Should have #email-[client] tag
    - Meeting files: Should have project tag
    - Priority if missing: LOW (recommendation)
 
 DETECTION STRATEGY:
 
-Step 1: Read YAML frontmatter
-Step 2: Check timestamp presence and format
-Step 3: Extract wikilinks with regex: \[\[([^\]]+)\]\]
-Step 4: Verify link targets exist
+Step 1: Check CLI availability (passed as parameter from coordinator)
+Step 2: Read YAML frontmatter — check timestamp presence and format
+Step 3 (CLI mode): Run `obsidian unresolved format=json` for broken links
+Step 3 (Fallback): Extract wikilinks with regex, verify targets via Glob
+Step 4 (CLI mode): Run `obsidian orphans format=json` for orphaned files
+Step 4 (Fallback): Skip orphan detection
 Step 5: Check tags for Type-specific patterns
 
 REQUIRED OUTPUT:
@@ -362,16 +398,22 @@ For each issue:
   - Recommendation: [fix]
 ```
 
-Group by issue type (Timestamps, Wikilinks, Tags).
+Group by issue type (Timestamps, Wikilinks, Orphans, Tags).
 
-WIKILINK VALIDATION:
-- Extract target from [[Target]] or [[Target|Alias]]
-- Check if Target.md exists anywhere in vault
-- If not found, report as broken link
+WIKILINK VALIDATION (dual-mode):
+- CLI mode: Parse `obsidian unresolved format=json` output, filter to scoped files
+- Fallback mode: Extract target from [[Target]] or [[Target|Alias]], check if Target.md exists via Glob
+
+ORPHAN DETECTION (CLI-only):
+- CLI mode: Parse `obsidian orphans format=json` output
+  - Filter out: 00-Inbox/*, 99-System/*, *template*, files created < 7 days ago
+  - Group by age: >365 days (HIGH), >90 days (MEDIUM), others (LOW)
+- Fallback mode: Skip entirely, note in report
 
 ERROR HANDLING:
 - If YAML missing → Skip timestamp validation
 - If regex fails → Note as parse error
+- If CLI command fails mid-run → Fall back to regex for that check, continue
 - If excessive broken links (>20) → Sample and report count
 
 PERFORMANCE TARGET: Complete in 15-20 seconds
@@ -389,7 +431,7 @@ Same as Standard but:
 Same as Standard but:
 - Scope: ALL files
 - Add: Tag consistency analysis (similar files, different tags)
-- Add: Link graph analysis (orphaned notes with no inbound links)
+- Add: Link graph analysis — CLI mode uses `obsidian orphans` (comprehensive); fallback mode builds regex-based reference map (less accurate for aliases/embeds)
 - Add: Timestamp drift detection (files with created > updated)
 
 ---
@@ -514,6 +556,11 @@ Launch all agents in SINGLE message with multiple Task calls:
 - Task 4: Agent 4 (Metadata Validator)
 - Task 5: Agent 5 (Cleanup Coordinator)
 ```
+
+**CLI Availability Propagation**:
+The coordinator checks CLI availability once (`obsidian version`, 2s timeout) before launching agents.
+The result (boolean) is passed as a parameter in each agent's prompt. Agents never check CLI
+availability themselves — they trust the coordinator's result.
 
 **Benefits**:
 - Parallel execution (fastest performance)

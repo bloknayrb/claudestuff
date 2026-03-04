@@ -92,7 +92,7 @@ Run the contributor checklist for **every plugin**:
 | example-plugin | ✓ | `/hello` works | |
 | automation | ✓ | `/track` needs vault | Expected |
 | ms-office-suite | ✓ | Skills load | |
-| obsidian-vault-management | ✓ | Skills load | |
+| obsidian-vault-management | ✓ | Skills load | CLI optional |
 | professional-agents | ✓ | Agents appear | |
 | simplemem-memory | ✓ | Skills load | Needs SimpleMem MCP |
 | transaction-analysis | ✓ | `/analyze-transactions` | |
@@ -185,6 +185,21 @@ Install multiple plugins and verify no conflicts:
 1. hooks.json is valid JSON
 2. Event name is correct (PreToolUse, PostToolUse, etc.)
 3. Matcher pattern matches the intended tools
+
+### CLI-Dependent Features Not Working
+
+**Symptoms:** Orphan detection skipped, wikilink validation using fallback
+
+**Check:**
+1. Obsidian is running
+2. CLI is registered on PATH: `obsidian version` should return version info
+3. If not on PATH: Obsidian Settings → General → CLI → Register
+4. Vault is fully indexed (wait 60 seconds after opening Obsidian)
+
+**Expected fallback behavior:**
+- `obsidian version` fails → all agents use Glob/Grep/PowerShell (< 2 second delay)
+- Orphan detection skipped with note in report
+- All other checks function normally via fallback
 
 ---
 

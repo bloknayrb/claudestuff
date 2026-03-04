@@ -91,8 +91,15 @@ FOR EACH required field:
     Validate format (date format, enumerated values, etc.)
 ```
 
-### YAML Parsing Pattern
+### YAML Parsing Pattern (Dual-Mode)
 
+#### CLI Mode (preferred)
+```bash
+obsidian properties file="filename" format=json
+```
+Returns frontmatter as structured JSON — no regex parsing needed. Eliminates edge cases with multiline values, special characters, and nested lists.
+
+#### Fallback Mode (regex parsing)
 ```regex
 # Extract YAML frontmatter
 ^---\n(.*?)\n---
@@ -219,7 +226,21 @@ Violations:
 - updated_date > today
 ```
 
-### Wikilink Validation Strategy
+### Wikilink Validation Strategy (Dual-Mode)
+
+#### CLI Mode (preferred when Obsidian is running)
+
+**Single command replaces all steps below**:
+```bash
+obsidian unresolved format=json
+```
+
+Returns structured JSON of all broken links vault-wide. Advantages:
+- Handles aliases, case-insensitive linking, block references (`[[File^block-id]]`)
+- No need to build file index or parse wikilink syntax
+- Filter results to files in scan scope (temporal filter) after retrieval
+
+#### Fallback Mode (Obsidian closed)
 
 **Step 1: Extract all wikilinks**
 ```regex
@@ -251,6 +272,8 @@ FOR EACH wikilink target:
 ```
 
 **Optimization**: Cache vault index, rebuild only when vault structure changes
+
+**Known Fallback Limitations**: Regex cannot resolve aliases, case-insensitive matches, or block references — may produce false positives/negatives compared to CLI mode
 
 ---
 
@@ -401,29 +424,38 @@ Files with identical size are candidates for content comparison
 
 ---
 
-## Pattern 8: Orphaned File Detection
+## Pattern 8: Orphaned File Detection (Dual-Mode)
 
 ### Purpose
 Find files with no inbound wikilinks (not referenced anywhere).
 
 ### Detection Strategy
 
-**Step 1: Build link graph**
-```
-FOR EACH file in vault:
-  Extract all outbound wikilinks
-  Build reference map: target → [source files]
+#### CLI Mode (preferred — accurate, fast)
+
+**Single command**:
+```bash
+obsidian orphans format=json
 ```
 
-**Step 2: Find orphans**
-```
-FOR EACH file in vault:
-  IF file NOT in reference map:
-    AND file NOT in special folders (Inbox, Templates):
-      Flag as orphaned
-```
+Returns structured JSON of all orphaned files using Obsidian's graph data. This correctly handles:
+- Alias-based references (regex misses these)
+- Embedded links (`![[File]]`)
+- Block references (`[[File^block-id]]`)
+- Case-insensitive link resolution
 
-**Exceptions** (not considered orphans):
+Then filter exceptions from the result set (see below).
+
+#### Fallback Mode (Obsidian closed)
+
+**Skip this detection entirely**. Building a regex-based link graph across a 25,000+ file vault is:
+- Slow (requires reading every file)
+- Inaccurate (misses aliases, embeds, block refs)
+- Not worth the false positive noise
+
+When CLI is unavailable, report: "Orphan detection skipped — requires Obsidian CLI."
+
+### Exceptions (not considered orphans)
 - Index files (folder.md)
 - Templates
 - Recently created files (<7 days)
@@ -433,10 +465,10 @@ FOR EACH file in vault:
 ### Severity
 
 ```
-IF orphaned AND >90 days old:
-  Priority: MEDIUM (likely abandoned)
 IF orphaned AND >365 days old:
   Priority: HIGH (archive candidate)
+IF orphaned AND >90 days old:
+  Priority: MEDIUM (likely abandoned)
 ELSE:
   Priority: LOW (informational)
 ```
@@ -502,18 +534,20 @@ grep -r "Type: Email" --include="*.md" |
 
 ## Pattern Integration Matrix
 
-| Pattern | Quick Path | Standard Path | Deep Path | Performance Cost |
-|---------|------------|---------------|-----------|------------------|
-| Type Mismatch | ✓ | ✓ | ✓ | LOW |
-| Template Compliance | ✓ | ✓ | ✓ | MEDIUM |
-| Project Status | - | ✓ | ✓ | MEDIUM |
-| Metadata Validation | ✓ | ✓ | ✓ | LOW |
-| Stale Content | - | ✓ | ✓ | LOW |
-| Empty Folders | - | ✓ | ✓ | LOW |
-| Duplicates | - | - | ✓ | HIGH |
-| Orphaned Files | - | - | ✓ | HIGH |
-| Broken Link Chains | - | ✓ | ✓ | MEDIUM |
-| Tag Consistency | - | ✓ | ✓ | LOW |
+| Pattern | Quick Path | Standard Path | Deep Path | Performance Cost | CLI Enhanced |
+|---------|------------|---------------|-----------|------------------|--------------|
+| Type Mismatch | ✓ | ✓ | ✓ | LOW | Yes (files) |
+| Template Compliance | ✓ | ✓ | ✓ | MEDIUM | Yes (properties) |
+| Project Status | - | ✓ | ✓ | MEDIUM | No |
+| Metadata Validation | ✓ | ✓ | ✓ | LOW | Yes (unresolved) |
+| Stale Content | - | ✓ | ✓ | LOW | No |
+| Empty Folders | - | ✓ | ✓ | LOW | No |
+| Duplicates | - | - | ✓ | HIGH | No |
+| Orphaned Files | - | ✓* | ✓* | LOW (CLI) / HIGH (regex) | Yes (CLI-only) |
+| Broken Link Chains | - | ✓ | ✓ | MEDIUM | Yes (unresolved) |
+| Tag Consistency | - | ✓ | ✓ | LOW | No |
+
+*\* Orphaned Files: Only available when CLI is active. Skipped in fallback mode.*
 
 ---
 
@@ -567,13 +601,15 @@ Quick Path thresholds:
 ## Pattern Evolution
 
 **v1.0.0**: 10 core detection patterns
+**v1.1.0**: Patterns 2, 4, 8, 9 updated with dual-mode (CLI + fallback). Pattern 8 now CLI-only for orphan detection. CLI Integration Matrix column added.
 
 **Future Patterns**:
 - Pattern 11: Content quality (readability scores)
-- Pattern 12: Link graph metrics (centrality, clustering)
+- Pattern 12: Link graph metrics (centrality, clustering) — CLI `obsidian backlinks` enables per-note analysis
 - Pattern 13: File naming conventions
 - Pattern 14: Attachment usage validation
 - Pattern 15: Cross-reference integrity (TaskNotes ↔ Meetings)
+- Pattern 16: Tag frequency analysis — CLI `obsidian tags sort=count counts` enables vault-wide tag metrics
 
 ---
 

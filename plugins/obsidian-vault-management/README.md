@@ -8,14 +8,16 @@ Skills for managing large Obsidian vaults. Uses parallel agent architecture with
 
 ## Skills Included
 
-### 1. Vault Sweeping (v1.0.0)
+### 1. Vault Sweeping (v1.1.0)
 
 Vault organization analysis with 5 parallel agents scanning for:
 - File organization issues (Type property vs folder location)
 - Template compliance violations
 - Project status updates needed
-- Metadata validation problems
+- Metadata validation problems (broken wikilinks, orphaned files)
 - Cleanup opportunities
+
+**Obsidian CLI Integration** (v1.1.0): When Obsidian is running, agents use CLI commands (`obsidian unresolved`, `obsidian orphans`, `obsidian properties`, `obsidian files`) for more accurate detection. Automatically falls back to Glob/Grep/PowerShell when CLI is unavailable.
 
 **Usage**: Claude automatically invokes when you describe maintenance needs
 **Performance**: 30-120 seconds depending on scope
@@ -47,8 +49,9 @@ git pull
 ## Requirements
 
 - **Platform**: Windows (PowerShell required for temporal filtering)
-- **Tools**: Read, Grep, Glob, Bash
+- **Tools**: Read, Grep, Glob, Bash, Agent
 - **Obsidian Vault**: YAML frontmatter with Type property
+- **Obsidian CLI** (optional): v1.12.4+ with CLI registered on PATH (Settings → General → CLI). Enables graph-based orphan detection and runtime link resolution. Falls back gracefully when unavailable.
 - **Claude Code**: Latest version recommended
 
 ## Configuration
@@ -107,4 +110,4 @@ MIT License - See [LICENSE](LICENSE) for details
 
 ---
 
-**Note**: This plugin requires Windows with PowerShell.
+**Note**: This plugin requires Windows with PowerShell. Obsidian CLI (v1.12.4+) is optional but recommended for enhanced detection accuracy.

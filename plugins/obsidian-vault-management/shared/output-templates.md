@@ -12,6 +12,10 @@ Generated: [timestamp]
 Scope: [Quick/Standard/Deep Path]
 Files Scanned: [count]
 
+## Detection Mode: [CLI / Fallback]
+[CLI: Obsidian CLI active — graph-based orphan and link detection enabled]
+[Fallback: Obsidian CLI unavailable — using Glob/Grep/PowerShell]
+
 ## Critical Issues (Immediate Action Required)
 
 [If none: ✓ No critical issues found]
@@ -32,11 +36,22 @@ Files Scanned: [count]
   - Template: [template-type]
   - Impact: MEDIUM - Affects data completeness
 
+### Broken Wikilinks
+- [ ] **[filename]**: Link to [[target]] — target does not exist
+  - Detection: [CLI: obsidian unresolved / Fallback: regex]
+  - Impact: MEDIUM - Affects navigation
+
 [... additional important issues ...]
 
 ## Recommendations (Optional Improvements)
 
 [If none: ✓ No recommendations at this time]
+
+### Orphaned Files (CLI mode only)
+[If CLI unavailable: ⚠️ Orphan detection skipped — requires Obsidian CLI]
+- **[filename]**: No inbound links, [age] days old
+  - Priority: [HIGH >365d / MEDIUM >90d / LOW <90d]
+  - Action: Link from relevant notes, archive, or review
 
 ### Cleanup Opportunities
 - **Stale Inbox Files**: [count] files older than 30 days
@@ -50,11 +65,13 @@ Files Scanned: [count]
 - **Critical**: [count] issues
 - **Important**: [count] issues
 - **Recommendations**: [count] items
+- **Detection Mode**: [CLI / Fallback]
 - **Next Sweep**: [suggested-date]
 
 [Quick Path only: Run Standard or Deep path for comprehensive analysis]
 [Standard Path: Run Deep path for historical pattern analysis]
 [Deep Path: Complete analysis with all available context]
+[Fallback mode: Run with Obsidian open for orphan detection and enhanced link validation]
 ```
 
 ---

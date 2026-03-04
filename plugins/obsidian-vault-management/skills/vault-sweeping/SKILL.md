@@ -1,8 +1,8 @@
 ---
 name: vault-sweeping
 description: Comprehensive vault maintenance with 5 parallel agents scanning file organization, template compliance, project status, metadata validation, and cleanup opportunities. Automatically detects scope and selects optimal path (Quick 30s, Standard 60s, Deep 120s). Use when checking vault health, finding misplaced files, validating templates, or performing weekly maintenance.
-version: 1.0.0
-allowed-tools: Read, Grep, Glob, Bash
+version: 1.1.0
+allowed-tools: Read, Grep, Glob, Bash, Agent
 ---
 
 # Vault Sweeping
@@ -12,6 +12,47 @@ allowed-tools: Read, Grep, Glob, Bash
 Maintains large Obsidian vaults through systematic analysis across five maintenance domains: file organization, template compliance, project status, metadata validation, and cleanup opportunities. The skill uses parallel agent architecture with adaptive path selection to optimize performance based on vault changes since last sweep.
 
 Designed for vaults with 25,000+ files where manual maintenance is impractical and systematic validation ensures data quality and discoverability.
+
+## Obsidian CLI Integration (Dual-Mode)
+
+The skill supports **dual-mode execution**: Obsidian CLI commands when available, with automatic fallback to Glob/Grep/PowerShell.
+
+### CLI Availability Check
+
+Run at the start of every sweep, before launching agents:
+
+```bash
+obsidian version
+```
+
+- **Timeout**: 2 seconds. If the command fails or times out, immediately use fallback mode.
+- **No retries**. A failed check means Obsidian isn't running — proceed with file-based detection.
+- **Overnight automation**: `overnight-orchestrator.ps1` runs when Obsidian is typically closed. The availability check must fail fast (< 2 seconds) to avoid delaying automated runs.
+
+### CLI-Enhanced Detection
+
+When CLI is available, these commands replace or augment file-based detection:
+
+| CLI Command | Replaces | Used By |
+|-------------|----------|---------|
+| `obsidian orphans format=json` | Custom link-graph orphan detection | Agent 4 (Rule 21) |
+| `obsidian unresolved format=json` | Regex-based broken link scan (Rule 13) | Agent 4 |
+| `obsidian properties file="X" format=json` | Manual YAML frontmatter parsing | Agent 2 (Rules 6-9) |
+| `obsidian files folder=X format=json` | Glob-based file listing | Agent 1 (Rules 1-4) |
+
+### Fallback Mode
+
+When CLI is unavailable (Obsidian closed, PATH not registered, timeout):
+- All agents use existing Glob/Grep/PowerShell patterns — identical to pre-CLI behavior
+- No degradation in detection accuracy for file-based rules
+- CLI-only detections (orphans via graph) are skipped with a note in the report
+
+### Caveats
+
+- **Obsidian must be running** for CLI commands. Overnight automation always uses fallback.
+- **PATH registration required**: CLI binary must be on PATH (Obsidian Settings → General → CLI). If PATH registration fails after an update, all runs silently fall back.
+- **Indexing state**: When Obsidian is running but vault is being indexed or syncing, `orphans` and `unresolved` may return stale/partial results. Do not treat CLI results as authoritative for files created in the last 60 seconds.
+- **Command verification**: The CLI commands in this document (`orphans`, `unresolved`, `files`, `properties`) use the `param=value` syntax confirmed by Obsidian CLI docs. Verify available commands against `obsidian help` output — the CLI evolves between releases and command names may change.
 
 ## When to Use This Skill
 
@@ -361,6 +402,7 @@ Get-ChildItem -Path $vault -Recurse -File |
 Before sweep:
 - [ ] Vault path accessible
 - [ ] PowerShell available (Windows)
+- [ ] Obsidian CLI available (`obsidian version`, 2s timeout) — sets mode for agents
 - [ ] Sweep log exists or can be created
 - [ ] File count within reasonable range
 
@@ -368,6 +410,8 @@ During sweep:
 - [ ] Agents launch successfully
 - [ ] Error handling active
 - [ ] Progress tracking
+- [ ] CLI mid-run failure: confirm per-check fallback without aborting sweep
+- [ ] CLI JSON output validated (parse response, not just exit code)
 
 After sweep:
 - [ ] All findings categorized
@@ -403,6 +447,7 @@ Track in sweep log:
 ## Limitations
 
 - **Windows-only**: PowerShell temporal filtering requires Windows
+- **Obsidian CLI requires running instance**: CLI commands only work when Obsidian is open. Overnight/automated runs always use fallback mode.
 - **Type property dependency**: Organization validation assumes Type property exists
 - **YAML frontmatter required**: Metadata validation needs structured frontmatter
 - **Performance**: Very large scopes (>10K files) may exceed Deep Path timing
@@ -415,8 +460,10 @@ Track in sweep log:
 - Cross-platform support (bash/find abstraction)
 - Machine learning pattern recognition for recurring issues
 - Auto-fix capability for simple issues (with user confirmation)
-- Integration with Obsidian plugin API for real-time validation
+- ~~Integration with Obsidian plugin API for real-time validation~~ → **Partially achieved** via Obsidian CLI (v1.12.4+). CLI provides runtime access to graph data, properties, and search. Full plugin API integration remains future work.
 - Custom validation rule configuration
+- CLI-based tag analysis (`obsidian tags sort=count counts`) for Pattern 10
+- CLI-based backlink analysis (`obsidian backlinks file="X"`) for link quality metrics
 
 ---
 
