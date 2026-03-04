@@ -62,11 +62,13 @@ DETECTION RULES:
 
 SEARCH STRATEGY (dual-mode):
 
-CLI mode (when Obsidian CLI available):
-Step 1: Use `obsidian files folder=X format=json` to get structured file listings per folder
-Step 2: Use `obsidian properties file="X" format=json` to read Type property (batch: one call per file)
-Step 3: Compare Type property against folder location rules
-Step 4: Check MeetingNotes-* filename pattern against folder
+CLI mode (when CLI available — passed as parameter from coordinator):
+Step 1: Use `obsidian files folder=X format=json` for bulk file listing per folder
+Step 2: Filter file list to those in scan scope (temporal filter)
+Step 3: Only for files needing deeper validation, call `obsidian properties file="X" format=json`
+        to read Type property (avoid per-file calls when folder location alone suffices)
+Step 4: Compare Type property against folder location rules
+Step 5: Check MeetingNotes-* filename pattern against folder
 
 Fallback mode (Obsidian closed or CLI unavailable):
 Step 1: Use Grep to find Type: Contact, Type: Project, Type: Email
@@ -74,8 +76,10 @@ Step 2: Check if file path matches expected location
 Step 3: Use Grep to find MeetingNotes-* pattern
 Step 4: Check if in correct meeting folder
 
-Note: CLI mode provides structured JSON output (faster parsing, no regex needed for YAML),
-but the Type-property-to-path comparison logic is identical in both modes.
+Note: CLI mode benefits Agent 1 via structured JSON output (faster parsing, no regex
+needed for YAML), not bulk scanning speed — the Type-property-to-path comparison logic
+is identical in both modes. Use bulk `obsidian files` for listing, then targeted
+`obsidian properties` only for ambiguous cases.
 
 REQUIRED OUTPUT:
 
@@ -172,7 +176,7 @@ TEMPLATE REQUIREMENTS:
 
 DETECTION STRATEGY (dual-mode):
 
-CLI mode (when Obsidian CLI available):
+CLI mode (when CLI available — passed as parameter from coordinator):
 Step 1: Use `obsidian properties file="X" format=json` to read frontmatter as structured JSON
 Step 2: Determine template type from Type property or file location
 Step 3: Check for required fields (JSON key presence — no YAML parsing needed)
@@ -552,6 +556,11 @@ Launch all agents in SINGLE message with multiple Task calls:
 - Task 4: Agent 4 (Metadata Validator)
 - Task 5: Agent 5 (Cleanup Coordinator)
 ```
+
+**CLI Availability Propagation**:
+The coordinator checks CLI availability once (`obsidian version`, 2s timeout) before launching agents.
+The result (boolean) is passed as a parameter in each agent's prompt. Agents never check CLI
+availability themselves — they trust the coordinator's result.
 
 **Benefits**:
 - Parallel execution (fastest performance)

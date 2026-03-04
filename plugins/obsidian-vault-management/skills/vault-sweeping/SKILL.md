@@ -52,6 +52,7 @@ When CLI is unavailable (Obsidian closed, PATH not registered, timeout):
 - **Obsidian must be running** for CLI commands. Overnight automation always uses fallback.
 - **PATH registration required**: CLI binary must be on PATH (Obsidian Settings → General → CLI). If PATH registration fails after an update, all runs silently fall back.
 - **Indexing state**: When Obsidian is running but vault is being indexed or syncing, `orphans` and `unresolved` may return stale/partial results. Do not treat CLI results as authoritative for files created in the last 60 seconds.
+- **Command verification**: The CLI commands in this document (`orphans`, `unresolved`, `files`, `properties`) use the `param=value` syntax confirmed by Obsidian CLI docs. Verify available commands against `obsidian help` output — the CLI evolves between releases and command names may change.
 
 ## When to Use This Skill
 

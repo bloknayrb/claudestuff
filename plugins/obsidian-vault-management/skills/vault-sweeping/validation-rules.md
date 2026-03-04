@@ -593,7 +593,7 @@ FOR EACH folder in vault:
 | Timestamp Format | Metadata | MEDIUM | Data Quality | Rare |
 | Timestamp Logic | Metadata | LOW | Accuracy | Very Rare |
 | Broken Wikilinks | Metadata | MEDIUM | Navigation | Common |
-| Orphaned Files | Metadata | LOW-HIGH | Discovery | Common |
+| Orphaned Files | Metadata | LOW / MEDIUM / HIGH | Discovery | Common |
 | Missing Tags | Metadata | LOW | Discovery | Common |
 | Active No Activity | Status | MEDIUM | Accuracy | Rare |
 | Completed With Activity | Status | HIGH | Accuracy | Rare |

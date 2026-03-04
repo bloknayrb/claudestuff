@@ -51,13 +51,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI-based detection patterns added to detection-patterns.md (Patterns 2, 4, 8, 9)
 - CLI availability note in shared/powershell-temporal-filter.md
 - New "CLI Enhanced" column in Pattern Integration Matrix
+- `Agent` added to SKILL.md `allowed-tools` to support parallel agent architecture
 
 ### Changed
 - **Rule 13: Wikilink Validity** now dual-mode — uses `obsidian unresolved` when CLI available, falls back to regex
 - **Agent 1 (File Org Scanner)**: Can use `obsidian files folder=X format=json` for structured file listings
 - **Agent 2 (Template Checker)**: Can use `obsidian properties file="X" format=json` for frontmatter reads (eliminates YAML parsing edge cases)
 - **Agent 4 (Metadata Validator)**: Major update — CLI-based unresolved link detection and orphan detection, with regex fallback
-- Added `Agent` to SKILL.md allowed-tools for parallel agent deployment
+- **Orphaned Files detection** now available in Standard Path (CLI-only; previously Deep Path only)
 - Updated Limitations section with CLI requirement note
 - Updated Future Enhancements — marked plugin API integration as partially achieved via CLI
 
