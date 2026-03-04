@@ -57,9 +57,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Agent 1 (File Org Scanner)**: Can use `obsidian files folder=X format=json` for structured file listings
 - **Agent 2 (Template Checker)**: Can use `obsidian properties file="X" format=json` for frontmatter reads (eliminates YAML parsing edge cases)
 - **Agent 4 (Metadata Validator)**: Major update — CLI-based unresolved link detection and orphan detection, with regex fallback
-- Updated allowed-tools to include Agent
+- Added `Agent` to SKILL.md allowed-tools for parallel agent deployment
 - Updated Limitations section with CLI requirement note
 - Updated Future Enhancements — marked plugin API integration as partially achieved via CLI
+
+### Fixed
+- Orphan severity ordering in detection-patterns.md: reordered age checks so >365d (HIGH) is evaluated before >90d (MEDIUM), preventing MEDIUM from always matching first
 
 ### Notes
 - CLI requires a running Obsidian instance — overnight automation always uses fallback mode

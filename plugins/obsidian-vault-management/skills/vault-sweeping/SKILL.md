@@ -1,7 +1,7 @@
 ---
 name: vault-sweeping
 description: Comprehensive vault maintenance with 5 parallel agents scanning file organization, template compliance, project status, metadata validation, and cleanup opportunities. Automatically detects scope and selects optimal path (Quick 30s, Standard 60s, Deep 120s). Use when checking vault health, finding misplaced files, validating templates, or performing weekly maintenance.
-version: 1.0.0
+version: 1.1.0
 allowed-tools: Read, Grep, Glob, Bash, Agent
 ---
 
@@ -409,6 +409,8 @@ During sweep:
 - [ ] Agents launch successfully
 - [ ] Error handling active
 - [ ] Progress tracking
+- [ ] CLI mid-run failure: confirm per-check fallback without aborting sweep
+- [ ] CLI JSON output validated (parse response, not just exit code)
 
 After sweep:
 - [ ] All findings categorized
