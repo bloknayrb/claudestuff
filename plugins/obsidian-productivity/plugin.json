@@ -5,14 +5,5 @@
   "author": {
     "name": "bloknayrb"
   },
-  "repository": "https://github.com/bloknayrb/claudestuff",
-  "components": {
-    "commands": ["commands/*.md"],
-    "skills": ["skills/**/SKILL.md"]
-  },
-  "requirements": {
-    "platform": "windows",
-    "vault_structure": "See ARCHITECTURE.md for required folder structure",
-    "plugins": ["dataview (recommended)"]
-  }
+  "repository": "https://github.com/bloknayrb/claudestuff"
 }
