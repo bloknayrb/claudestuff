@@ -23,6 +23,7 @@
 | **Memory Integration** | Context persistence | simplemem-memory |
 | **Personal Finance** | Budgeting, investing, financial planning | personal-finance |
 | **Career Coaching** | Career exploration, resume review, interview prep | career-coach |
+| **Android Development** | Jetpack Compose, Kotlin, architecture, publishing | android-dev |
 | **Learning** | How plugins work | example-plugin |
 
 ## Plugins at a Glance
@@ -58,6 +59,9 @@ Are you...
 ├── Navigating career decisions?
 │   └── → career-coach (exploration, resume review, interview prep)
 │
+├── Building an Android app?
+│   └── → android-dev (Compose, Kotlin, architecture, publishing)
+│
 └── Adding memory to Claude Code?
     └── → simplemem-memory (temporal project memory)
 ```
@@ -75,6 +79,7 @@ Are you...
 | **automation** | Hard | High | Task tracking patterns |
 | **personal-finance** | Easy | Low | Personal finance education |
 | **career-coach** | Easy | Low | Career coaching and interview prep |
+| **android-dev** | Easy | Low | Android app development guidance |
 | **transaction-analysis** | Low | High | Toll industry analysis |
 
 **Complexity Key:**
@@ -185,6 +190,18 @@ Are you...
 **Agents**: Career Coach (orchestrator), Resume Reviewer, Mock Interviewer
 
 **Use for**: Career direction, resume review, ATS optimization, behavioral interview practice, salary negotiation, offer comparison
+
+---
+
+### android-dev
+
+**What**: Android app development — project setup, Compose UI, architecture, testing, publishing
+
+**Skills**: Android Architecture (MVVM, Hilt, project setup), Compose UI (components, state, navigation), Android Platform (permissions, platform APIs, troubleshooting), Build/Test/Publish (testing pyramid, Gradle, Play Store)
+
+**Agents**: Android Dev (routing agent for all Android tasks)
+
+**Use for**: Building Android apps with Kotlin and Jetpack Compose, from first project to Play Store
 
 ---
 

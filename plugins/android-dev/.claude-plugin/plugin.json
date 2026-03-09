@@ -1,0 +1,9 @@
+{
+  "name": "android-dev",
+  "version": "1.0.0",
+  "description": "Android app development plugin: Jetpack Compose, Kotlin, MVVM architecture, project scaffolding, troubleshooting, and Play Store publishing.",
+  "author": {
+    "name": "bloknayrb"
+  },
+  "repository": "https://github.com/bloknayrb/claudestuff"
+}
