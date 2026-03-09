@@ -28,26 +28,30 @@ class AuthRepository @Inject constructor(
 ) {
     private val credentialManager = CredentialManager.create(context)
 
-    suspend fun signIn(): SignInResult {
+    // Activity is required — CredentialManager shows a bottom sheet UI
+    suspend fun signIn(activity: Activity): SignInResult {
         val request = GetCredentialRequest.Builder()
             .addCredentialOption(
                 GetPasswordOption()  // Saved passwords
             )
-            .addCredentialOption(
-                GetPublicKeyCredentialOption(
-                    requestJson = createPasskeyRequestJson()
-                )
-            )
+            // For passkey support, add:
+            // .addCredentialOption(GetPublicKeyCredentialOption(requestJson = yourServerWebAuthnJson))
+            // Passkeys require server-side WebAuthn configuration.
+            // See: https://developer.android.com/identity/sign-in/credential-manager
             .build()
 
         return try {
-            val response = credentialManager.getCredential(context as Activity, request)
+            val response = credentialManager.getCredential(activity, request)
             handleSignInResponse(response)
         } catch (e: GetCredentialException) {
             SignInResult.Error(e.message ?: "Sign-in failed")
         }
     }
 }
+
+// In Compose, get the Activity from LocalContext:
+// val activity = LocalContext.current as? ComponentActivity ?: return
+// Then pass it: authRepository.signIn(activity)
 ```
 
 > **Security note**: For production authentication, consult a security professional. This shows the API pattern, not a complete auth implementation.

@@ -1,26 +1,26 @@
-# Jetpack Navigation 3
+# Jetpack Navigation for Compose
 
 ## Overview
 
-Navigation 3 is the latest Jetpack navigation library for Compose. It uses a simple list-based back stack and type-safe routes defined as Kotlin classes or objects. Navigation 3 replaces the older NavHost/NavController approach with a more Compose-idiomatic API.
+Jetpack Navigation provides structured navigation for Compose apps. **Navigation 2.x is the stable, production-ready library** — it's well-documented, widely used, and fully supported. Navigation 3 is an alpha-stage rewrite with a more Compose-idiomatic API, but it's not yet ready for production use.
 
-> **Note**: Navigation 3 is in alpha as of early 2025. The API may change, but the concepts are stable and this is the recommended approach for new projects. If you need production stability now, the older `navigation-compose` (2.x) is still fully supported.
+## Navigation 2.x (Stable — Recommended)
 
-## Setup
+### Setup
 
 Add to `gradle/libs.versions.toml`:
 
 ```toml
 [versions]
-navigation = "3.0.0-alpha10"
+navigation = "2.8.9"
 
 [libraries]
-navigation-compose = { group = "androidx.navigation3", name = "navigation-compose", version.ref = "navigation" }
+navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigation" }
 ```
 
-## Defining Routes
+### Defining Routes
 
-Routes are regular Kotlin classes or objects. Use `@Serializable` for type-safe argument passing:
+Use `@Serializable` classes for type-safe routes (Navigation 2.8+):
 
 ```kotlin
 @Serializable
@@ -36,129 +36,118 @@ object AddTask
 object Settings
 ```
 
-## Setting Up Navigation
+### Setting Up Navigation
 
 ```kotlin
 @Composable
 fun AppNavigation() {
-    // The back stack is just a list of route objects
-    val backStack = rememberMutableStateListOf<Any>(TaskList)
+    val navController = rememberNavController()
 
-    NavDisplay(
-        backStack = backStack,
-        onBack = { backStack.removeLastOrNull() },
-        entryProvider = entryProvider {
-            entry<TaskList> {
-                TaskListScreen(
-                    onNavigateToDetail = { taskId ->
-                        backStack.add(TaskDetail(taskId))
-                    },
-                    onNavigateToAdd = {
-                        backStack.add(AddTask)
-                    },
-                    onNavigateToSettings = {
-                        backStack.add(Settings)
-                    }
-                )
-            }
-
-            entry<TaskDetail> { route ->
-                TaskDetailScreen(
-                    taskId = route.taskId,
-                    onBack = { backStack.removeLastOrNull() }
-                )
-            }
-
-            entry<AddTask> {
-                AddTaskScreen(
-                    onTaskAdded = { backStack.removeLastOrNull() },
-                    onBack = { backStack.removeLastOrNull() }
-                )
-            }
-
-            entry<Settings> {
-                SettingsScreen(
-                    onBack = { backStack.removeLastOrNull() }
-                )
-            }
+    NavHost(navController = navController, startDestination = TaskList) {
+        composable<TaskList> {
+            TaskListScreen(
+                onNavigateToDetail = { taskId ->
+                    navController.navigate(TaskDetail(taskId))
+                },
+                onNavigateToAdd = {
+                    navController.navigate(AddTask)
+                },
+                onNavigateToSettings = {
+                    navController.navigate(Settings)
+                }
+            )
         }
-    )
+
+        composable<TaskDetail> { backStackEntry ->
+            val route: TaskDetail = backStackEntry.toRoute()
+            TaskDetailScreen(
+                taskId = route.taskId,
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable<AddTask> {
+            AddTaskScreen(
+                onTaskAdded = { navController.popBackStack() },
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable<Settings> {
+            SettingsScreen(
+                onBack = { navController.popBackStack() }
+            )
+        }
+    }
 }
 ```
 
-## Key Concepts
+### Key Concepts
 
-### Back Stack as a List
+#### Type-Safe Arguments (2.8+)
 
-Navigation 3's back stack is just a `SnapshotStateList<Any>`. You navigate by adding to it and go back by removing from it. This is simpler and more transparent than the NavController approach.
-
-```kotlin
-// Navigate forward
-backStack.add(TaskDetail(taskId = 42))
-
-// Go back
-backStack.removeLastOrNull()
-
-// Go back to root
-backStack.clear()
-backStack.add(TaskList)
-```
-
-### Type-Safe Arguments
-
-Since routes are Kotlin classes, arguments are type-safe at compile time:
+Navigation 2.8 introduced type-safe routes using `@Serializable` classes — the same approach Navigation 3 uses. This eliminates the old string-based `"route/{argName}"` pattern:
 
 ```kotlin
 @Serializable
 data class TaskDetail(val taskId: Int)
 
-// In the entry provider, access arguments directly:
-entry<TaskDetail> { route ->
+composable<TaskDetail> { backStackEntry ->
+    val route: TaskDetail = backStackEntry.toRoute()
     TaskDetailScreen(taskId = route.taskId)
 }
 ```
 
-No more `navController.getBackStackEntry(...).arguments?.getInt("taskId")`.
+#### ViewModel Scoping
 
-### ViewModel Scoping
-
-ViewModels in Navigation 3 are scoped to their entry automatically when using `hiltViewModel()`:
+ViewModels are scoped to their navigation destination automatically:
 
 ```kotlin
-entry<TaskDetail> { route ->
-    // This ViewModel is scoped to this TaskDetail entry
+composable<TaskDetail> {
     val viewModel: TaskDetailViewModel = hiltViewModel()
     TaskDetailScreen(viewModel = viewModel)
 }
 ```
 
-## Common Navigation Patterns
+### Common Navigation Patterns
 
-### Bottom Navigation
+#### Bottom Navigation
 
 ```kotlin
 @Composable
 fun MainScreen() {
-    val backStack = rememberMutableStateListOf<Any>(TaskList)
-    val currentRoute = backStack.lastOrNull()
+    val navController = rememberNavController()
 
     Scaffold(
         bottomBar = {
+            val navBackStackEntry by navController.currentBackStackEntryAsState()
+            val currentDestination = navBackStackEntry?.destination
+
             NavigationBar {
                 NavigationBarItem(
-                    selected = currentRoute is TaskList,
+                    selected = currentDestination?.hasRoute<TaskList>() == true,
                     onClick = {
-                        backStack.clear()
-                        backStack.add(TaskList)
+                        navController.navigate(TaskList) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
                     },
                     icon = { Icon(Icons.Default.List, contentDescription = "Tasks") },
                     label = { Text("Tasks") }
                 )
                 NavigationBarItem(
-                    selected = currentRoute is Settings,
+                    selected = currentDestination?.hasRoute<Settings>() == true,
                     onClick = {
-                        backStack.clear()
-                        backStack.add(Settings)
+                        navController.navigate(Settings) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
                     },
                     icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
                     label = { Text("Settings") }
@@ -166,81 +155,53 @@ fun MainScreen() {
             }
         }
     ) { paddingValues ->
-        Box(modifier = Modifier.padding(paddingValues)) {
-            NavDisplay(
-                backStack = backStack,
-                onBack = { backStack.removeLastOrNull() },
-                entryProvider = entryProvider {
-                    entry<TaskList> { /* ... */ }
-                    entry<Settings> { /* ... */ }
-                    entry<TaskDetail> { /* ... */ }
-                }
-            )
+        NavHost(
+            navController = navController,
+            startDestination = TaskList,
+            modifier = Modifier.padding(paddingValues)
+        ) {
+            composable<TaskList> { /* ... */ }
+            composable<Settings> { /* ... */ }
+            composable<TaskDetail> { /* ... */ }
         }
     }
 }
 ```
 
-### Passing Results Back
+#### Passing Results Back
 
-Since the back stack is a simple list, passing results back is straightforward:
+Use `SavedStateHandle` on the previous back stack entry:
 
 ```kotlin
-@Composable
-fun AppNavigation() {
-    val backStack = rememberMutableStateListOf<Any>(TaskList)
-    var lastAddedTaskId by remember { mutableStateOf<Int?>(null) }
+// In the destination that produces a result
+navController.previousBackStackEntry?.savedStateHandle?.set("taskAdded", taskId)
+navController.popBackStack()
 
-    NavDisplay(
-        backStack = backStack,
-        onBack = { backStack.removeLastOrNull() },
-        entryProvider = entryProvider {
-            entry<TaskList> {
-                // React to result
-                LaunchedEffect(lastAddedTaskId) {
-                    lastAddedTaskId?.let { id ->
-                        // Show snackbar, scroll to item, etc.
-                        lastAddedTaskId = null
-                    }
-                }
-                TaskListScreen(
-                    onNavigateToAdd = { backStack.add(AddTask) }
-                )
-            }
-
-            entry<AddTask> {
-                AddTaskScreen(
-                    onTaskAdded = { taskId ->
-                        lastAddedTaskId = taskId
-                        backStack.removeLastOrNull()
-                    }
-                )
-            }
-        }
-    )
-}
+// In the destination that receives the result
+val resultTaskId = navController.currentBackStackEntry
+    ?.savedStateHandle
+    ?.getStateFlow<Int?>("taskAdded", null)
+    ?.collectAsStateWithLifecycle()
 ```
 
-### Deep Links
+#### Deep Links
 
 ```kotlin
-entry<TaskDetail>(
-    metadata = NavEntryMetadata(
-        deepLinks = listOf(
-            navDeepLink<TaskDetail>(basePath = "myapp://tasks")
-        )
+composable<TaskDetail>(
+    deepLinks = listOf(
+        navDeepLink<TaskDetail>(basePath = "myapp://tasks")
     )
-) { route ->
+) { backStackEntry ->
+    val route: TaskDetail = backStackEntry.toRoute()
     TaskDetailScreen(taskId = route.taskId)
 }
 ```
 
-## Using Navigation 2.x (Stable Alternative)
+#### String-Based Routes (Legacy Pattern)
 
-If you need production stability, the older navigation-compose works well:
+If working with an older codebase that uses string routes:
 
 ```kotlin
-// Routes as strings
 const val TASK_LIST = "task_list"
 const val TASK_DETAIL = "task_detail/{taskId}"
 
@@ -260,4 +221,62 @@ NavHost(navController = navController, startDestination = TASK_LIST) {
 }
 ```
 
-Navigation 3 is simpler and more type-safe — prefer it for new projects.
+Prefer the type-safe `@Serializable` approach for new code.
+
+## Navigation 3 (Alpha Preview)
+
+> **Warning**: Navigation 3 is in alpha (`3.0.0-alpha10` as of early 2025). The API may have breaking changes between releases. Use it for experimentation and prototyping, not production apps.
+
+Navigation 3 replaces `NavHost`/`NavController` with a simpler list-based back stack. The back stack is just a `SnapshotStateList<Any>` — you navigate by adding to it and go back by removing from it.
+
+### Setup
+
+```toml
+[versions]
+nav3 = "3.0.0-alpha10"
+
+[libraries]
+navigation3-compose = { group = "androidx.navigation3", name = "navigation-compose", version.ref = "nav3" }
+```
+
+### Basic Usage
+
+```kotlin
+@Composable
+fun AppNavigation() {
+    val backStack = rememberMutableStateListOf<Any>(TaskList)
+
+    NavDisplay(
+        backStack = backStack,
+        onBack = { backStack.removeLastOrNull() },
+        entryProvider = entryProvider {
+            entry<TaskList> {
+                TaskListScreen(
+                    onNavigateToDetail = { taskId ->
+                        backStack.add(TaskDetail(taskId))
+                    }
+                )
+            }
+
+            entry<TaskDetail> { route ->
+                TaskDetailScreen(
+                    taskId = route.taskId,
+                    onBack = { backStack.removeLastOrNull() }
+                )
+            }
+        }
+    )
+}
+```
+
+### Why Nav 3 Is Interesting
+
+- **Back stack is transparent** — it's a regular Kotlin list, not a framework abstraction
+- **No NavController** — navigation is just list operations (`add`, `removeLastOrNull`, `clear`)
+- **Same type-safe routes** — uses the same `@Serializable` route classes as Nav 2.8+
+
+### When to Use Nav 3
+
+- **Side projects and prototypes** where alpha instability is acceptable
+- **Learning** the direction Jetpack Navigation is heading
+- **Not recommended** for production apps shipping to users

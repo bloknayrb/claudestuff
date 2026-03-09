@@ -208,14 +208,16 @@ fun PermissionWithSettingsFallback(
 Starting with Android 13, apps need to request `POST_NOTIFICATIONS`:
 
 ```kotlin
-// Check if we need to request (only on API 33+)
-if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-    val notificationPermission = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        // Notifications will work regardless — they just won't show if denied
-    }
+// Always declare the launcher unconditionally — Compose requires
+// remember* calls to run on every recomposition, not inside conditionals.
+val notificationPermission = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.RequestPermission()
+) { granted ->
+    // Notifications will work regardless — they just won't show if denied
+}
 
+// Only request on API 33+
+if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
     LaunchedEffect(Unit) {
         if (ContextCompat.checkSelfPermission(
                 context, Manifest.permission.POST_NOTIFICATIONS

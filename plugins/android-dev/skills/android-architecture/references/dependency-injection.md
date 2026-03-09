@@ -248,7 +248,25 @@ class TaskListViewModelTest {
 
 ### Integration Tests (With Hilt)
 
-For integration tests that need real DI:
+For integration tests that need real DI, first create a custom test runner:
+
+```kotlin
+// Create: app/src/androidTest/java/.../HiltTestRunner.kt
+class HiltTestRunner : AndroidJUnitRunner() {
+    override fun newApplication(cl: ClassLoader?, name: String?, context: Context?): Application {
+        return super.newApplication(cl, HiltTestApplication::class.java.name, context)
+    }
+}
+```
+
+Then reference it in your `build.gradle.kts`:
+```kotlin
+defaultConfig {
+    testInstrumentationRunner = "com.example.myapp.HiltTestRunner"
+}
+```
+
+Now write Hilt integration tests:
 
 ```kotlin
 @HiltAndroidTest

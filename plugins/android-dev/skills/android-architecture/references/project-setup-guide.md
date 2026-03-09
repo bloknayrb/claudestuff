@@ -79,12 +79,14 @@ The generated project puts everything in `MainActivity`. Here's how to restructu
 
 In `gradle/libs.versions.toml`, add:
 
+> **Version freshness**: The versions below were current as of early 2025. Before starting a new project, check [Google's Maven Repository](https://maven.google.com) or use Android Studio's dependency update suggestions to get the latest stable versions.
+
 ```toml
 [versions]
 hilt = "2.51.1"
 hilt-navigation-compose = "1.2.0"
 lifecycle = "2.8.7"
-navigation = "3.0.0-alpha10"
+navigation = "2.8.9"
 room = "2.6.1"
 ksp = "2.1.0-1.0.29"
 
@@ -94,7 +96,7 @@ hilt-compiler = { group = "com.google.dagger", name = "hilt-android-compiler", v
 hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-compose", version.ref = "hilt-navigation-compose" }
 lifecycle-runtime-compose = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "lifecycle" }
 lifecycle-viewmodel-compose = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-compose", version.ref = "lifecycle" }
-navigation-compose = { group = "androidx.navigation3", name = "navigation-compose", version.ref = "navigation" }
+navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigation" }
 room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
 room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
 room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }

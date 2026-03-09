@@ -98,5 +98,5 @@ Always include these — they're not optional:
 ## References
 
 - `references/compose-patterns.md` — Component patterns with complete code examples
-- `references/navigation-guide.md` — Jetpack Navigation 3 setup and patterns
+- `references/navigation-guide.md` — Jetpack Navigation setup and patterns (Nav 2.x stable + Nav 3 preview)
 - `references/state-management.md` — StateFlow, UiState, recomposition, and testing state

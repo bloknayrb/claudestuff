@@ -21,6 +21,8 @@ project-root/
 
 The version catalog (`gradle/libs.versions.toml`) centralizes all dependency versions:
 
+> **Version freshness**: The versions below were current as of early 2025. Before starting a new project, check [Google's Maven Repository](https://maven.google.com) or use Android Studio's dependency update suggestions to get the latest stable versions.
+
 ```toml
 [versions]
 agp = "8.7.3"
@@ -34,7 +36,7 @@ retrofit = "2.11.0"
 okhttp = "4.12.0"
 coil = "3.0.4"
 coroutines = "1.9.0"
-navigation = "3.0.0-alpha10"
+navigation = "2.8.9"
 junit5 = "5.10.3"
 mockk = "1.13.13"
 turbine = "1.2.0"
@@ -55,7 +57,7 @@ lifecycle-runtime-compose = { group = "androidx.lifecycle", name = "lifecycle-ru
 lifecycle-viewmodel-compose = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-compose", version.ref = "lifecycle" }
 
 # Navigation
-navigation-compose = { group = "androidx.navigation3", name = "navigation-compose", version.ref = "navigation" }
+navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigation" }
 
 # Hilt
 hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }
@@ -123,6 +125,8 @@ android {
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // For Hilt instrumented tests, override with a custom runner:
+        // testInstrumentationRunner = "com.example.myapp.HiltTestRunner"
     }
 
     buildTypes {
