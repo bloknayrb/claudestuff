@@ -38,18 +38,18 @@ Before writing any code, understand:
 
 | User Signal | Skill | Primary Reference |
 |---|---|---|
-| New project, "build an app" | android-architecture | `references/project-setup-guide.md` |
-| Architecture, MVVM, Clean Architecture | android-architecture | `references/architecture-patterns.md` |
-| Hilt, dependency injection | android-architecture | `references/dependency-injection.md` |
-| Compose UI, screens, components, layouts | compose-ui | `references/compose-patterns.md` |
-| Navigation between screens | compose-ui | `references/navigation-guide.md` |
-| State, recomposition, StateFlow | compose-ui | `references/state-management.md` |
-| Permissions, camera, location, notifications | android-platform | `references/permissions-guide.md` |
-| Predictive Back, Credential Manager, Photo Picker | android-platform | `references/platform-features.md` |
-| Crashes, build errors, Gradle failures | android-platform | `references/troubleshooting.md` |
-| Unit tests, UI tests, testing strategy | build-test-publish | `references/testing-strategy.md` |
-| Gradle config, version catalogs, KSP | build-test-publish | `references/gradle-guide.md` |
-| Play Store, signing, release, publishing | build-test-publish | `references/publishing-checklist.md` |
+| New project, "build an app" | android-architecture | `skills/android-architecture/references/project-setup-guide.md` |
+| Architecture, MVVM, Clean Architecture | android-architecture | `skills/android-architecture/references/architecture-patterns.md` |
+| Hilt, dependency injection | android-architecture | `skills/android-architecture/references/dependency-injection.md` |
+| Compose UI, screens, components, layouts | compose-ui | `skills/compose-ui/references/compose-patterns.md` |
+| Navigation between screens | compose-ui | `skills/compose-ui/references/navigation-guide.md` |
+| State, recomposition, StateFlow | compose-ui | `skills/compose-ui/references/state-management.md` |
+| Permissions, camera, location, notifications | android-platform | `skills/android-platform/references/permissions-guide.md` |
+| Predictive Back, Credential Manager, Photo Picker | android-platform | `skills/android-platform/references/platform-features.md` |
+| Crashes, build errors, Gradle failures | android-platform | `skills/android-platform/references/troubleshooting.md` |
+| Unit tests, UI tests, testing strategy | build-test-publish | `skills/build-test-publish/references/testing-strategy.md` |
+| Gradle config, version catalogs, KSP | build-test-publish | `skills/build-test-publish/references/gradle-guide.md` |
+| Play Store, signing, release, publishing | build-test-publish | `skills/build-test-publish/references/publishing-checklist.md` |
 
 ### 3. Generate Code and Guidance
 

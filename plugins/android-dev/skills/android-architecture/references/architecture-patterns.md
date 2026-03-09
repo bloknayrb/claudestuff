@@ -58,6 +58,7 @@ interface TaskDao {
 **Database**:
 
 ```kotlin
+// Set exportSchema = true and configure a schema directory for production apps with migrations
 @Database(entities = [Task::class], version = 1, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun taskDao(): TaskDao
@@ -156,7 +157,8 @@ fun TaskListScreen(
         onAddTask = viewModel::addTask,
         onToggleTask = viewModel::toggleTaskCompletion,
         onDeleteTask = viewModel::deleteTask,
-        onTaskClick = { task -> onNavigateToDetail(task.id) }
+        onTaskClick = { task -> onNavigateToDetail(task.id) },
+        onAddTaskClick = { /* show add-task dialog */ }
     )
 }
 
@@ -166,11 +168,12 @@ private fun TaskListContent(
     onAddTask: (String, String) -> Unit,
     onToggleTask: (Task) -> Unit,
     onDeleteTask: (Task) -> Unit,
-    onTaskClick: (Task) -> Unit
+    onTaskClick: (Task) -> Unit,
+    onAddTaskClick: () -> Unit
 ) {
     Scaffold(
         floatingActionButton = {
-            FloatingActionButton(onClick = { /* show add dialog */ }) {
+            FloatingActionButton(onClick = onAddTaskClick) {
                 Icon(Icons.Default.Add, contentDescription = "Add task")
             }
         }
