@@ -69,6 +69,11 @@
       "description": "Career development coaching: GROW model, RIASEC assessment, resume/ATS optimization, STAR interview practice, and salary negotiation"
     },
     {
+      "name": "android-dev",
+      "source": "./plugins/android-dev",
+      "description": "Android app development: Jetpack Compose, Kotlin, MVVM architecture, project scaffolding, troubleshooting, and Play Store publishing"
+    },
+    {
       "name": "boop-scripting",
       "source": "./skills/boop-scripting",
       "description": "Woop/Boop script API reference, patterns, and template for Windows text transforms"
