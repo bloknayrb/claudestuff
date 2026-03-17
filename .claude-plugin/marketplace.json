@@ -77,6 +77,11 @@
       "name": "boop-scripting",
       "source": "./skills/boop-scripting",
       "description": "Woop/Boop script API reference, patterns, and template for Windows text transforms"
+    },
+    {
+      "name": "anti-slop",
+      "source": "./plugins/anti-slop",
+      "description": "Pre-PR branch quality audit — catches description-diff misalignment, commit hygiene issues, and template compliance"
     }
   ]
 }
