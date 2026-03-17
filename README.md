@@ -24,6 +24,8 @@
 | **Personal Finance** | Budgeting, investing, financial planning | personal-finance |
 | **Career Coaching** | Career exploration, resume review, interview prep | career-coach |
 | **Android Development** | Jetpack Compose, Kotlin, architecture, publishing | android-dev |
+| **Image Generation** | Prompt engineering for Nano Banana MCP | nanobanana |
+| **CLI Patterns** | Obsidian CLI decision frameworks and workflow recipes | obsidian-cli-patterns |
 | **Learning** | How plugins work | example-plugin |
 
 ## Plugins at a Glance
@@ -47,6 +49,8 @@ Are you...
 ├── Building Obsidian automation?
 │   ├── Want vault maintenance?
 │   │   └── → obsidian-vault-management (sweeping, validation)
+│   ├── Want CLI workflow expertise?
+│   │   └── → obsidian-cli-patterns (decision frameworks, recipes, pitfalls)
 │   └── Want task/project tracking?
 │       └── → automation (/track, /update-projects)
 │
@@ -61,6 +65,9 @@ Are you...
 │
 ├── Building an Android app?
 │   └── → android-dev (Compose, Kotlin, architecture, publishing)
+│
+├── Generating images with Nano Banana?
+│   └── → nanobanana (prompt engineering, model selection, grounding)
 │
 └── Adding memory to Claude Code?
     └── → simplemem-memory (temporal project memory)
@@ -80,6 +87,8 @@ Are you...
 | **personal-finance** | Easy | Low | Personal finance education |
 | **career-coach** | Easy | Low | Career coaching and interview prep |
 | **android-dev** | Easy | Low | Android app development guidance |
+| **nanobanana** | Easy | Low | Image generation prompt optimization |
+| **obsidian-cli-patterns** | Easy | Low | Obsidian CLI workflow expertise |
 | **transaction-analysis** | Low | High | Toll industry analysis |
 
 **Complexity Key:**
@@ -202,6 +211,30 @@ Are you...
 **Agents**: Android Dev (routing agent for all Android tasks)
 
 **Use for**: Building Android apps with Kotlin and Jetpack Compose, from first project to Play Store
+
+---
+
+### nanobanana
+
+**What**: Image generation prompting skill for the Nano Banana MCP server
+
+**Skills**: Image Generation (model selection, prompt engineering, visual grounding, cost optimization)
+
+**Use for**: Writing better image prompts, choosing the right model tier, optimizing generation costs
+
+**Requires**: Nano Banana MCP server configured and running
+
+---
+
+### obsidian-cli-patterns
+
+**What**: Obsidian CLI behavioral patterns — decision frameworks, workflow recipes, and pitfalls
+
+**Skills**: CLI Patterns (when to use CLI vs direct file ops, 8 workflow recipes, 9 documented pitfalls)
+
+**Use for**: Building vault automation workflows, choosing CLI vs direct file operations, avoiding common CLI mistakes
+
+**Complements**: Official obsidian-cli skill (kepano) — that covers syntax, this covers behavior
 
 ---
 

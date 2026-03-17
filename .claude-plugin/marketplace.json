@@ -77,6 +77,16 @@
       "name": "boop-scripting",
       "source": "./skills/boop-scripting",
       "description": "Woop/Boop script API reference, patterns, and template for Windows text transforms"
+    },
+    {
+      "name": "nanobanana",
+      "source": "./plugins/nanobanana",
+      "description": "Image generation prompting skill for the Nano Banana MCP server — model selection, prompt engineering, visual grounding, and cost optimization"
+    },
+    {
+      "name": "obsidian-cli-patterns",
+      "source": "./plugins/obsidian-cli-patterns",
+      "description": "Obsidian CLI behavioral patterns: decision frameworks, workflow recipes, and common pitfalls for vault automation"
     }
   ]
 }

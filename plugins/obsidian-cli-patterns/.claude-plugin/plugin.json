@@ -1,0 +1,9 @@
+{
+  "name": "obsidian-cli-patterns",
+  "version": "1.0.0",
+  "description": "Obsidian CLI behavioral patterns: decision frameworks, workflow recipes, and common pitfalls for vault automation",
+  "author": {
+    "name": "bloknayrb"
+  },
+  "repository": "https://github.com/bloknayrb/claudestuff"
+}
