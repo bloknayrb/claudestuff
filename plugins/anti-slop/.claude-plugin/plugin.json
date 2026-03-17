@@ -1,0 +1,8 @@
+{
+  "name": "anti-slop",
+  "version": "1.0.0",
+  "description": "Pre-PR branch quality audit inspired by anti-slop heuristics",
+  "author": {
+    "name": "Bryan Kolb"
+  }
+}

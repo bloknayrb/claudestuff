@@ -1,0 +1,11 @@
+[
+  {
+    "event": "PreToolUse",
+    "hooks": [
+      {
+        "matcher": "Bash",
+        "command": "if echo \"$TOOL_INPUT\" | grep -q 'gh pr create'; then echo 'Consider running the anti-slop audit agent before creating this PR to verify description-diff alignment and commit quality.'; fi"
+      }
+    ]
+  }
+]
