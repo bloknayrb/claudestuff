@@ -39,11 +39,6 @@
       "description": "Office document skills for Claude Code — PPTX, DOCX, XLSX, and PDF workflows"
     },
     {
-      "name": "simplemem-memory",
-      "source": "./plugins/simplemem-memory",
-      "description": "SimpleMem MCP integration for project-specific temporal memory — decisions, action items, milestones with date context"
-    },
-    {
       "name": "toll-consulting",
       "source": "./plugins/toll-consulting",
       "description": "Toll industry agents and skills: operations consulting, procurement, and document review"
