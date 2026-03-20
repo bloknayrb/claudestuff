@@ -77,6 +77,11 @@
       "name": "anti-slop",
       "source": "./plugins/anti-slop",
       "description": "Pre-PR branch quality audit — catches description-diff misalignment, commit hygiene issues, and template compliance"
+    },
+    {
+      "name": "simplemem-memory",
+      "source": "./plugins/simplemem-memory",
+      "description": "SimpleMem MCP integration for project-specific temporal memory — decisions, action items, milestones with date context"
     }
   ]
 }
