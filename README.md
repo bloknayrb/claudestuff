@@ -62,6 +62,9 @@ Are you...
 ├── Building an Android app?
 │   └── → android-dev (Compose, Kotlin, architecture, publishing)
 │
+├── Updating repo documentation?
+│   └── → documentation-updater (skill: audit, generate, update docs)
+│
 └── Adding memory to Claude Code?
     └── → simplemem-memory (temporal project memory)
 ```
@@ -232,6 +235,7 @@ Skills in the `skills/` directory work independently of plugins:
 | task-management | TaskNote creation patterns |
 | invoice-timesheet-verification | Timesheet reconciliation |
 | boop-scripting | Woop/Boop script API, patterns, and template for Windows text transforms |
+| documentation-updater | Full-lifecycle doc management: audit, generate, update README/CHANGELOG/CONTRIBUTING/code docs |
 
 ## Creating Your Own
 
