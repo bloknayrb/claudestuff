@@ -83,12 +83,12 @@ Not all five are always necessary. If the user has 500+ words from other sources
 
 **Standard usage — text via stdin:**
 ```bash
-echo "$TEXT" | uv run ${CLAUDE_PLUGIN_ROOT}/skills/style-analysis/scripts/style_metrics.py --json
+printf '%s' "$TEXT" | uv run ${CLAUDE_PLUGIN_ROOT}/skills/style-analysis/scripts/style_metrics.py --json
 ```
 
 **Compare new text against an existing profile:**
 ```bash
-echo "$TEXT" | uv run ${CLAUDE_PLUGIN_ROOT}/skills/style-analysis/scripts/style_metrics.py --json --compare ~/.claude/ghostwriter-profiles/name.json
+printf '%s' "$TEXT" | uv run ${CLAUDE_PLUGIN_ROOT}/skills/style-analysis/scripts/style_metrics.py --json --compare ~/.claude/ghostwriter-profiles/name.json
 ```
 
 **Analyze a text file directly:**
