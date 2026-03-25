@@ -52,8 +52,8 @@ Do you need visual grounding (Google Search image lookup)?
 | Tier | `model_tier` value | Best for | Thinking | Grounding | Max resolution |
 |------|--------------------|----------|----------|-----------|----------------|
 | NB1 | `flash` | Legacy pipelines, cheapest option | No | No | 1024px |
-| NB2 | `nb2` | **Default for all new work** | See note | See note | 4K |
-| Pro | `pro` | Edge cases, grounding, complex reasoning | Yes | Yes | 4K |
+| NB2 | `nb2` | **Default for all new work** | See note | See note — set `enable_grounding: false` explicitly | 4K |
+| Pro | `pro` | Edge cases, grounding, complex reasoning | Yes | Yes (default) | 4K |
 
 ---
 
