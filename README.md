@@ -18,12 +18,14 @@
 |----------|-------------|---------|
 | **Patterns** | Reusable architecture anyone can adopt | [skills/shared/](skills/) |
 | **Reference Implementations** | Working commands - study the structure | automation, obsidian-vault-management |
+| **Obsidian Productivity** | Task tracking, email triage, standups, timesheets | obsidian-productivity |
 | **Domain Tools** | Specialized for specific work | transaction-analysis, toll-consulting, professional-agents |
 | **Office Automation** | Document creation and editing | ms-office-suite |
-| **Memory Integration** | Context persistence | simplemem-memory |
 | **Personal Finance** | Budgeting, investing, financial planning | personal-finance |
 | **Career Coaching** | Career exploration, resume review, interview prep | career-coach |
 | **Android Development** | Jetpack Compose, Kotlin, architecture, publishing | android-dev |
+| **Code Quality** | Pre-PR branch auditing and hygiene | anti-slop |
+| **Personal Focus** | Executive function support, getting unstuck | focus-tools |
 | **Learning** | How plugins work | example-plugin |
 
 ## Plugins at a Glance
@@ -32,6 +34,9 @@
 
 ```
 Are you...
+├── Feeling overwhelmed or stuck?
+│   └── → focus-tools (/sos cuts through to ONE next action)
+│
 ├── Learning how plugins work?
 │   └── → example-plugin (shows all component types)
 │
@@ -47,8 +52,10 @@ Are you...
 ├── Building Obsidian automation?
 │   ├── Want vault maintenance?
 │   │   └── → obsidian-vault-management (sweeping, validation)
-│   └── Want task/project tracking?
-│       └── → automation (/track, /update-projects)
+│   ├── Want task/project tracking?
+│   │   └── → automation (/track, /update-projects)
+│   └── Want daily standups, email triage, timesheets?
+│       └── → obsidian-productivity (full productivity stack)
 │
 ├── Analyzing toll transaction data?
 │   └── → transaction-analysis (VDOT, DelDOT, MDTA, DRPA)
@@ -62,8 +69,11 @@ Are you...
 ├── Building an Android app?
 │   └── → android-dev (Compose, Kotlin, architecture, publishing)
 │
-└── Adding memory to Claude Code?
-    └── → simplemem-memory (temporal project memory)
+├── Adding memory to Claude Code?
+│   └── → memory-router skill (routes to SimpleMem or OpenMemory)
+│
+└── Checking branch quality before a PR?
+    └── → anti-slop (audit agent + pre-PR hooks)
 ```
 
 ### Complexity Ratings
@@ -71,10 +81,12 @@ Are you...
 | Plugin | Setup | Customization | Best For |
 |--------|-------|---------------|----------|
 | **example-plugin** | Easy | None needed | Learning plugin structure |
+| **focus-tools** | Easy | None needed | Getting unstuck, executive function |
 | **professional-agents** | Easy | Low | Adding role-based agents |
 | **toll-consulting** | Easy | Low | Toll industry consulting |
+| **anti-slop** | Easy | Low | Pre-PR branch quality auditing |
 | **ms-office-suite** | Medium | Low | Office document automation |
-| **simplemem-memory** | Medium | Low | Project context memory |
+| **obsidian-productivity** | Medium | Medium | Obsidian task tracking and productivity |
 | **obsidian-vault-management** | Hard | High | Obsidian vault maintenance |
 | **automation** | Hard | High | Task tracking patterns |
 | **personal-finance** | Easy | Low | Personal finance education |
@@ -108,6 +120,16 @@ Are you...
 **Use for**: Studying comprehensive task tracking patterns, incremental scanning logic
 
 **Note**: Reference implementation - expects specific vault structure
+
+---
+
+### obsidian-productivity
+
+**What**: Complete Obsidian productivity stack — task tracking, email triage, standups, and timesheets
+
+**Components**: `/track`, `/daily-standup`, `/email-triage`, `/capture-time`, `/timesheet` commands; Email Classification skill, Time Tracking skill
+
+**Use for**: Daily workflow management in Obsidian — tracking tasks, triaging email, generating timesheets, running standups
 
 ---
 
@@ -157,15 +179,13 @@ Are you...
 
 ---
 
-### simplemem-memory
+### focus-tools
 
-**What**: SimpleMem MCP integration for project memory
+**What**: Executive function support for getting unstuck
 
-**Skills**: Temporal memory management, meeting context
+**Components**: `/sos` command, Executive Function Support skill
 
-**Use for**: Storing project decisions, action items, milestones with date context
-
-**Requires**: SimpleMem MCP server
+**Use for**: Cutting through overwhelm to identify ONE next action when you're stuck or paralyzed by a long task list
 
 ---
 
@@ -202,6 +222,16 @@ Are you...
 **Agents**: Android Dev (routing agent for all Android tasks)
 
 **Use for**: Building Android apps with Kotlin and Jetpack Compose, from first project to Play Store
+
+---
+
+### anti-slop
+
+**What**: Pre-PR branch quality auditing — catches the things you forget to check before opening a pull request
+
+**Components**: Audit agent, pre-PR hooks
+
+**Use for**: Verifying description-diff alignment, commit hygiene, template compliance, and branch quality before creating PRs
 
 ---
 
