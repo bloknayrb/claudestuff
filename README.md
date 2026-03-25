@@ -24,6 +24,7 @@
 | **Personal Finance** | Budgeting, investing, financial planning | personal-finance |
 | **Career Coaching** | Career exploration, resume review, interview prep | career-coach |
 | **Android Development** | Jetpack Compose, Kotlin, architecture, publishing | android-dev |
+| **Writing** | Learn your style, write in your voice | ghostwriter |
 | **Learning** | How plugins work | example-plugin |
 
 ## Plugins at a Glance
@@ -65,6 +66,9 @@ Are you...
 ├── Updating repo documentation?
 │   └── → documentation-updater (skill: audit, generate, update docs)
 │
+├── Writing in your own voice?
+│   └── → ghostwriter (learn style, draft, rewrite, critique)
+│
 └── Adding memory to Claude Code?
     └── → simplemem-memory (temporal project memory)
 ```
@@ -83,6 +87,7 @@ Are you...
 | **personal-finance** | Easy | Low | Personal finance education |
 | **career-coach** | Easy | Low | Career coaching and interview prep |
 | **android-dev** | Easy | Low | Android app development guidance |
+| **ghostwriter** | Easy | Low | Writing in your voice |
 | **transaction-analysis** | Low | High | Toll industry analysis |
 
 **Complexity Key:**
@@ -205,6 +210,20 @@ Are you...
 **Agents**: Android Dev (routing agent for all Android tasks)
 
 **Use for**: Building Android apps with Kotlin and Jetpack Compose, from first project to Play Store
+
+---
+
+### ghostwriter
+
+**What**: Writing style learning and voice profile ghostwriting
+
+**Commands**: `/learn-my-style`, `/ghostwrite`
+
+**Agents**: Ghostwriter (draft, rewrite, critique, tone shift, analyze)
+
+**Skills**: Style Analysis (six dimensions, metavoice synthesis, quantitative metrics)
+
+**Use for**: Learning your writing style from samples, drafting in your voice, rewriting text to match your style, comparing writing against your profile
 
 ---
 
