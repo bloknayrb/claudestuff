@@ -82,6 +82,11 @@
       "name": "documentation-updater",
       "source": "./skills/documentation-updater",
       "description": "Full-lifecycle documentation management: detect project type, audit doc quality, generate/update README, CHANGELOG, CONTRIBUTING, and code docs for any repository"
+    },
+    {
+      "name": "nanobanana",
+      "source": "./plugins/nanobanana",
+      "description": "Image generation prompting skill for the Nano Banana MCP server — model selection, prompt engineering, visual grounding, and cost optimization"
     }
   ]
 }

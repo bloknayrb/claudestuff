@@ -1,0 +1,9 @@
+{
+  "name": "nanobanana",
+  "version": "1.0.0",
+  "description": "Image generation prompting skill for the Nano Banana MCP server",
+  "author": {
+    "name": "bloknayrb"
+  },
+  "repository": "https://github.com/bloknayrb/claudestuff"
+}
