@@ -1,0 +1,8 @@
+{
+  "name": "ghostwriter",
+  "version": "1.0.0",
+  "description": "Learn a user's writing style from samples, store named voice profiles, then draft, rewrite, critique, and tone-shift in that voice.",
+  "author": {
+    "name": "bloknayrb"
+  }
+}

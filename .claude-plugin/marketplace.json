@@ -87,6 +87,11 @@
       "name": "nanobanana",
       "source": "./plugins/nanobanana",
       "description": "Image generation prompting skill for the Nano Banana MCP server — model selection, prompt engineering, visual grounding, and cost optimization"
+    },
+    {
+      "name": "ghostwriter",
+      "source": "./plugins/ghostwriter",
+      "description": "Learn a user's writing style from samples, store named voice profiles, then draft, rewrite, critique, and tone-shift in that voice"
     }
   ]
 }

@@ -25,6 +25,7 @@
 | **Career Coaching** | Career exploration, resume review, interview prep | career-coach |
 | **Android Development** | Jetpack Compose, Kotlin, architecture, publishing | android-dev |
 | **Image Generation** | AI image prompting for Nano Banana MCP | nanobanana |
+| **Writing** | Learn your style, write in your voice | ghostwriter |
 | **Learning** | How plugins work | example-plugin |
 
 ## Plugins at a Glance
@@ -69,6 +70,9 @@ Are you...
 ├── Generating images with Nano Banana?
 │   └── → nanobanana (model selection, prompt engineering, visual grounding)
 │
+├── Writing in your own voice?
+│   └── → ghostwriter (learn style, draft, rewrite, critique)
+│
 └── Adding memory to Claude Code?
     └── → simplemem-memory (temporal project memory)
 ```
@@ -88,6 +92,7 @@ Are you...
 | **career-coach** | Easy | Low | Career coaching and interview prep |
 | **android-dev** | Easy | Low | Android app development guidance |
 | **nanobanana** | Easy | Medium | Image generation prompting |
+| **ghostwriter** | Easy | Low | Writing in your voice |
 | **transaction-analysis** | Low | High | Toll industry analysis |
 
 **Complexity Key:**
@@ -222,6 +227,20 @@ Are you...
 **Use for**: AI image generation with Gemini models — crafting effective prompts, choosing the right model tier, multi-image editing workflows
 
 **Requires**: Nano Banana MCP server configured and running
+
+---
+
+### ghostwriter
+
+**What**: Writing style learning and voice profile ghostwriting
+
+**Commands**: `/learn-my-style`, `/ghostwrite`
+
+**Agents**: Ghostwriter (draft, rewrite, critique, tone shift, analyze)
+
+**Skills**: Style Analysis (six dimensions, metavoice synthesis, quantitative metrics)
+
+**Use for**: Learning your writing style from samples, drafting in your voice, rewriting text to match your style, comparing writing against your profile
 
 ---
 
