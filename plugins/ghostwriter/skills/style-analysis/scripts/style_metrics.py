@@ -27,6 +27,7 @@ from collections import Counter
 ABBREVIATIONS = {
     "dr", "mr", "mrs", "ms", "prof", "sr", "jr", "st",
     "vs", "etc", "inc", "ltd", "corp", "dept", "univ",
+    "e.g", "i.e", "et al",
     "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
     "mon", "tue", "wed", "thu", "fri", "sat", "sun",
     "fig", "eq", "vol", "no", "op", "approx", "est",
@@ -334,8 +335,16 @@ def analyze(text: str) -> dict:
 
 def compare_metrics(input_metrics: dict, profile_path: str) -> dict:
     """Compare input metrics against a saved profile."""
-    with open(os.path.expanduser(profile_path), encoding="utf-8") as f:
-        profile = json.load(f)
+    expanded = os.path.expanduser(profile_path)
+    try:
+        with open(expanded, encoding="utf-8") as f:
+            profile = json.load(f)
+    except FileNotFoundError:
+        print(f"Error: Profile not found: {expanded}", file=sys.stderr)
+        sys.exit(1)
+    except json.JSONDecodeError as e:
+        print(f"Error: Malformed profile JSON: {expanded}: {e}", file=sys.stderr)
+        sys.exit(1)
 
     profile_metrics = profile.get("metrics", {})
 
@@ -343,7 +352,6 @@ def compare_metrics(input_metrics: dict, profile_path: str) -> dict:
     thresholds = {
         "sentence_length_mean": 5.0,
         "sentence_length_median": 5.0,
-        "sentence_length_std": 4.0,
         "mattr": 0.08,
         "contraction_rate": 1.5,
         "passive_voice_heuristic": 10.0,

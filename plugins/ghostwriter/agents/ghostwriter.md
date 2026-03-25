@@ -100,7 +100,7 @@ If ambiguous or spans multiple modes, ask ONE clarifying question before proceed
 
 - Run style_metrics.py on the input text:
   ```bash
-  echo "$TEXT" | uv run ${CLAUDE_PLUGIN_ROOT}/skills/style-analysis/scripts/style_metrics.py --json --compare ~/.claude/ghostwriter-profiles/PROFILE_NAME.json
+  printf '%s' "$TEXT" | uv run ${CLAUDE_PLUGIN_ROOT}/skills/style-analysis/scripts/style_metrics.py --json --compare ~/.claude/ghostwriter-profiles/PROFILE_NAME.json
   ```
 - Present a structured comparison table: dimension, profile baseline, input measurement, delta, assessment (match / slight deviation / significant deviation ***).
 - Then provide a narrative summary: what matches well, what deviates, and specific revision suggestions.
@@ -118,7 +118,7 @@ If ambiguous or spans multiple modes, ask ONE clarifying question before proceed
 
 - Run style_metrics.py on the provided text:
   ```bash
-  echo "$TEXT" | uv run ${CLAUDE_PLUGIN_ROOT}/skills/style-analysis/scripts/style_metrics.py --json
+  printf '%s' "$TEXT" | uv run ${CLAUDE_PLUGIN_ROOT}/skills/style-analysis/scripts/style_metrics.py --json
   ```
 - Describe the writing style in natural language, covering all six dimensions.
 - Highlight what's distinctive or unusual.
