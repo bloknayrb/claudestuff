@@ -4,6 +4,24 @@ All notable changes to the claudestuff marketplace will be documented in this fi
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **personal-finance** plugin: budgeting, investing, and financial planning grounded in Bogleheads philosophy (PR #6)
+- **career-coach** plugin: GROW model coaching, RIASEC assessment, ATS resume optimization, STAR interview practice, salary negotiation (PR #6)
+- **toll-consulting** plugin: Toll Consultant and Toll Procurement Consultant agents, document review skill for owner's representative work
+- **android-dev** plugin: Jetpack Compose, Kotlin, MVVM architecture, project scaffolding, Play Store publishing (PR #8)
+- **anti-slop** plugin: pre-PR branch quality auditing — description-diff alignment, commit hygiene, template compliance (PR #9)
+
+### Changed
+- **obsidian-vault-management** v1.1.0: Obsidian CLI integration for dual-mode orphan and broken link detection (PR #7)
+- README.md: added decision tree, complexity ratings, plugin sections for all newly added plugins; removed stale `simplemem-memory` references; pointed memory decision tree to `memory-router` standalone skill (PR #14)
+
+### Moved
+- **simplemem-memory** plugin relocated to `feature/memory-system-plugin` branch pending consolidation into `memory-management` plugin (a broader system with subconscious hooks, SimpleMem MCP, and memory router)
+
+---
+
 ## [1.0.0] - 2026-01-22
 
 First stable release with complete documentation and validation tooling.
