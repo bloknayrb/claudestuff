@@ -57,7 +57,7 @@ Switch to Pro when NB2 **consistently** produces:
 
 | Resolution | `flash` | `nb2` | `pro` | Notes |
 |------------|---------|-------|-------|-------|
-| `"1k"` | — | Yes | Yes | Great for drafts |
+| `"1k"` | Not accepted | Yes | Yes | Great for drafts; flash max is 1024px via `"high"` only |
 | `"high"` | Default | Default | Default | Standard output |
 | `"2k"` | — | — | Yes | Pro only |
 | `"4k"` | — | — | Yes | Pro only, maximum detail |
