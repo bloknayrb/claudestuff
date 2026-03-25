@@ -24,6 +24,7 @@
 | **Personal Finance** | Budgeting, investing, financial planning | personal-finance |
 | **Career Coaching** | Career exploration, resume review, interview prep | career-coach |
 | **Android Development** | Jetpack Compose, Kotlin, architecture, publishing | android-dev |
+| **Image Generation** | AI image prompting for Nano Banana MCP | nanobanana |
 | **Learning** | How plugins work | example-plugin |
 
 ## Plugins at a Glance
@@ -65,6 +66,9 @@ Are you...
 ├── Updating repo documentation?
 │   └── → documentation-updater (skill: audit, generate, update docs)
 │
+├── Generating images with Nano Banana?
+│   └── → nanobanana (model selection, prompt engineering, visual grounding)
+│
 └── Adding memory to Claude Code?
     └── → simplemem-memory (temporal project memory)
 ```
@@ -83,6 +87,7 @@ Are you...
 | **personal-finance** | Easy | Low | Personal finance education |
 | **career-coach** | Easy | Low | Career coaching and interview prep |
 | **android-dev** | Easy | Low | Android app development guidance |
+| **nanobanana** | Easy | Medium | Image generation prompting |
 | **transaction-analysis** | Low | High | Toll industry analysis |
 
 **Complexity Key:**
@@ -205,6 +210,18 @@ Are you...
 **Agents**: Android Dev (routing agent for all Android tasks)
 
 **Use for**: Building Android apps with Kotlin and Jetpack Compose, from first project to Play Store
+
+---
+
+### nanobanana
+
+**What**: Image generation prompting skill for the Nano Banana MCP server
+
+**Skills**: Image Generation (model selection, prompt engineering, visual grounding, cost optimization)
+
+**Use for**: AI image generation with Gemini models — crafting effective prompts, choosing the right model tier, multi-image editing workflows
+
+**Requires**: Nano Banana MCP server configured and running
 
 ---
 
