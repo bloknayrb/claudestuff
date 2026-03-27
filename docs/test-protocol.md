@@ -34,7 +34,7 @@ claude --no-plugins
 /plugin install [plugin-name]
 
 # Example:
-/plugin install automation
+/plugin install professional-agents
 ```
 
 ### 4. Verify Discovery
@@ -90,12 +90,15 @@ Run the contributor checklist for **every plugin**:
 | Plugin | Installs | Primary Command | Notes |
 |--------|----------|-----------------|-------|
 | example-plugin | ✓ | `/hello` works | |
-| automation | ✓ | `/track` needs vault | Expected |
 | ms-office-suite | ✓ | Skills load | |
-| obsidian-vault-management | ✓ | Skills load | CLI optional |
 | professional-agents | ✓ | Agents appear | |
-| simplemem-memory | ✓ | Skills load | Needs SimpleMem MCP |
-| transaction-analysis | ✓ | `/analyze-transactions` | |
+| personal-finance | ✓ | Agents appear | |
+| career-coach | ✓ | Agents appear | |
+| android-dev | ✓ | Agents appear | |
+| nanobanana | ✓ | Skills load | Needs Nano Banana MCP |
+| ghostwriter | ✓ | `/learn-my-style` works | |
+| anti-slop | ✓ | Agents appear | |
+| focus-tools | ✓ | `/sos` runs | Needs task state file |
 
 ### 2. Cross-Plugin Compatibility
 
@@ -119,7 +122,7 @@ Install multiple plugins and verify no conflicts:
 
 | Platform | Required For | Test Status |
 |----------|--------------|-------------|
-| Windows | automation, obsidian-* | Required |
+| Windows | ms-office-suite (PowerShell scripts) | Required |
 | macOS | All plugins | Nice to have |
 | Linux | All plugins | Nice to have |
 
@@ -185,21 +188,6 @@ Install multiple plugins and verify no conflicts:
 1. hooks.json is valid JSON
 2. Event name is correct (PreToolUse, PostToolUse, etc.)
 3. Matcher pattern matches the intended tools
-
-### CLI-Dependent Features Not Working
-
-**Symptoms:** Orphan detection skipped, wikilink validation using fallback
-
-**Check:**
-1. Obsidian is running
-2. CLI is registered on PATH: `obsidian version` should return version info
-3. If not on PATH: Obsidian Settings → General → CLI → Register
-4. Vault is fully indexed (wait 60 seconds after opening Obsidian)
-
-**Expected fallback behavior:**
-- `obsidian version` fails → all agents use Glob/Grep/PowerShell (< 2 second delay)
-- Orphan detection skipped with note in report
-- All other checks function normally via fallback
 
 ---
 

@@ -1,9 +1,0 @@
-{
-  "name": "obsidian-productivity",
-  "version": "1.0.0",
-  "description": "Complete Obsidian productivity stack: task tracking, email triage, daily standups, and timesheet generation",
-  "author": {
-    "name": "bloknayrb"
-  },
-  "repository": "https://github.com/bloknayrb/claudestuff"
-}

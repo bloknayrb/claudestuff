@@ -16,17 +16,15 @@
 
 | Category | Description | Plugins |
 |----------|-------------|---------|
-| **Patterns** | Reusable architecture anyone can adopt | [skills/shared/](skills/) |
-| **Reference Implementations** | Working commands - study the structure | automation, obsidian-vault-management |
-| **Domain Tools** | Specialized for specific work | transaction-analysis, toll-consulting, professional-agents |
+| **Learning** | How plugins work | example-plugin |
+| **Developer Tools** | Role-based agents, code quality, docs | professional-agents, anti-slop, documentation-updater |
 | **Office Automation** | Document creation and editing | ms-office-suite |
-| **Memory Integration** | Context persistence | simplemem-memory |
 | **Personal Finance** | Budgeting, investing, financial planning | personal-finance |
 | **Career Coaching** | Career exploration, resume review, interview prep | career-coach |
 | **Android Development** | Jetpack Compose, Kotlin, architecture, publishing | android-dev |
 | **Image Generation** | AI image prompting for Nano Banana MCP | nanobanana |
 | **Writing** | Learn your style, write in your voice | ghostwriter |
-| **Learning** | How plugins work | example-plugin |
+| **Focus** | Executive function support | focus-tools |
 
 ## Plugins at a Glance
 
@@ -42,18 +40,6 @@ Are you...
 │
 ├── Looking for agent design patterns?
 │   └── → professional-agents (8 role-based agents)
-│
-├── Working on toll projects?
-│   └── → toll-consulting (agents + document review skill)
-│
-├── Building Obsidian automation?
-│   ├── Want vault maintenance?
-│   │   └── → obsidian-vault-management (sweeping, validation)
-│   └── Want task/project tracking?
-│       └── → automation (/track, /update-projects)
-│
-├── Analyzing toll transaction data?
-│   └── → transaction-analysis (VDOT, DelDOT, MDTA, DRPA)
 │
 ├── Managing personal finances?
 │   └── → personal-finance (budgeting, investing, planning)
@@ -73,8 +59,11 @@ Are you...
 ├── Writing in your own voice?
 │   └── → ghostwriter (learn style, draft, rewrite, critique)
 │
-└── Adding memory to Claude Code?
-    └── → simplemem-memory (temporal project memory)
+├── Auditing a branch before PR?
+│   └── → anti-slop (pre-PR quality audit)
+│
+└── Overwhelmed and need to focus?
+    └── → focus-tools (identify ONE next action)
 ```
 
 ### Complexity Ratings
@@ -83,22 +72,18 @@ Are you...
 |--------|-------|---------------|----------|
 | **example-plugin** | Easy | None needed | Learning plugin structure |
 | **professional-agents** | Easy | Low | Adding role-based agents |
-| **toll-consulting** | Easy | Low | Toll industry consulting |
 | **ms-office-suite** | Medium | Low | Office document automation |
-| **simplemem-memory** | Medium | Low | Project context memory |
-| **obsidian-vault-management** | Hard | High | Obsidian vault maintenance |
-| **automation** | Hard | High | Task tracking patterns |
 | **personal-finance** | Easy | Low | Personal finance education |
 | **career-coach** | Easy | Low | Career coaching and interview prep |
 | **android-dev** | Easy | Low | Android app development guidance |
 | **nanobanana** | Easy | Medium | Image generation prompting |
 | **ghostwriter** | Easy | Low | Writing in your voice |
-| **transaction-analysis** | Low | High | Toll industry analysis |
+| **anti-slop** | Easy | Low | Pre-PR branch quality audit |
+| **focus-tools** | Medium | Medium | Executive function support |
 
 **Complexity Key:**
 - **Easy**: Install and use immediately
-- **Medium**: Requires some dependencies
-- **Hard**: Requires specific vault/file structure
+- **Medium**: Requires some configuration or dependencies
 
 ## Plugins
 
@@ -109,18 +94,6 @@ Are you...
 **Components**: `/hello` command, Code Reviewer agent, Example skill, Post-tool hook, MCP config
 
 **Use for**: Learning how plugins work, starting template for new plugins
-
----
-
-### automation
-
-**What**: Vault scanning and project management for Obsidian
-
-**Components**: `/track`, `/update-projects`
-
-**Use for**: Studying comprehensive task tracking patterns, incremental scanning logic
-
-**Note**: Reference implementation - expects specific vault structure
 
 ---
 
@@ -136,18 +109,6 @@ Are you...
 
 ---
 
-### obsidian-vault-management
-
-**What**: Vault maintenance with parallel agent architecture
-
-**Skills**: Vault sweeping (5 parallel agents), validation rules, orphan detection
-
-**Use for**: Large vault maintenance, template compliance, metadata validation, broken link detection
-
-**Note**: Windows/PowerShell required. Obsidian CLI (v1.12.4+) optional for enhanced graph-based detection.
-
----
-
 ### professional-agents
 
 **What**: 8 role-based agents for development and project management
@@ -155,30 +116,6 @@ Are you...
 **Agents**: Developer, Tech Lead, Product Owner, UX Designer, QA Reviewer, Researcher, Strategic PM, DOCX Editor
 
 **Use for**: Adding specialized personas, understanding agent design patterns
-
----
-
-### toll-consulting
-
-**What**: Toll industry agents and document review skill
-
-**Agents**: Toll Consultant, Toll Procurement Consultant
-
-**Skills**: Document review (owner's representative perspective)
-
-**Use for**: Toll operations consulting, procurement advisory, project document review
-
----
-
-### simplemem-memory
-
-**What**: SimpleMem MCP integration for project memory
-
-**Skills**: Temporal memory management, meeting context
-
-**Use for**: Storing project decisions, action items, milestones with date context
-
-**Requires**: SimpleMem MCP server
 
 ---
 
@@ -244,15 +181,27 @@ Are you...
 
 ---
 
-### transaction-analysis
+### anti-slop
 
-**What**: Toll transaction data analysis with auto client detection
+**What**: Pre-PR branch quality audit
 
-**Components**: `/analyze-transactions`, Transaction Analyst agent, Data Quality Validator agent
+**Agents**: anti-slop auditor (checks description-diff alignment, commit hygiene, template compliance)
 
-**Use for**: VDOT, DelDOT, MDTA, DRPA transaction analysis
+**Use for**: Catching lazy PRs before they hit review — mismatched descriptions, missing Closes #N, bad commit messages
 
-**Note**: Domain-specific - valuable as multi-agent pattern reference
+---
+
+### focus-tools
+
+**What**: Executive function support for getting unstuck
+
+**Commands**: `/sos`
+
+**Skills**: executive-function-support
+
+**Use for**: Cutting through overwhelm and identifying ONE next action
+
+**Note**: Reference implementation — expects a task state file. Adapt paths for your setup.
 
 ## Standalone Skills
 
@@ -264,13 +213,6 @@ Skills in the `skills/` directory work independently of plugins:
 | testing-best-practices | Unit/integration test patterns |
 | api-design | RESTful API design principles |
 | security-review | OWASP-based security patterns |
-| excel-analysis | Pandas workflows for Excel |
-| meeting-prep | Context assembly for meetings |
-| memory-router | Smart routing to memory systems |
-| semantic-search | Vault search with embeddings |
-| task-management | TaskNote creation patterns |
-| invoice-timesheet-verification | Timesheet reconciliation |
-| boop-scripting | Woop/Boop script API, patterns, and template for Windows text transforms |
 | documentation-updater | Full-lifecycle doc management: audit, generate, update README/CHANGELOG/CONTRIBUTING/code docs |
 
 ## Creating Your Own
@@ -319,7 +261,6 @@ See [example-plugin](plugins/example-plugin/) for a complete reference.
 This repository is a **showcase**, not a product.
 
 **What that means:**
-- Personal context is intentional, not accidental
 - Plugins are reference implementations to study
 - The value is in patterns and documentation
 - Build your own system using these as guides
@@ -327,11 +268,9 @@ This repository is a **showcase**, not a product.
 **What contributions are welcome:**
 - Bug fixes
 - Documentation improvements
-- Pattern extraction to `skills/shared/`
 
 **What's not the goal:**
 - Making everything "plug and play"
-- Removing personal context
 - Support SLAs
 
 ## External Resources

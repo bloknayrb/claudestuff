@@ -1,7 +1,7 @@
 {
   "name": "claudestuff-marketplace",
   "metadata": {
-    "description": "A curated marketplace for Claude Code plugins - documented snapshot of one consultant's Claude Code configuration",
+    "description": "A curated marketplace for Claude Code plugins - broadly useful tools for developers, writers, and learners",
     "version": "1.0.0"
   },
   "owner": {
@@ -19,39 +19,14 @@
       "description": "Executive function support for getting unstuck - cut through overwhelm and identify ONE next action"
     },
     {
-      "name": "obsidian-productivity",
-      "source": "./plugins/obsidian-productivity",
-      "description": "Complete Obsidian productivity stack: task tracking, email triage, daily standups, and timesheet generation"
-    },
-    {
-      "name": "transaction-analysis",
-      "source": "./plugins/transaction-analysis",
-      "description": "Toll transaction data analysis with automatic client detection (VDOT, DelDOT, MDTA, DRPA), specialized agents, and multi-format reporting"
-    },
-    {
-      "name": "obsidian-vault-management",
-      "source": "./plugins/obsidian-vault-management",
-      "description": "Vault maintenance skills for large Obsidian vaults. Parallel agent architecture. Windows/PowerShell required"
-    },
-    {
       "name": "ms-office-suite",
       "source": "./plugins/ms-office-suite",
       "description": "Office document skills for Claude Code — PPTX, DOCX, XLSX, and PDF workflows"
     },
     {
-      "name": "toll-consulting",
-      "source": "./plugins/toll-consulting",
-      "description": "Toll industry agents and skills: operations consulting, procurement, and document review"
-    },
-    {
       "name": "professional-agents",
       "source": "./plugins/professional-agents",
       "description": "Professional role-based agents for software development and project management"
-    },
-    {
-      "name": "automation",
-      "source": "./plugins/automation",
-      "description": "Vault scanning and project management commands for Obsidian"
     },
     {
       "name": "personal-finance",
@@ -67,11 +42,6 @@
       "name": "android-dev",
       "source": "./plugins/android-dev",
       "description": "Android app development: Jetpack Compose, Kotlin, MVVM architecture, project scaffolding, troubleshooting, and Play Store publishing"
-    },
-    {
-      "name": "boop-scripting",
-      "source": "./skills/boop-scripting",
-      "description": "Woop/Boop script API reference, patterns, and template for Windows text transforms"
     },
     {
       "name": "anti-slop",
