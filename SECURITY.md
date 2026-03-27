@@ -37,12 +37,10 @@ Several plugins in this marketplace integrate with MCP (Model Context Protocol) 
 
 | Plugin | Data Accessed | Storage |
 |--------|---------------|---------|
-| **transaction-analysis** | Excel files with transaction data | Analysis results in Obsidian vault |
-| **obsidian-vault-management** | Obsidian vault files (markdown) | State files in vault |
-| **simplemem-memory** | Conversation context | Local SQLite database |
 | **ms-office-suite** | Office documents | Processed files in working directory |
 | **professional-agents** | Task context | No persistent storage |
-| **automation** | Vault files, state files | Updates to vault files |
+| **personal-finance** | Transaction CSV files, portfolio data | No persistent storage |
+| **ghostwriter** | Writing samples | Voice profiles at `~/.claude/ghostwriter-profiles/` |
 
 #### Sensitive Data Considerations
 

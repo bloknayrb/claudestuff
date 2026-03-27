@@ -22,7 +22,6 @@ This is a Claude Code plugin marketplace repository that serves as a central hub
 │       └── .mcp.json        # MCP server configuration
 ├── skills/                   # Standalone skills directory
 │   ├── skill-creation/       # Meta-skill for creating other skills
-│   ├── analyzing-transactions/  # Domain-specific transaction analysis
 │   ├── api-design/
 │   ├── security-review/
 │   └── testing-best-practices/
@@ -150,23 +149,6 @@ This repository has Claude Code GitHub Actions configured:
 Claude Code GitHub Actions require:
 - `CLAUDE_CODE_OAUTH_TOKEN` secret configured
 - Appropriate permissions (contents:read, pull-requests:read, issues:read, etc.)
-
-## Domain-Specific Knowledge
-
-### Transaction Analysis Skill
-
-The `analyzing-transactions` skill is highly specialized for toll transaction data analysis across multiple client systems (VDOT, DelDOT, MDTA, DRPA). It:
-- Auto-detects client type from dataset characteristics
-- Applies client-specific analysis frameworks
-- Calculates collection rates, rejection patterns, disposition lifecycles
-- Generates both technical and executive reports
-
-This skill demonstrates advanced skill architecture with multiple supporting documents:
-- `CLIENT-DETECTION.md`: Decision logic for identifying data sources
-- `DECISION-TREES.md`: Root cause analysis flowcharts
-- `EXTRACTION-GUIDE.md`: Script development guidance
-
-When working with transaction data or similar domain-specific analysis tasks, reference this skill as an exemplar of comprehensive knowledge packaging.
 
 ## Testing and Validation
 
