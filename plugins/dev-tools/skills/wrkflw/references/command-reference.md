@@ -58,6 +58,7 @@ wrkflw run .github/workflows/ci.yml
 wrkflw run --runtime podman .github/workflows/ci.yml
 wrkflw run --job build .github/workflows/ci.yml
 wrkflw run --diff --event push .github/workflows/ci.yml
+wrkflw run --diff --diff-base origin/main --diff-head HEAD .github/workflows/ci.yml
 wrkflw run --event pull_request --base-branch main --diff .github/workflows/ci.yml
 ```
 

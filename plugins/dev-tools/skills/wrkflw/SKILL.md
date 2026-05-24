@@ -24,7 +24,7 @@ of the "push → red CI → fix → push" loop.
 - Before pushing changes that touch `.github/workflows/` or `.gitlab-ci.yml`.
 - A workflow is failing on GitHub and you want to reproduce it locally.
 - You're authoring or editing a workflow and want fast feedback.
-- You want to remotely trigger a `workflow_dispatch` without opening the browser.
+- You want to remotely trigger a workflow or pipeline without opening the browser.
 
 ## Step 1 — confirm wrkflw is installed
 
@@ -44,7 +44,7 @@ The `emulation` runtime needs nothing extra — prefer it for quick checks.
 | Actually execute a workflow locally | `run` |
 | Re-run affected workflows on file change | `watch` |
 | Interactive exploration | `tui` (or bare `wrkflw`) |
-| Remotely fire `workflow_dispatch` | `trigger` / `trigger-gitlab` |
+| Remotely fire a workflow / pipeline | `trigger` / `trigger-gitlab` |
 | Enumerate detected workflows | `list` |
 
 **Default pre-push gate:** `validate`. It's fast and needs no containers. It

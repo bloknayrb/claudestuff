@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "INPUT=$(cat); if echo \"$INPUT\" | grep -q 'gh pr create'; then printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"Before creating this PR, run the anti-slop audit agent to verify description-diff alignment and commit quality.\"}}'; fi",
+            "command": "INPUT=$(cat); if echo \"$INPUT\" | grep -qE '[^[:alnum:]]gh[[:space:]]+pr[[:space:]]+create([^[:alnum:]]|$)'; then printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"Before creating this PR, run the anti-slop audit agent to verify description-diff alignment and commit quality.\"}}'; fi",
             "description": "Remind to run the anti-slop audit before gh pr create"
           }
         ]
