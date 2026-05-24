@@ -17,7 +17,7 @@
 | Category | Description | Plugins |
 |----------|-------------|---------|
 | **Learning** | How plugins work | example-plugin |
-| **Developer Tools** | Role-based agents, code quality, docs | professional-agents, anti-slop, documentation-updater |
+| **Developer Tools** | Role-based agents, code quality, docs, local CI | professional-agents, anti-slop, documentation-updater, dev-tools |
 | **Office Automation** | Document creation and editing | ms-office-suite |
 | **Personal Finance** | Budgeting, investing, financial planning | personal-finance |
 | **Career Coaching** | Career exploration, resume review, interview prep | career-coach |
@@ -62,6 +62,9 @@ Are you...
 ├── Auditing a branch before PR?
 │   └── → anti-slop (pre-PR quality audit)
 │
+├── Testing GitHub Actions / GitLab CI locally?
+│   └── → dev-tools (wrkflw: validate and run workflows before pushing)
+│
 └── Overwhelmed and need to focus?
     └── → focus-tools (identify ONE next action)
 ```
@@ -79,6 +82,7 @@ Are you...
 | **nanobanana** | Easy | Medium | Image generation prompting |
 | **ghostwriter** | Easy | Low | Writing in your voice |
 | **anti-slop** | Easy | Low | Pre-PR branch quality audit |
+| **dev-tools** | Easy | Low | Local CI workflow validation and execution |
 | **focus-tools** | Medium | Medium | Executive function support |
 
 **Complexity Key:**
@@ -188,6 +192,22 @@ Are you...
 **Agents**: anti-slop auditor (checks description-diff alignment, commit hygiene, template compliance)
 
 **Use for**: Catching lazy PRs before they hit review — mismatched descriptions, missing Closes #N, bad commit messages
+
+---
+
+### dev-tools
+
+**What**: Software-development tooling — the consolidation home for dev-focused plugins, starting with local CI workflow testing
+
+**Commands**: `/wrkflw`
+
+**Skills**: wrkflw (validate and run GitHub Actions / GitLab CI workflows locally)
+
+**Hooks**: Pre-push reminder to validate workflows when the repo has CI files
+
+**Use for**: Catching broken CI before pushing — validate and run `.github/workflows` (and GitLab pipelines) locally with the `wrkflw` CLI
+
+**Requires**: [`wrkflw`](https://github.com/bahdotsh/wrkflw) installed (`cargo install wrkflw` or `brew install wrkflw`); Docker or Podman only for those runtimes
 
 ---
 

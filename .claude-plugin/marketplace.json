@@ -62,6 +62,11 @@
       "name": "ghostwriter",
       "source": "./plugins/ghostwriter",
       "description": "Learn a user's writing style from samples, store named voice profiles, then draft, rewrite, critique, and tone-shift in that voice"
+    },
+    {
+      "name": "dev-tools",
+      "source": "./plugins/dev-tools",
+      "description": "Software-development tooling — starting with wrkflw for validating and running GitHub Actions/GitLab CI workflows locally before pushing"
     }
   ]
 }

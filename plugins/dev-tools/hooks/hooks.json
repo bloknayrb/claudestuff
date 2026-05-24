@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "INPUT=$(cat); if echo \"$INPUT\" | grep -q 'git push'; then if [ -d .github/workflows ] || [ -f .gitlab-ci.yml ]; then printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"This repo has CI workflows and a git push is about to run. Validate them locally with the wrkflw skill (wrkflw validate) before pushing.\"}}'; fi; fi",
+            "description": "Remind to validate workflows with wrkflw before git push"
+          }
+        ]
+      }
+    ]
+  }
+}
