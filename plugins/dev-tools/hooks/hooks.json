@@ -10,6 +10,16 @@
             "description": "Remind to validate workflows with wrkflw before git push"
           }
         ]
+      },
+      {
+        "matcher": "ExitPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "INPUT=$(cat); if echo \"$INPUT\" | grep -qF '[plan-reviewed-by-agents:'; then exit 0; else printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Before submitting this plan, have agents review it. 1) Dispatch at least one review agent (e.g. feature-dev:code-reviewer, general-purpose, or a Plan subagent) to critique the plan for gaps, bugs, and wrong assumptions. 2) Incorporate the findings into the plan. 3) Append a final line to the plan: [plan-reviewed-by-agents: <agent-type(s)>; <one-line summary or: no blocking issues>]. 4) Re-call ExitPlanMode with the updated plan text (the marker must be in the plan argument, not only the plan file). If agents already reviewed this plan, just add that marker line and resubmit.\"}}'; fi",
+            "description": "Require agent review of a plan before ExitPlanMode (bypass via [plan-reviewed-by-agents:] marker)"
+          }
+        ]
       }
     ]
   }
