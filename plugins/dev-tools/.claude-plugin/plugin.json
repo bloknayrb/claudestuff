@@ -1,0 +1,9 @@
+{
+  "name": "dev-tools",
+  "version": "1.0.0",
+  "description": "Software-development tooling for Claude Code — starting with wrkflw for local GitHub Actions/GitLab CI validation and execution",
+  "author": {
+    "name": "bloknayrb"
+  },
+  "repository": "https://github.com/bloknayrb/claudestuff"
+}
