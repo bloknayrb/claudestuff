@@ -28,4 +28,10 @@ puts one line beneath the answer for each claim with no evidence or only weak ev
   session at the same time would be read as this session's run.
 - **Log paths resolve from the session root,** not the shell's persisted working directory: relative log names written
   from two different persisted directories can collide.
-- **`cmd /c`, `cargo +nightly test` and `node --test` are not recognised** as runs.
+- **`cmd /c`, `cargo +nightly test`, `node --test` and `yarn workspace X test` are not recognised** as runs.
+- **Read-back keys keep `..` segments as written.** A log written as `repo/../push.log` and read as `push.log` (or the
+  other way round) is not matched, so the run stays weak.
+- **A segment over 1,000 characters is not matched** for runners or git operations: it yields no run, so a true claim
+  resting on a very long command gets a "no run" note.
+- **A git operation the tool result records (`gitOperation`) can be credited inside a loop** when the command itself
+  was not matched: `eval "git push"` in a loop, or a push segment over 1,000 characters in a loop.

@@ -852,6 +852,10 @@ describe('runners are commands, not arguments; ops that do nothing', () => {
       ['pnpm --dir node test', ['tests']],
       ['npm --prefix node test', ['tests']],
       ['uv run --directory py pytest', ['tests']],
+      // One-shot launchers.
+      ['uvx pytest', ['tests']],
+      ['pnpm dlx vitest run', ['tests']],
+      ['pipx run pytest', ['tests']],
       ['npx vitest --help', []],
       ['pytest -h', []],
       ['pytest --co -q', []],
@@ -948,10 +952,29 @@ describe('time stays bounded on adversarial inputs', () => {
     expect(ms(() => push(`To github.com:x/y.git\n${'\n'.repeat(3000)}done`)), 'blank lines').toBeLessThan(50)
     push(`a${' \r'.repeat(399)}\nb`)
     expect(ms(() => push(`a${' \r'.repeat(400)}\nb`)), 'space and CR').toBeLessThan(50)
+    // One long run of spaces or tabs on a single line: the optional plus no longer splits it two ways.
+    push(`${' '.repeat(8999)}x`)
+    expect(ms(() => push(`${' '.repeat(9000)}x`)), '9,000 spaces').toBeLessThan(50)
+    push(`${'\t'.repeat(9899)}x`)
+    expect(ms(() => push(`${'\t'.repeat(9900)}x`)), '9,900 tabs').toBeLessThan(50)
     // 150 echoes whose texts end in 40 digits: the scan checks each maximal digit run once.
     const echoes = (n: number) => Array.from({ length: n }, (_, i) => `pytest;echo "$A$?x${i}$B ${'1'.repeat(40)}"`).join('\n')
     kinds(sh(echoes(149)), said(''))
     expect(ms(() => kinds(sh(echoes(150)), said(''))), 'digit-dense echoes').toBeLessThan(50)
+  })
+
+  test('unterminated heredoc openers and long `${` runs', () => {
+    const openers = (n: number) => `${'cat <<A '.repeat(n)}\nnpm test`
+    kinds(sh(openers(2499)))
+    expect(ms(() => kinds(sh(openers(2500)))), '2,500 openers').toBeLessThan(50)
+    const nested = (n: number) => `bash -c 'bash -c "${'x <<A '.repeat(n)}"'`
+    kinds(sh(nested(2499)))
+    expect(ms(() => kinds(sh(nested(2500)))), '2,500 openers inside bash -c twice').toBeLessThan(50)
+    // A real heredoc is still dropped as data, and a later run still counts.
+    expect(kinds(sh("cat <<A\npytest\nA\nnpm test"))).toEqual(['tests'])
+    const dollars = (n: number) => `npm test; echo "${'${'.repeat(n)} $?"`
+    kinds(sh(dollars(4984)), said('x 0'))
+    expect(ms(() => kinds(sh(dollars(4985)), said('x 0'))), '4,985 `${`').toBeLessThan(50)
   })
 
   test('a segment over 1,000 characters is not matched: no run', () => {
@@ -992,16 +1015,21 @@ describe('read-backs judge a run only from its own output', () => {
     expect(judge('tests', ledger).status).toBe('backed')
   })
 
-  test('a read that also prints another file judges nothing; read-only git and gh beside it do not withhold', () => {
+  test('a read that also prints another file judges nothing; only git ls-remote and gh pr view beside it do not withhold', () => {
     const other = emptyLedger()
     call(other, 1, sh(PUSH), bg('b1'))
     expect(call(other, 2, sh('cat "$TEMP/npm-debug.log"; tail -3 "$TEMP/p.log"'), said('12 errors\nexit=0'))).toEqual([])
     expect(judge('push', other).status).toBe('background')
-    for (const extra of ['git ls-remote origin feat/x', 'git rev-parse HEAD', 'git status --short', 'git log --oneline -1', 'gh pr view 5 --json state', 'gh pr checks 5']) {
+    for (const extra of ['git ls-remote origin feat/x', 'git -C ../x ls-remote origin', 'gh pr view 5 --json state']) {
       const git = emptyLedger()
       call(git, 1, sh(PUSH), bg('b1'))
       expect(call(git, 2, sh(`tail -3 "$TEMP/p.log"; ${extra}`), said('exit=0\nabc1234\trefs/heads/feat/x')).length, extra).toBe(1)
       expect(judge('push', git).status, extra).toBe('backed')
+    }
+    for (const extra of ['git rev-parse HEAD', 'git status --short', 'git log --oneline -1', 'git show --stat HEAD', 'gh pr checks 5', 'gh pr list', 'git fetch origin']) {
+      const git = emptyLedger()
+      call(git, 1, sh(PUSH), bg('b1'))
+      expect(call(git, 2, sh(`tail -3 "$TEMP/p.log"; ${extra}`), said('exit=0')), extra).toEqual([])
     }
     // A git op that changes something, beside the read, still withholds.
     const pushing = emptyLedger()
@@ -1011,6 +1039,34 @@ describe('read-backs judge a run only from its own output', () => {
     const both = emptyLedger()
     call(both, 1, sh(PUSH), bg('b1'))
     expect(call(both, 2, sh('cat "C:/t/tasks/b1.output"; tail -2 "$TEMP/p.log"'), said('exit=0\n[exited with code 0]')).length).toBe(1)
+  })
+
+  test("the reader's own git status, log, rev-parse or checks never flips a run to failed", () => {
+    const PUSH_LOG = 'git push origin feat/x > "$TEMP/q.log" 2>&1'
+    const OK_PUSH = 'To github.com:o/r.git\n   abc1234..def5678  feat/x -> feat/x'
+    const TESTS = 'npm test > "$TEMP/t.log" 2>&1'
+    const VITEST = ' Test Files  3 passed (3)\n      Tests  40 passed (40)'
+    for (const [run, reader, out, kind] of [
+      [PUSH_LOG, 'tail -3 "$TEMP/q.log"; git status', `${OK_PUSH}\nnothing to commit, working tree clean`, 'push'],
+      [PUSH_LOG, 'tail -3 "$TEMP/q.log"; git rev-parse origin/feat/y', `${OK_PUSH}\nfatal: ambiguous argument 'origin/feat/y'`, 'push'],
+      [TESTS, 'tail -5 "$TEMP/t.log"; git log --oneline -3', `${VITEST}\nabc1234 fix: retry when 2 failed uploads remain`, 'tests'],
+      [TESTS, 'tail -5 "$TEMP/t.log"; gh pr checks 5', `${VITEST}\n1 failing, 3 successful, 0 skipped, and 0 pending checks`, 'tests'],
+      ['npm run build > "$TEMP/b.log" 2>&1', 'tail -3 "$TEMP/b.log"; git log --oneline -2', ' built in 2.1s\nabc1234 fix: Build failed on Windows', 'build'],
+    ] as const) {
+      const ledger = emptyLedger()
+      call(ledger, 1, sh(run), bg('b1'))
+      expect(call(ledger, 2, sh(reader), said(out)), reader).toEqual([])
+      expect(judge(kind, ledger).status, reader).toBe('background')
+    }
+  })
+
+  test("a status echo the reader runs is the reader's status, never the run's", () => {
+    const run = 'git push origin feat/x > "$TEMP/p.log" 2>&1; echo "EXIT=$?" >> "$TEMP/p.log"'
+    const ledger = emptyLedger()
+    call(ledger, 1, sh(run), bg('b1'))
+    // The tail cut off the run's own EXIT=1; the EXIT=0 in view is the reader's own echo after git ls-remote.
+    call(ledger, 2, sh('git ls-remote origin feat/x; echo "EXIT=$?"; tail -3 "$TEMP/p.log"'), said('EXIT=0\nhusky - pre-push script failed (code 1)\nerror: failed to push some refs'))
+    expect(judge('push', ledger).status).toBe('failed')
   })
 
   test('a looping background command stays weak through every read-back', () => {

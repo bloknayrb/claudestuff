@@ -54,7 +54,47 @@ const SHIP_OPS: readonly ShipOp[] = ['commit', 'push', 'merge', 'pr-create']
 
 // A heredoc's body is data: keep the line that opens it, drop the body and its closing delimiter. With no closing
 // delimiter it is not a heredoc (`python -c "print(1<<n)"` is a shift), and nothing is dropped.
-const HEREDOC = /<<-?[ \t]*(['"]?)([A-Za-z_]\w*)\1([^\n]*)\n(?:[\s\S]*?\n)?[ \t]*\2[ \t\r]*(?=\n|$)/g
+// Matched at one position (sticky): heredocsOf only starts it at an opener whose word closes a later line.
+const HEREDOC = /<<-?[ \t]*(['"]?)([A-Za-z_]\w*)\1([^\n]*)\n(?:[\s\S]*?\n)?[ \t]*\2[ \t\r]*(?=\n|$)/y
+const OPENER = /<<-?[ \t]*(['"]?)([A-Za-z_]\w*)\1/g
+
+/**
+ * The heredocs in a command, in order. An opener whose word is no later line of the command never enters the body
+ * scan, so many unterminated `<<` (shifts, comparisons) cost nothing; the lazy scan from each one to the end was
+ * O(openers x length).
+ */
+function heredocsOf(command: string): RegExpExecArray[] {
+  if (!command.includes('<<')) return []
+  // Where each trimmed line last occurs.
+  const lastAt = new Map<string, number>()
+  let at = 0
+  for (const line of command.split('\n')) {
+    lastAt.set(line.trim(), at)
+    at += line.length + 1
+  }
+  const found: RegExpExecArray[] = []
+  OPENER.lastIndex = 0
+  for (let m = OPENER.exec(command); m !== null; m = OPENER.exec(command)) {
+    if ((lastAt.get(m[2] ?? '') ?? -1) <= m.index) continue
+    HEREDOC.lastIndex = m.index
+    const h = HEREDOC.exec(command)
+    if (h === null) continue
+    found.push(h)
+    OPENER.lastIndex = h.index + h[0].length
+  }
+  return found
+}
+
+/** The command with each heredoc's body and closing line dropped; its opener becomes `<<HEREDOC` and keeps its line. */
+function withoutHeredocs(command: string): string {
+  let out = ''
+  let last = 0
+  for (const h of heredocsOf(command)) {
+    out += `${command.slice(last, h.index)}<<HEREDOC${h[3] ?? ''}`
+    last = h.index + h[0].length
+  }
+  return out + command.slice(last)
+}
 // PowerShell here-strings are data too.
 const HERESTRING = /@(['"])\r?\n[\s\S]*?\r?\n\1@/g
 // A line continuation (bash backslash, PowerShell backtick) joins two lines.
@@ -63,7 +103,7 @@ const BREAKS = new Set([' ', '\t', '\r', '(', ')', '{', '}'])
 
 /** Splits a bash or PowerShell line into simple commands at top-level operators, outside quotes. */
 export function segmentsOf(command: string): Segment[] {
-  const src = command.replace(HEREDOC, '<<HEREDOC$3').replace(HERESTRING, ' @HERE@ ').replace(CONTINUATION, ' ')
+  const src = withoutHeredocs(command).replace(HERESTRING, ' @HERE@ ').replace(CONTINUATION, ' ')
   const segments: Segment[] = []
   let words: Word[] = []
   let text = ''
@@ -306,7 +346,7 @@ const SHIP_FAIL = /^(?:error|fatal):|\[rejected\]|\bnothing to commit\b|\bfailed
 // Each op's own confirmation, so one op's output cannot confirm another (`MERGED` from `gh pr view` is not a commit).
 const SHIP_PASS: Readonly<Record<ShipOp, RegExp>> = {
   commit: /^\[[\w./-]+(?: \(root-commit\))? [0-9a-f]{7,}\]/m,
-  push: /^[ \t]*\+?[ \t]*[0-9a-f]{7,}\.\.\.?[0-9a-f]{7,}\s+\S+\s+->\s+\S+|^[ \t]*\*\s+\[new (?:branch|tag)\]|\bset up to track\b/im,
+  push: /^[ \t]*(?:\+[ \t]*)?[0-9a-f]{7,}\.\.\.?[0-9a-f]{7,}\s+\S+\s+->\s+\S+|^[ \t]*\*\s+\[new (?:branch|tag)\]|\bset up to track\b/im,
   // `gh pr view --json state` prints MERGED bare, first in a --jq line, or as JSON. `git merge` prints "Merge made by",
   // and a `git log` after it shows the merge commit's own subject (`git merge x | tail -5 && git log --oneline -3`).
   merge: /\bMerged pull request\b|^[ \t]*MERGED\b|"state"\s*:\s*"MERGED"|\bstate\s*[=:]\s*"?MERGED\b|^Merge made by\b|^[0-9a-f]{7,40} +(?:\([^)]*\) +)?Merge (?:remote-tracking branch|branch|pull request #\d+)\b/im,
@@ -408,7 +448,7 @@ function statusPattern(template: string, last: boolean, member: number, piped: b
 /** The shape of a status line, matched like a regex (`source`, `test`, `exec` with the status as group 1). */
 type StatusShape = { source: string; test: (line: string) => boolean; exec: (line: string) => [string, string] | null }
 
-const VARIABLE = /\$\{[^}]*\}|\$[A-Za-z_?][\w]*/
+const VARIABLE = /\$\{[^}$]*\}|\$[A-Za-z_?][\w]*/
 
 /**
  * A status line is the echo's literal pieces in order with anything at each variable (a glob with `*` per variable),
@@ -537,7 +577,7 @@ const STATUS_LINE_CAP = 300
 let statusCache: { output: string; lines: string[]; by: Map<string, { found: string[]; once: string[] }> } | null = null
 
 /** An echo's text with every variable as `0`: the shape of the line it prints. */
-const filled = (text: string): string => text.replace(/\$\{[^}]*\}|\$[A-Za-z_?][\w]*/g, '0')
+const filled = (text: string): string => text.replace(/\$\{[^}$]*\}|\$[A-Za-z_?][\w]*/g, '0')
 
 /**
  * The status an echo printed. Several echoes can print lines of one shape (`echo "exit=$?"` after each of two runs),
@@ -789,11 +829,11 @@ function escapeRe(text: string): string {
 // A word that starts a launcher is never an option's value, so `pnpm -a pnpm -a ...` reads one way only. Only words
 // that really start one are kept out: a bare launcher word, `X run`, `npm exec`, `python -m`. A value such as `node`,
 // `py` or `python3.12` alone stays a value (`pnpm --filter node test`, `uv run --python python3.12 pytest`).
-const OPTION = String.raw`\s+--?\w[\w-]*(?:[= ](?!(?:npx|bunx|pnpx|pnpm|yarn|bun)(?:\s|$)|(?:uv|poetry|pdm|hatch|pipenv)\s+run(?:\s|$)|npm\s+exec(?:\s|$)|(?:python[\d.]*|py)\s+-m(?:\s|$))[^\s-]\S*)?`
+const OPTION = String.raw`\s+--?\w[\w-]*(?:[= ](?!(?:npx|bunx|pnpx|pnpm|yarn|bun|uvx)(?:\s|$)|(?:uv|poetry|pdm|hatch|pipenv|pipx)\s+run(?:\s|$)|(?:pnpm|yarn)\s+dlx(?:\s|$)|npm\s+exec(?:\s|$)|(?:python[\d.]*|py)\s+-m(?:\s|$))[^\s-]\S*)?`
 // Options between a runner's words: `idf.py -C firmware build`.
 const OPTIONS_BETWEEN = String.raw`(?:${OPTION})*\s+`
 // What may come before a runner that is not the command word itself: a launcher that runs it.
-const LAUNCHER = String.raw`(?:(?:npx|bunx|pnpx)(?:${OPTION})*\s+|(?:uv|poetry|pdm|hatch|pipenv)\s+run(?:${OPTION})*\s+|(?:pnpm|npm)\s+exec(?:${OPTION})*\s+(?:--\s+)?|(?:pnpm|yarn)(?:${OPTION})*\s+|bun(?:\s+run|\s+x)?(?:${OPTION})*\s+|python[\d.]*\s+-m\s+|py\s+-m\s+)`
+const LAUNCHER = String.raw`(?:(?:npx|bunx|pnpx)(?:${OPTION})*\s+|uvx(?:${OPTION})*\s+|(?:pnpm|yarn)\s+dlx(?:${OPTION})*\s+|(?:uv|poetry|pdm|hatch|pipenv|pipx)\s+run(?:${OPTION})*\s+|(?:pnpm|npm)\s+exec(?:${OPTION})*\s+(?:--\s+)?|(?:pnpm|yarn)(?:${OPTION})*\s+|bun(?:\s+run|\s+x)?(?:${OPTION})*\s+|python[\d.]*\s+-m\s+|py\s+-m\s+)`
 
 /**
  * A runner as whole tokens at the start of a segment's command, or after a launcher: `pytest -q`, `npx vitest run`,
@@ -947,7 +987,7 @@ export function classify(facts: Facts, config: Config, places: Places): Classifi
   const plains = segments.map(plainOf)
   const kindsAt = plains.map(plain => kindsIn(plain, config))
   // Each heredoc's first body line, in order; segmentsOf leaves `<<HEREDOC` where each one was.
-  const heredocs = [...command.matchAll(HEREDOC)].map(m => (m[0].split('\n')[1] ?? '').trim())
+  const heredocs = heredocsOf(command).map(m => (m[0].split('\n')[1] ?? '').trim())
   let seen = 0
   const heredocAt = segments.map(segment => {
     const count = segment.words.reduce((n, w) => n + w.text.split('<<HEREDOC').length - 1, 0)
@@ -1174,6 +1214,44 @@ const keyIn = (text: string, key: string): boolean => new RegExp(`(?<![\\w.-])${
  * known). A run that shows nothing stays weak until a later read. Each name belongs to the latest run that wrote it.
  * Returns the entries it changed.
  */
+const STATUS_VARIABLE = /\$\?|\$\{\?\}|\$LASTEXITCODE|PIPESTATUS/i
+const NUMBERING_GREPS = new Set(['grep', 'egrep', 'rg'])
+
+/** A reader's git or gh command that withholds judgement: any but `git ls-remote` and `gh pr view`. */
+function mixingGit(segment: Segment): boolean {
+  const word = commandWord(segment)
+  if (word !== 'git' && word !== 'gh') return false
+  // The subcommand: the first word after the command word that is no option (or option value: `-C dir`, `-c k=v`).
+  const rest: string[] = []
+  const words = segment.words
+  for (let k = headOf(segment) + 1; k < words.length; k += 1) {
+    const w = words[k]?.text ?? ''
+    if (w === '-C' || w === '-c' || w === '-R' || w === '--repo') k += 1
+    else if (!w.startsWith('-')) rest.push(w.toLowerCase())
+    if (rest.length === 2) break
+  }
+  if (word === 'git') return rest[0] !== 'ls-remote'
+  return !(rest[0] === 'pr' && rest[1] === 'view')
+}
+
+/** Whether a line is a glob's pieces in order (first at the start, last at the end), with anything between. */
+function globLine(pieces: readonly string[], line: string): boolean {
+  if (pieces.length === 1) return line === pieces[0]
+  const first = pieces[0] ?? ''
+  const last = pieces[pieces.length - 1] ?? ''
+  if (line.length < first.length + last.length || !line.startsWith(first) || !line.endsWith(last)) return false
+  let at = first.length
+  const end = line.length - last.length
+  for (let k = 1; k < pieces.length - 1; k += 1) {
+    const piece = pieces[k] ?? ''
+    if (piece === '') continue
+    const found = line.indexOf(piece, at)
+    if (found < 0 || found + piece.length > end) return false
+    at = found + piece.length
+  }
+  return true
+}
+
 export function readBack(ledger: Ledger, facts: Facts, config: Config, places: Places): Entry[] {
   if (facts.denied || facts.interrupted || facts.background) return []
   const text = `${facts.command ?? ''}\n${facts.path ?? ''}`.toLowerCase()
@@ -1187,15 +1265,31 @@ export function readBack(ledger: Ledger, facts: Facts, config: Config, places: P
   const calls = new Set<number>()
   for (const [key, seq] of latest) if (isTaskKey(key) ? keyIn(text, key) : named.has(key) && !own.has(key)) calls.add(seq)
   if (calls.size === 0) return []
-  // `grep -n` prefixes each line with its number ("31024:exit=0"); the status lines are matched without it.
-  const numbered = /\b(?:grep|egrep|rg)\b[^|;&\n]*\s-[A-Za-z]*n/.test(facts.command ?? '')
-  const output = facts.tool === 'Read' ? facts.output.replace(READ_PREFIX, '') : numbered ? facts.output.replace(/^\d+[:-]/gm, '') : facts.output
+  const readerSegments = facts.command === null ? [] : commandsOf(facts.command)
+  // `grep -n` prefixes each line with its number ("31024:exit=0"); the status lines are matched without it. Read from
+  // the parsed words: a pattern over the raw command grew with the number of grep words times the line length.
+  const numbered = readerSegments.some(s => NUMBERING_GREPS.has(commandWord(s)) && s.words.some(w => !w.quoted && /^-[A-Za-z]*n/.test(w.text)))
+  // A read that also runs a test or build runner, or any git or gh command but `git ls-remote` and `gh pr view`,
+  // prints that command's summaries, failures and sha lines beside the run's (`nothing to commit` from `git status`,
+  // `fatal:` from `git rev-parse`, "2 failed" in a `git log` subject, a failing check in `gh pr checks`, a ref update
+  // from `git fetch`). Such a read judges nothing; a clean read can later.
+  if (readerSegments.some(s => kindsIn(plainOf(s), config).length > 0 || mixingGit(s))) return []
+  // A status echo the reader itself runs prints the reader's status, never the run's: its lines are dropped before the
+  // run is judged, even when the run echoed the same template (then neither line can be told apart).
+  const ownEchoes = readerSegments
+    .filter(s => ECHO_HEADS.has(commandWord(s)))
+    .map(echoText)
+    .filter(t => STATUS_VARIABLE.test(t))
+    .map(t => t.split(VARIABLE))
+  const read = facts.tool === 'Read' ? facts.output.replace(READ_PREFIX, '') : numbered ? facts.output.replace(/^\d+[:-]/gm, '') : facts.output
+  const output =
+    ownEchoes.length === 0
+      ? read
+      : read
+          .split('\n')
+          .filter(line => !ownEchoes.some(pieces => globLine(pieces, line.trim())))
+          .join('\n')
   const exit = EXITED.exec(output)
-  // A read that also runs a test or build runner, or a git or gh op that changes something, prints that command's
-  // summaries and confirmations beside the run's. Such a read judges nothing; a clean read can later. Read-only git and
-  // gh (`ls-remote`, `rev-parse`, `status`, `log`, `show`, `branch`, `gh pr view/list/checks`) print no summary and
-  // do not withhold judgement.
-  if (facts.command !== null && commandsOf(facts.command).some(s => kindsIn(plainOf(s), config).length > 0)) return []
   const changed: Entry[] = []
   for (const seq of calls) {
     const waiting = ledger.entries.filter(e => e.seq === seq && e.background && e.watch !== undefined)
