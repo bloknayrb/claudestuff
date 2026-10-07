@@ -1,0 +1,679 @@
+import type { Basis, Kind, ShipOp } from '../types'
+
+// Pure: no `$`, no runtime imports. scripts/precision.mjs imports this file under Node.
+
+// Equal to the manifest's userConfig defaults: change both together.
+export const DEFAULT_TEST_COMMANDS: readonly string[] = ['pytest', 'uv run pytest', 'npm test', 'npm run test', 'npm run test:e2e', 'pnpm test', 'yarn test', 'vitest', 'jest', 'npx playwright test', 'cargo test', 'go test', 'claude plugin test']
+export const DEFAULT_BUILD_COMMANDS: readonly string[] = ['tsc', 'cargo build', 'npm run build', 'npm run typecheck', 'npm run typecheck:tests']
+
+export type Config = { tests: readonly RegExp[]; build: readonly RegExp[] }
+/** What a tool call answered (the ToolCallResult arms, read loosely). `text` is the result as the model read it. */
+export type Ran = { readonly deny?: string; readonly isError?: boolean; readonly result?: unknown; readonly text?: string }
+export type Facts = {
+  tool: string
+  command: string | null
+  path: string | null
+  toolUseId: string | null
+  denied: boolean
+  isError: boolean
+  interrupted: boolean
+  background: boolean
+  /** The result as the model read it: where a runner's summary shows. */
+  output: string
+  git: Partial<Record<ShipOp, true>>
+  /** Files a Bash command changed, when its result lists them (bashEditDiff, @internal: may be absent). */
+  changed: string[]
+}
+export type Run = { kind: Kind; ok: boolean; masked: boolean; basis: Basis }
+/**
+ * `mutations`: code edits, as pathKey()s. `messageFiles`: files a git or gh command read a message or body from
+ * (`-F`, `--file`, `--body-file`), normalized; relative ones as written.
+ */
+export type Classified = { mutations: string[]; runs: Run[]; messageFiles: string[] }
+/** Where things live: the home folder (memory roots), the session's project root (relative paths) and %TEMP%. Each may be unknown. */
+export type Places = { home: string | null; root: string | null; temp: string | null }
+export type Word = { text: string; quoted: boolean }
+/** The operator after a segment; '' ends the line (a trailing `&` is kept: the line ran in the background). */
+export type Op = '' | ';' | '\n' | '&' | '&&' | '||' | '|'
+export type Segment = { words: Word[]; op: Op }
+
+const SHELLS = new Set(['Bash', 'PowerShell'])
+const EDITORS = new Set(['Edit', 'Write', 'NotebookEdit'])
+const SHIP_OPS: readonly ShipOp[] = ['commit', 'push', 'merge', 'pr-create']
+
+// ---- Parsing a command line (decision 8) ----
+
+// A heredoc's body is data: keep the line that opens it, drop the body and its closing delimiter.
+const HEREDOC = /<<-?[ \t]*(['"]?)([A-Za-z_]\w*)\1([^\n]*)(?:\n(?:[\s\S]*?\n)?[ \t]*\2[ \t\r]*(?=\n|$)|\n[\s\S]*$)/g
+// PowerShell here-strings are data too.
+const HERESTRING = /@(['"])\r?\n[\s\S]*?\r?\n\1@/g
+// A line continuation (bash backslash, PowerShell backtick) joins two lines.
+const CONTINUATION = /\\\r?\n|`\r?\n/g
+const BREAKS = new Set([' ', '\t', '\r', '(', ')', '{', '}'])
+
+/** Splits a bash or PowerShell line into simple commands at top-level operators, outside quotes. */
+export function segmentsOf(command: string): Segment[] {
+  const src = command.replace(HEREDOC, '<<HEREDOC$3').replace(HERESTRING, ' @HERE@ ').replace(CONTINUATION, ' ')
+  const segments: Segment[] = []
+  let words: Word[] = []
+  let text = ''
+  let quoted = false
+  let open = false
+  let quote: string | null = null
+  const endWord = (): void => {
+    if (open) words.push({ text, quoted })
+    text = ''
+    quoted = false
+    open = false
+  }
+  const endSegment = (op: Op): void => {
+    endWord()
+    if (words.length > 0) segments.push({ words, op })
+    words = []
+  }
+  for (let i = 0; i < src.length; i += 1) {
+    const ch = src.charAt(i)
+    const next = src.charAt(i + 1)
+    if (quote !== null) {
+      if (ch === quote) {
+        quote = null
+      } else if (ch === '\\' && quote === '"' && next !== '' && '"\\$`'.includes(next)) {
+        text += next
+        i += 1
+      } else {
+        text += ch
+      }
+      continue
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch
+      quoted = true
+      open = true
+    } else if (ch === '\\' && next !== '') {
+      text += next
+      open = true
+      i += 1
+    } else if (ch === '#' && !open) {
+      while (i + 1 < src.length && src.charAt(i + 1) !== '\n') i += 1
+    } else if (ch === ';' || ch === '\n') {
+      endSegment(ch === ';' ? ';' : '\n')
+    } else if (ch === '&') {
+      const prev = src.charAt(i - 1)
+      if (next === '&') {
+        endSegment('&&')
+        i += 1
+      } else if (prev === '>' || prev === '<' || next === '>') {
+        // A redirection: 2>&1, >&2, &>.
+        text += ch
+        open = true
+      } else if (open || words.length > 0) {
+        endSegment('&')
+      }
+      // Otherwise PowerShell's call operator, `& "C:/x.exe"`: nothing to record.
+    } else if (ch === '|') {
+      if (next === '|') {
+        endSegment('||')
+        i += 1
+      } else {
+        if (next === '&') i += 1 // `|&` pipes stderr too
+        endSegment('|')
+      }
+    } else if (BREAKS.has(ch)) {
+      endWord()
+    } else {
+      text += ch
+      open = true
+    }
+  }
+  endSegment('')
+  const last = segments[segments.length - 1]
+  if (last !== undefined && last.op !== '&') last.op = ''
+  return segments
+}
+
+const SHELL_PAYLOAD: Readonly<Record<string, readonly string[]>> = {
+  bash: ['-c', '-lc'],
+  sh: ['-c'],
+  zsh: ['-c'],
+  pwsh: ['-command', '-c'],
+  powershell: ['-command', '-c'],
+  cmd: ['/c'],
+}
+const WRAPPERS = new Set(['sudo', 'time', 'env', 'command', 'exec', 'nice', 'nohup'])
+// Commands whose arguments are data: a runner word inside them is not a run.
+const DATA_HEADS = new Set(['echo', 'printf', 'grep', 'egrep', 'fgrep', 'rg', 'sed', 'awk', 'cat', 'head', 'tail', 'less', 'jq', 'which', 'where', 'pip', 'pip3', 'write-output', 'write-host', 'select-string', 'sls', 'findstr', 'get-content', 'set-content', 'out-file'])
+const ECHO_HEADS = new Set(['echo', 'printf', 'write-output', 'write-host'])
+// Flags whose value is a message or a body, not a command.
+const PAYLOAD_FLAGS = new Set(['-m', '--message', '--body', '-b', '--title', '-t', '-F', '--file', '--body-file'])
+
+// Shell keywords that open a loop or conditional body: `do gh pr merge $n`, `then git push` (re-review).
+const KEYWORDS = new Set(['do', 'then', 'else', 'elif', 'if', 'while', 'until', '!'])
+
+/** The index of a segment's command word, past keywords, `X=1` assignments (quoted or not) and wrappers such as `sudo` or `timeout 60`. */
+function headOf(segment: Segment): number {
+  let i = 0
+  while (i < segment.words.length) {
+    const word = segment.words[i]
+    if (word === undefined) break
+    const t = word.text.toLowerCase()
+    if (/^[A-Za-z_]\w*=/.test(word.text)) i += 1
+    else if (WRAPPERS.has(t) || KEYWORDS.has(t)) i += 1
+    else if (t === 'timeout') i += 2
+    else break
+  }
+  return i
+}
+
+const commandWord = (segment: Segment): string => (segment.words[headOf(segment)]?.text ?? '').toLowerCase().replace(/\.exe$/, '')
+
+/** segmentsOf, with `bash -c "..."` and `pwsh -Command "..."` payloads parsed as the commands they are. */
+export function commandsOf(command: string, depth = 0): Segment[] {
+  const out: Segment[] = []
+  for (const segment of segmentsOf(command)) {
+    const flags = SHELL_PAYLOAD[commandWord(segment)]
+    const head = headOf(segment)
+    const at = flags === undefined ? -1 : segment.words.findIndex((w, i) => i > head && flags.includes(w.text.toLowerCase()))
+    const payload = at < 0 ? undefined : segment.words[at + 1]
+    const inner = payload === undefined || depth >= 2 ? [] : commandsOf(payload.text, depth + 1)
+    const tail = inner[inner.length - 1]
+    if (tail === undefined) {
+      out.push(segment)
+      continue
+    }
+    tail.op = segment.op
+    out.push(...inner)
+  }
+  return out
+}
+
+/** A segment as matching sees it: from the command word on, quoted and payload arguments as `Q`; '' for a data command. */
+function plainOf(segment: Segment): string {
+  if (DATA_HEADS.has(commandWord(segment))) return ''
+  const head = headOf(segment)
+  const out: string[] = []
+  for (let i = head; i < segment.words.length; i += 1) {
+    const word = segment.words[i]
+    if (word === undefined) continue
+    const before = segment.words[i - 1]
+    const isPayload = word.quoted || (i > head && before !== undefined && !before.quoted && PAYLOAD_FLAGS.has(before.text))
+    out.push(isPayload ? 'Q' : word.text)
+  }
+  return out.join(' ')
+}
+
+// ---- Runners, git ops and their outcome (decision 7) ----
+
+// After the runner, in its segment: flags that make it run nothing.
+const NON_RUN = /\s--(?:version|help|collect-only|no-run|listTests)\b/i
+
+const GIT = String.raw`^git(?:\s+-[cC]\s+\S+)*\s+`
+const SHIP_RES: Readonly<Record<ShipOp, RegExp>> = {
+  commit: new RegExp(`${GIT}commit(?![\\w-])`, 'i'),
+  push: new RegExp(`${GIT}push(?![\\w-])`, 'i'),
+  merge: new RegExp(`^gh\\s+pr\\s+merge(?![\\w-])|${GIT}merge(?![\\w-])`, 'i'),
+  'pr-create': /^gh\s+pr\s+create(?![\w-])/i,
+}
+// An op that does nothing: `git merge --abort`, `git push --dry-run`.
+const SHIP_SKIP = /\s--(?:abort|dry-run)\b/i
+
+// What a runner's visible output says. `claude plugin test` prints "66 pass" / "4 fail"; svelte-check prints
+// "COMPLETED ... 0 ERRORS"; tsup prints "Build success"; tsc prints nothing on success.
+const SUMMARY: Readonly<Record<'tests' | 'build', { fail: RegExp; pass: RegExp }>> = {
+  tests: {
+    fail: /\b[1-9]\d*\s+(?:failed|failing|fail|failures?|errors?)\b|\bFAILED\b|^\s*FAIL\b|^\(fail\)|test result: FAILED/m,
+    pass: /\b[1-9]\d*\s+(?:passed|passing|pass)\b|\btest result: ok\b|^OK\b|^ok\s+\S/m,
+  },
+  build: {
+    // The last three: the compiler never started (npx found no tsc, or it is not on PATH), so its silence proves nothing.
+    fail: /\berror TS\d+|\bFound [1-9]\d* errors?\b|^error(?:\[E\d+\])?:|\bBuild failed\b|\bFailed to compile\b|\bCOMPLETED\b.*\b[1-9]\d* ERRORS\b|This is not the tsc command|command not found|is not recognized as/im,
+    pass: /^\s*Finished\b|\bCompiled successfully\b|\bbuilt in \d|\bFound 0 errors\b|\bCOMPLETED\b.*\b0 ERRORS\b|\bBuild success\b/im,
+  },
+}
+const SHIP_FAIL = /^(?:error|fatal):|\[rejected\]|\bnothing to commit\b|\bfailed to push\b/im
+// Each op's own confirmation, so one op's output cannot confirm another (`MERGED` from `gh pr view` is not a commit).
+const SHIP_PASS: Readonly<Record<ShipOp, RegExp>> = {
+  commit: /^\[[\w./-]+(?: \(root-commit\))? [0-9a-f]{7,}\]/m,
+  push: /^\s*\+?\s*[0-9a-f]{7,}\.\.\.?[0-9a-f]{7,}\s+\S+\s+->\s+\S+|^\s*\*\s+\[new (?:branch|tag)\]|\bset up to track\b/im,
+  // `gh pr view --json state` prints MERGED bare, first in a --jq line, or as JSON.
+  merge: /\bMerged pull request\b|^\s*MERGED\b|"state"\s*:\s*"MERGED"/im,
+  'pr-create': /github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/i,
+}
+// `git commit -q` prints nothing; a later `git log --oneline` in the same command prints a sha line: the commit's own
+// when it carries the commit's subject (after any `(HEAD -> x)` decoration), or, with no subject known, when nothing
+// between the commit and the log moved to another branch, folder or repository (third round).
+const SHA_LINE = /^[0-9a-f]{7,40} +(?:\([^)]*\) +)?(\S.*)$/
+const GIT_LOG = /^git(?:\s+-[cC]\s+\S+)*\s+log(?![\w-])/i
+const GIT_ELSEWHERE = /^git(?:\s+-[cC]\s+\S+)*\s+(?:checkout|switch|pull|merge|reset)(?![\w-])/
+const CD = new Set(['cd', 'pushd', 'popd', 'chdir', 'set-location', 'sl'])
+const TSC = /(?:^|\s)tsc(?=$|\s)/i
+// Pipe members that keep every line tsc prints, so a failure would still show its first `error TS` line. `tail` keeps
+// them only as `tail -n +K` (third round: a last-N `tail` often holds only a diagnostic's indented elaboration lines),
+// and `Select-Object` only without `-Last`; `less` and `more` are left out.
+const FILTERS = new Set(['head', 'tail', 'grep', 'egrep', 'rg', 'cat', 'tee', 'sort', 'uniq', 'select-object', 'select', 'out-host', 'out-string', 'select-string', 'sls', 'findstr'])
+const GREPS = new Set(['grep', 'egrep', 'rg', 'select-string', 'sls', 'findstr'])
+// Grep flags that print a count, a file name or nothing instead of the lines.
+const COUNTING = /^-(?:-(?:count|quiet|silent|files-with(?:out)?-matches)$|[A-Za-z]*[cqlL][A-Za-z]*$)|^-Quiet$/
+
+/** A parsed command line, with what classify has learned so far about each segment. */
+type Line = {
+  segments: readonly Segment[]
+  plains: readonly string[]
+  kindsAt: readonly Kind[][]
+  /** Segment k holds a run already judged strong and ok (classify fills this in order, so earlier segments are known). */
+  strong: readonly boolean[]
+  /** The first line of the heredoc segment k reads, when it reads one. */
+  heredocAt: readonly (string | undefined)[]
+}
+
+/** An `echo` of a run's own status: the line pattern (status as group 1), and which of the echoes printing lines of that shape it is. */
+type Echoed = { pattern: RegExp; n: number; of: number }
+
+type Place = {
+  /** Something after the run can replace its exit status. */
+  masked: boolean
+  /** The run's pipeline ends the line, so the call's isError is its status. */
+  last: boolean
+  /** What an `&& echo` after the run printed (only for a run that ends its pipeline). */
+  echoes: string[]
+  /** An `echo` of this run's own exit status straight after its pipeline. */
+  status: Echoed | null
+  /**
+   * Kinds run by later members of this run's `&&` chain: one that showed its own pass summary ran, so this run exited 0.
+   * Only for a run that ends its pipeline: otherwise the chain went on because the last filter exited 0 (third round).
+   */
+  chained: Kind[]
+  /** A `git log` after this run can show a quiet commit's sha line (see SHA_LINE). */
+  logged: boolean
+  /** The commit's subject, when the command shows it (`-m`, or the heredoc's first line). */
+  subject: string | null
+  /** Piped only into filters that keep every line tsc prints. */
+  filtered: boolean
+  /** Every earlier member of this run's `&&` chain is a `cd` or a proven run, so this run surely started. */
+  ran: boolean
+}
+
+const echoText = (segment: Segment): string =>
+  segment.words
+    .slice(headOf(segment) + 1)
+    .filter(w => w.quoted || !/^-[neE]+$/.test(w.text))
+    .map(w => w.text)
+    .join(' ')
+    .trim()
+
+/**
+ * The line an echo of a run's status prints, as a pattern. `$?` is the status of the command just before the echo, so
+ * it counts only for the last member of that pipeline; `${PIPESTATUS[n]}` names the n-th member; `$LASTEXITCODE` is
+ * PowerShell's. Any other variable in the echo matches any text.
+ */
+function statusPattern(template: string, last: boolean, member: number, piped: boolean): RegExp | null {
+  const own = [...(last ? [String.raw`\$\?`, String.raw`\$\{\?\}`] : []), ...(piped ? [String.raw`\$\{PIPESTATUS\[${member}\]\}`] : []), String.raw`\$LASTEXITCODE\b`]
+  const found = new RegExp(own.join('|'), 'i').exec(template)
+  if (found === null) return null
+  const literal = (text: string): string => text.split(/\$\{[^}]*\}|\$[A-Za-z_?][\w]*/).map(escapeRe).join('.*?')
+  return new RegExp(String.raw`^${literal(template.slice(0, found.index))}(-?\d+)${literal(template.slice(found.index + found[0].length))}$`)
+}
+
+/** An echo's text with every variable as `0`: the shape of the line it prints. */
+const filled = (text: string): string => text.replace(/\$\{[^}]*\}|\$[A-Za-z_?][\w]*/g, '0')
+
+/**
+ * The status an echo printed. Several echoes can print lines of one shape (`echo "exit=$?"` after each of two runs),
+ * so the n-th matching line is the n-th such echo's; when the count of matching lines differs from the count of those
+ * echoes (a loop, or a program printing the same shape), the status is unsure (third round).
+ */
+function statusIn(output: string, status: Echoed): number | 'unsure' | null {
+  const found = output
+    .split(/\r?\n/)
+    .map(line => status.pattern.exec(line.trim())?.[1])
+    .filter((v): v is string => v !== undefined)
+  if (found.length === 0) return null
+  if (found.length !== status.of) return 'unsure'
+  return Number(found[status.n])
+}
+
+/** A pipe member that keeps every line tsc prints (FILTERS). */
+function keepsLines(segment: Segment): boolean {
+  const word = commandWord(segment)
+  if (!FILTERS.has(word)) return false
+  const args = segment.words.slice(headOf(segment) + 1).filter(w => !w.quoted).map(w => w.text)
+  if (word === 'tail') return args.some(a => /^(?:-n|--lines=)?\+\d+$/.test(a))
+  if (word === 'select-object' || word === 'select') return !args.some(a => /^-l/i.test(a))
+  return !GREPS.has(word) || !args.some(a => COUNTING.test(a))
+}
+
+/** The repository a git segment names with `-C` before its verb, or null. */
+function gitDirOf(segment: Segment): string | null {
+  if (commandWord(segment) !== 'git') return null
+  for (let k = headOf(segment) + 1; k < segment.words.length; ) {
+    const word = segment.words[k]
+    if (word === undefined || !word.text.startsWith('-')) break
+    if (word.text === '-C') return segment.words[k + 1]?.text ?? null
+    k += word.text === '-c' ? 2 : 1
+  }
+  return null
+}
+
+/** A commit segment's subject: the first line of its `-m` value, or of the heredoc it reads; null when the command does not show it. */
+function subjectOf(segment: Segment, heredoc: string | undefined): string | null {
+  const words = segment.words
+  const at = words.findIndex(w => !w.quoted && (w.text === '-m' || w.text === '--message'))
+  let value = at >= 0 ? words[at + 1]?.text : words.map(w => /^--message=([\s\S]*)$/.exec(w.text)?.[1]).find(v => v !== undefined)
+  if (value === undefined || value.includes('<<HEREDOC')) value = words.some(w => w.text.includes('<<HEREDOC')) ? heredoc : undefined
+  else if (/[$`]/.test(value)) value = undefined // `-m "$(cat msg.txt)"`: the text is not in the command
+  const subject = (value ?? '').split(/\r?\n/)[0]?.trim() ?? ''
+  return subject === '' ? null : subject
+}
+
+/** What, after segment i, can replace its exit status, and what else on the line can show how it ended. */
+function placeOf(line: Line, i: number): Place {
+  const { segments, plains, kindsAt, strong } = line
+  let start = i
+  while (start > 0 && segments[start - 1]?.op === '|') start -= 1
+  let j = i
+  while (j < segments.length - 1 && segments[j]?.op === '|') j += 1
+  // A later `&&` member proves this run only when this run's status is its pipeline's (it ends the pipeline: a piped
+  // run's chain goes on because the last filter exited 0), and when no `||` before it could have skipped it
+  // (`x || run && echo ok` prints ok when x passed and run never ran). Third round.
+  const credits = j === i && segments[start - 1]?.op !== '||'
+  let masked = j > i // a later pipe member's status is the pipeline's
+  const echoes: string[] = []
+  // Still in this run's `&&` chain: an `&& echo` after a `;`, newline, `&` or `||` prints whatever this run did.
+  let chain = true
+  for (let k = j; k < segments.length; k += 1) {
+    const op = segments[k]?.op ?? ''
+    if (op === '') break
+    if (op === '|') continue // a pipe inside a later && command: this run's failure still stops the chain
+    if (op === '&&') {
+      const after = segments[k + 1]
+      if (after !== undefined && ECHO_HEADS.has(commandWord(after))) {
+        masked = true
+        if (credits && chain) echoes.push(echoText(after))
+      }
+      continue
+    }
+    masked = true // `;`, a newline, `&` or `||`: another command's status ends the line
+    chain = false
+  }
+  // An echo of the status straight after the pipeline (`; echo "rc=$?"`), never after `&&` or `||`.
+  const end = segments[j]?.op
+  const next = segments[j + 1]
+  const echoed = (end === ';' || end === '\n') && next !== undefined && ECHO_HEADS.has(commandWord(next))
+  const pattern = echoed ? statusPattern(echoText(next), j === i, i - start, j > start) : null
+  let status: Echoed | null = null
+  if (pattern !== null) {
+    // Every echo on the line that prints a line of this shape, in order; this one is the n-th.
+    const same = segments.flatMap((s, k) => (ECHO_HEADS.has(commandWord(s)) && pattern.test(filled(echoText(s))) ? [k] : []))
+    const n = same.indexOf(j + 1)
+    if (n >= 0) status = { pattern, n, of: same.length }
+  }
+  // The members of this run's `&&` chain after it, each a pipeline.
+  const chained: Kind[] = []
+  for (let k = j; credits && segments[k]?.op === '&&'; ) {
+    let last = k + 1
+    while (last < segments.length - 1 && segments[last]?.op === '|') last += 1
+    for (let m = k + 1; m <= last; m += 1) chained.push(...(kindsAt[m] ?? []))
+    k = last
+  }
+  // A later `git log`. With the commit's subject known, its sha line must carry it (shaShows). Without it, nothing
+  // between the commit and the log may change branch, folder or repository (third round).
+  const segment = segments[i]
+  const subject = segment !== undefined && (kindsAt[i] ?? []).includes('commit') ? subjectOf(segment, line.heredocAt[i]) : null
+  const here = segment === undefined ? null : gitDirOf(segment)
+  const log = plains.findIndex((plain, m) => m > j && GIT_LOG.test(plain))
+  const stays =
+    log >= 0 &&
+    segments.slice(j + 1, log + 1).every((s, k) => !CD.has(commandWord(s)) && !GIT_ELSEWHERE.test(plains[j + 1 + k] ?? '') && (commandWord(s) !== 'git' || gitDirOf(s) === here))
+  // tsc's silence proves something only if tsc started: every earlier member of its `&&` chain is a `cd` or a run
+  // already proven, and no `||` could have skipped it (third round).
+  let ran = true
+  for (let k = start - 1; k >= 0; ) {
+    const op = segments[k]?.op
+    if (op === '||') ran = false
+    if (op !== '&&') break
+    let first = k
+    while (first > 0 && segments[first - 1]?.op === '|') first -= 1
+    const before = segments[k]
+    const cd = first === k && before !== undefined && CD.has(commandWord(before))
+    if (!cd && !strong.slice(first, k + 1).some(Boolean)) {
+      ran = false
+      break
+    }
+    k = first - 1
+  }
+  return {
+    masked,
+    last: j === segments.length - 1,
+    echoes,
+    status,
+    chained,
+    logged: log >= 0 && (subject !== null || stays),
+    subject,
+    filtered: j > i && segments.slice(i + 1, j + 1).every(keepsLines),
+    ran,
+  }
+}
+
+/** A sha line in the output: one carrying the subject when it is known, else any. */
+function shaShows(output: string, subject: string | null): boolean {
+  return output.split(/\r?\n/).some(text => {
+    const match = SHA_LINE.exec(text.trim())
+    return match !== null && (subject === null || (match[1] ?? '').startsWith(subject.slice(0, 40)))
+  })
+}
+
+function shownBy(kind: Kind, output: string, echoes: readonly string[], logged: boolean, subject: string | null): 'pass' | 'fail' | null {
+  const group = kind === 'tests' || kind === 'build' ? SUMMARY[kind] : { fail: SHIP_FAIL, pass: SHIP_PASS[kind] }
+  if (group.fail.test(output)) return 'fail'
+  if (group.pass.test(output)) return 'pass'
+  if (kind === 'commit' && logged && shaShows(output, subject)) return 'pass'
+  // The text an `&& echo` printed shows the run before it succeeded.
+  const lines = output.split(/\r?\n/).map(l => l.trim())
+  if (echoes.some(t => t.length >= 2 && lines.includes(t))) return 'pass'
+  return null
+}
+
+function strengthOf(kind: Kind, facts: Facts, place: Place, plain: string): Omit<Run, 'kind'> {
+  if (facts.denied || facts.interrupted) return { ok: false, masked: false, basis: 'exit' }
+  // The exit status speaks for this run only when nothing after it can replace it; isError speaks for the last segment.
+  if (!place.masked && (place.last || !facts.isError)) return { ok: !facts.isError, masked: false, basis: 'exit' }
+  // An echo of this run's own status is its exit code; echoed lines that do not pair off with their echoes are unsure.
+  const status = place.status === null ? null : statusIn(facts.output, place.status)
+  if (status === 'unsure') return { ok: true, masked: true, basis: 'none' }
+  if (status !== null) return { ok: status === 0, masked: false, basis: 'echo' }
+  const shown = shownBy(kind, facts.output, place.echoes, place.logged, place.subject)
+  if (shown === 'fail') return { ok: false, masked: false, basis: 'output' }
+  if (shown === 'pass') return { ok: true, masked: false, basis: 'output' }
+  // A later `&&` member that showed its own pass summary ran, so this run exited 0. (A failure summary is not used:
+  // a generic `error:` line may be this run's own.) `chained` is empty unless this run ends its pipeline.
+  if (place.chained.some(k => shownBy(k, facts.output, [], false, null) === 'pass')) return { ok: true, masked: false, basis: 'output' }
+  // tsc prints nothing on success, and its first line on failure is an `error TS` line. So no such line is a pass when
+  // tsc surely started (the call did not error, every earlier `&&` member is a `cd` or proven) and every later pipe
+  // member keeps all its lines (no last-N `tail`, no count). Third round.
+  if (kind === 'build' && place.filtered && place.ran && !facts.isError && TSC.test(plain)) return { ok: true, masked: false, basis: 'output' }
+  return { ok: true, masked: true, basis: 'none' }
+}
+
+/** A userConfig list: an array (the manifest's `multiple` form) or a comma string; empty means the defaults. */
+export function listOption(value: unknown, fallback: readonly string[]): string[] {
+  const raw: unknown[] = Array.isArray(value) ? value : typeof value === 'string' ? value.split(',') : []
+  const list = raw.filter((v): v is string => typeof v === 'string').map(v => v.trim()).filter(v => v.length > 0)
+  return list.length > 0 ? list : [...fallback]
+}
+
+function escapeRe(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** A runner as whole tokens within a segment: `uv run pytest` matches `uv run pytest -q`, never `pytest-cov`. */
+export function runnerRe(command: string): RegExp {
+  const body = command.trim().split(/\s+/).map(escapeRe).join('\\s+')
+  return new RegExp(`(?:^|\\s)${body}(?=$|\\s)`, 'i')
+}
+
+export function configOf(tests: readonly string[], build: readonly string[]): Config {
+  return { tests: tests.map(runnerRe), build: build.map(runnerRe) }
+}
+
+function runnerIn(plain: string, res: readonly RegExp[]): boolean {
+  for (const re of res) {
+    const match = re.exec(plain)
+    if (match === null) continue
+    if (NON_RUN.test(plain.slice(match.index + match[0].length))) continue
+    return true
+  }
+  return false
+}
+
+const objectOf = (value: unknown): Record<string, unknown> =>
+  typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {}
+
+/** What a finished tool call tells the ledger. `input` is the tool.call event (tool name beside its arguments). */
+export function factsOf(input: Readonly<Record<string, unknown>>, ran: Ran): Facts {
+  const result = objectOf(ran.result)
+  const op = objectOf(result.gitOperation)
+  const pr = objectOf(op.pr)
+  const branch = objectOf(op.branch)
+  const git: Partial<Record<ShipOp, true>> = {}
+  if (op.commit !== undefined) git.commit = true
+  if (op.push !== undefined) git.push = true
+  if (pr.action === 'merged' || branch.action === 'merged') git.merge = true
+  if (pr.action === 'created') git['pr-create'] = true
+  const diff = objectOf(result.bashEditDiff)
+  const listed: unknown[] = Array.isArray(diff.changedFiles)
+    ? diff.changedFiles
+    : Array.isArray(diff.files)
+      ? diff.files.map(f => objectOf(f).filePath)
+      : []
+  const stdout = typeof result.stdout === 'string' ? result.stdout : null
+  const stderr = typeof result.stderr === 'string' ? result.stderr : ''
+  const output = typeof ran.text === 'string' ? ran.text : stdout !== null ? `${stdout}\n${stderr}` : typeof ran.result === 'string' ? ran.result : ''
+  return {
+    tool: String(input.tool),
+    command: typeof input.command === 'string' ? input.command : null,
+    path: typeof input.file_path === 'string' ? input.file_path : typeof input.notebook_path === 'string' ? input.notebook_path : null,
+    toolUseId: typeof input.tool_use_id === 'string' ? input.tool_use_id : null,
+    denied: ran.deny !== undefined,
+    isError: ran.isError === true,
+    interrupted: result.interrupted === true,
+    background: input.run_in_background === true || typeof result.backgroundTaskId === 'string',
+    output,
+    git,
+    changed: listed.filter((p): p is string => typeof p === 'string'),
+  }
+}
+
+// ---- Mutation scope (decision 9) ----
+
+const SCRATCH_DIRS = /\/appdata\/local\/temp\/|^\/tmp\/|\/scratchpad\/|^[a-z]:\/windows\/temp\//
+const trimEnd = (p: string): string => p.replace(/\/+$/, '')
+
+/** Forward slashes, `~/` and git-bash `/c/` expanded, lowercased (Windows paths compare case-insensitively). */
+export function normPath(path: string, home: string | null): string {
+  let p = path.replace(/\\/g, '/').replace(/\/{2,}/g, '/')
+  if (p.startsWith('~/') && home !== null) p = trimEnd(home.replace(/\\/g, '/')) + p.slice(1)
+  const drive = /^\/([a-zA-Z])\//.exec(p)
+  if (drive !== null) p = `${drive[1]}:/${p.slice(3)}`
+  return p.toLowerCase()
+}
+
+/** A path as the ledger keys it: normalized, and made absolute against the session root when it is relative and the root is known. */
+export function pathKey(path: string, places: Places): string {
+  const p = normPath(path, places.home)
+  if (/^(?:[a-z]:\/|\/)/.test(p) || places.root === null) return p
+  return `${trimEnd(normPath(places.root, places.home))}/${p.replace(/^\.\//, '')}`
+}
+
+/**
+ * A write that counts as a code edit: anywhere, sibling worktrees included (brief, second round), except `.md` files,
+ * memory roots, and scratch or temp folders (the session scratchpad and %TEMP%). A commit-message or PR-body file is
+ * taken back out when a git or gh command reads it (`record`).
+ */
+export function isCodeMutation(path: string, places: Places): boolean {
+  const p = pathKey(path, places)
+  if (p.endsWith('.md') || SCRATCH_DIRS.test(p)) return false
+  if (places.temp !== null) {
+    const temp = trimEnd(normPath(places.temp, places.home))
+    if (temp !== '' && p.startsWith(`${temp}/`)) return false
+  }
+  if (places.home !== null) {
+    const claude = `${trimEnd(normPath(places.home, null))}/.claude/`
+    if (p.startsWith(`${claude}memory/`) || p.startsWith(`${claude}rules/`)) return false
+    const projects = `${claude}projects/`
+    if (p.startsWith(projects) && p.slice(projects.length).split('/')[1] === 'memory') return false
+  }
+  return true
+}
+
+/** The kinds of run a segment is: test or build runners, and git or gh ops. */
+function kindsIn(plain: string, config: Config): Kind[] {
+  if (plain === '') return []
+  const found: Kind[] = []
+  if (runnerIn(plain, config.tests)) found.push('tests')
+  if (runnerIn(plain, config.build)) found.push('build')
+  for (const op of SHIP_OPS) if (SHIP_RES[op].test(plain) && !SHIP_SKIP.test(plain)) found.push(op)
+  return found
+}
+
+// A git or gh command that reads its message or body from a file: that file was a message, not code.
+const MESSAGE_CMD = /^(?:git(?:\s+-[cC]\s+\S+)*\s+(?:commit|tag|merge)|gh\s+(?:pr|issue|release)\s+(?:create|edit|merge|comment))(?![\w-])/i
+const MESSAGE_FLAGS = new Set(['-F', '--file', '--body-file'])
+
+/** The files git or gh read a message or body from, normalized; a relative one as written. `-F -` (stdin) is none. */
+function messageFilesOf(segments: readonly Segment[], plains: readonly string[], home: string | null): string[] {
+  const out: string[] = []
+  segments.forEach((segment, i) => {
+    if (!MESSAGE_CMD.test(plains[i] ?? '')) return
+    segment.words.forEach((word, k) => {
+      const inline = /^--(?:file|body-file)=(.+)$/.exec(word.text)
+      const value = inline !== null ? inline[1] : MESSAGE_FLAGS.has(word.text) ? segment.words[k + 1]?.text : undefined
+      if (value !== undefined && value !== '' && value !== '-') out.push(normPath(value, home).replace(/^\.\//, ''))
+    })
+  })
+  return out
+}
+
+export function classify(facts: Facts, config: Config, places: Places): Classified {
+  if (EDITORS.has(facts.tool)) {
+    const ok = !facts.denied && !facts.isError && !facts.interrupted
+    const edited = ok && facts.path !== null && isCodeMutation(facts.path, places)
+    return { mutations: edited && facts.path !== null ? [pathKey(facts.path, places)] : [], runs: [], messageFiles: [] }
+  }
+  const command = facts.command
+  if (!SHELLS.has(facts.tool) || command === null) return { mutations: [], runs: [], messageFiles: [] }
+  const segments = commandsOf(command)
+  const plains = segments.map(plainOf)
+  const kindsAt = plains.map(plain => kindsIn(plain, config))
+  // Each heredoc's first body line, in order; segmentsOf leaves `<<HEREDOC` where each one was.
+  const heredocs = [...command.matchAll(HEREDOC)].map(m => (m[0].split('\n')[1] ?? '').trim())
+  let seen = 0
+  const heredocAt = segments.map(segment => {
+    const count = segment.words.reduce((n, w) => n + w.text.split('<<HEREDOC').length - 1, 0)
+    const first = count > 0 ? heredocs[seen] : undefined
+    seen += count
+    return first
+  })
+  const strong: boolean[] = segments.map(() => false)
+  const line: Line = { segments, plains, kindsAt, strong, heredocAt }
+  const runs: Run[] = []
+  kindsAt.forEach((kinds, i) => {
+    if (kinds.length === 0) return
+    const place = placeOf(line, i)
+    for (const kind of kinds) {
+      const run: Run = { kind, ...strengthOf(kind, facts, place, plains[i] ?? '') }
+      runs.push(run)
+      if (run.ok && !run.masked) strong[i] = true
+    }
+  })
+  // The result's gitOperation confirms an op whatever the command looked like (spec deviation 7).
+  for (const op of SHIP_OPS) {
+    if (facts.git[op] !== true) continue
+    const seen = runs.filter(r => r.kind === op)
+    if (seen.length === 0) runs.push({ kind: op, ok: true, masked: false, basis: 'gitOperation' })
+    for (const run of seen) Object.assign(run, { ok: true, masked: false, basis: 'gitOperation' })
+  }
+  return {
+    mutations: facts.changed.filter(p => isCodeMutation(p, places)).map(p => pathKey(p, places)),
+    runs,
+    messageFiles: messageFilesOf(segments, plains, places.home),
+  }
+}
