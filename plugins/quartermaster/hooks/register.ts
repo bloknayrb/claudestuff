@@ -226,7 +226,7 @@ async function recordReading($: EngineInterface, limits: readonly SessionRateLim
   if (window === null || window.resetsAt === null) return
   const { key, readings } = await addReading($, window.resetsAt, [await $.clock.now(), window.pct])
   const crossed = await claimThreshold($, key, window.pct)
-  if (crossed !== null) $.ui.toast(`Quartermaster: ${windowText(window.pct, window.resetsAt, fitCap(readings))}.`)
+  if (crossed !== null) $.ui.toast(`Quartermaster: ${windowText(window.pct, window.resetsAt, fitCap(readings), await $.clock.now())}.`)
 }
 
 /** The one status line; hidden with no five-hour reading. */
@@ -263,7 +263,7 @@ async function judge($: EngineInterface, view: SpawnView, label: string): Promis
     const window = fiveHour((await $.session.usage()).rateLimits)
     if (window !== null && window.pct >= cfg.warnAt) {
       const held = window.resetsAt === null ? null : await windowReadings($, window.resetsAt)
-      const reading = windowText(window.pct, window.resetsAt, held === null ? null : fitCap(held.readings))
+      const reading = windowText(window.pct, window.resetsAt, held === null ? null : fitCap(held.readings), await $.clock.now())
       fired.windowKey = held === null ? null : held.key
       fired.guards.push('heavy')
       fired.denyTexts.push(`Quartermaster: ${reading}. Re-issue unchanged to spend it anyway.`)
@@ -472,7 +472,7 @@ const onCommand: Hook<'command.run'> = async $ => {
     guardLine('heavy guard', counters.heavy),
     window === null
       ? 'pace: no five-hour reading (rate limits come with a subscription)'
-      : `pace: ${paceClause(cap, window.resetsAt, window.pct)}, window at ${window.pct}%`,
+      : `pace: ${paceClause(cap, window.resetsAt, window.pct, await $.clock.now())}, window at ${window.pct}%`,
     `this session: ${agentsClause(await read($, agents), cfg.heavyModels)}`,
     `toast-only spawns this session: ${sources.join(', ') || 'none'}`,
     `ring: ${ring.length} of the last ${RING_MAX} fires kept`,

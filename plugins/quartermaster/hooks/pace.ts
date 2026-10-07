@@ -72,11 +72,13 @@ export function paceClause(cap: number | null, resetsAt: number | null, pct = 0,
 }
 
 /** `five-hour window at 82%, resets 17:00; on pace to cap at 15:40`: the reading the heavy guard and toasts give. */
-export function windowText(pct: number, resetsAt: number | null, cap: number | null): string {
+export function windowText(pct: number, resetsAt: number | null, cap: number | null, now = 0): string {
   const resets = resetsAt === null ? '' : `, resets ${clockText(resetsAt)}`
   const pace =
     pct >= 100
       ? 'already capped'
+      : cap !== null && now > 0 && cap <= now
+      ? 'about to cap'
       : cap === null
       ? 'pace unknown'
       : resetsAt !== null && cap >= resetsAt
