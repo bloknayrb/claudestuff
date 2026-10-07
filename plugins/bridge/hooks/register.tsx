@@ -1,16 +1,32 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderViewport } from 'claude-code'
 
-import type { BridgeSession, DecideInput } from '../types'
-import { addDecision, idForUse, pending } from './book'
+import type { Answer, BridgeSession, DecideInput } from '../types'
+import { addDecision, idForUse, isAnsweredBy, markAnswered, pending, recommendedAnswer, reopen } from './book'
+import { mainTurnEnded, mainTurnStarted, rowAppended, stepBegan } from './delivery'
+import { APPEND_MARK, formatRow, isBlankText } from './row'
 import { denialFor, INPUT_SCHEMA, isSubagentCall, receipt, SUBAGENT_DENIAL, TOOL_DESCRIPTION, TOOL_NAME, validateDecide } from './decide'
-import { freshSession, normalize } from './session'
+import { freshSession, lastTurn, normalize, withTurnText } from './session'
 import { ARM_DELAY_MS, bandTree, PANE_ID, paneTree, PANE_TITLE } from './ui'
 import type { CardActions } from './ui'
 
 // A new decision opens the pane unasked only from this width, as the spec says; the engine's own
 // floor is 110 for a pane id the person has opened before, so the mod checks 144 itself too.
 const UNASKED_PANE_COLUMNS = 144
+
+// Shared convention: a minimal wake starting with '<'. It is stored plugin-framed (00-shared Q3);
+// never submit it asUser, or it would pass for typed text.
+const WAKE_TEXT = '<bridge-wake/>'
+const WAKE_RETRY_MS = 500
+const WAKE_FAIL_TOAST = 'Bridge: answer saved; it reaches Claude with your next prompt.'
+
+// The shared module's row tags: an answer row, and a still-pending note (Task 10).
+const ROW_TAG = 'decision'
+const NOTE_TAG = 'note'
+
+// The test kit's refusal of a plugin append (00-shared); a live engine always serves one. The same
+// seam as Red Team's appendRow.
+const KIT_NO_APPEND = 'no implementation for session.append'
 
 // The one state value. Defined here, beside every read/update of it: the 2.1.292 validator refuses a
 // state library read of an atom imported from another file (00-shared, Validator rules).
@@ -153,10 +169,112 @@ async function toggleOther($: EngineInterface, id: number): Promise<void> {
   if (moved.deny !== undefined) $.ui.log(`bridge: focus not moved: ${moved.deny}`, { to: 'debug' })
 }
 
-// Task 9 replaces these three with the delivering versions.
-async function pickOption(_$: EngineInterface, _id: number, _index: number): Promise<void> {}
-async function makeItSo(_$: EngineInterface, _id: number): Promise<void> {}
-async function sendOther(_$: EngineInterface, _id: number, _text: string): Promise<void> {}
+// The one place this mod appends a row. A row that landed is also logged under APPEND_MARK, which is
+// what the tests read (the kit serves no plugin append). Only the kit's exact refusal counts as landed;
+// a real deny or any other throw is a failed delivery, which must never wake Claude.
+async function appendRow($: EngineInterface, text: string): Promise<{ isAppended: boolean; why: string }> {
+  let result: { isAppended: boolean; why: string }
+  try {
+    const r = await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } })
+    result = r.deny === undefined ? { isAppended: true, why: '' } : { isAppended: false, why: r.deny }
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err)
+    result = { isAppended: why.includes(KIT_NO_APPEND), why }
+  }
+  if (result.isAppended) $.ui.log(`${APPEND_MARK}${text}`, { to: 'debug' })
+  return result
+}
+
+// '' when the wake entered, else why not.
+async function submitWake($: EngineInterface): Promise<string> {
+  try {
+    const sent = await $.prompt.submit({ text: WAKE_TEXT })
+    return sent.drop !== undefined ? `dropped: ${sent.drop}` : ''
+  } catch (err) {
+    return `refused: ${err instanceof Error ? err.message : String(err)}`
+  }
+}
+
+// Fire and forget, from whatever dispatch decided to wake. Task 2 Step 7 may route this through a timer.
+function startWake($: EngineInterface): void {
+  void guard($, 'wake', wakeOnce($))
+}
+
+async function wakeOnce($: EngineInterface): Promise<void> {
+  const why = await submitWake($)
+  if (why === '') return
+  $.ui.log(`bridge: wake not submitted (${why}); retrying once`, { to: 'debug' })
+  $.clock.after(WAKE_RETRY_MS, () => void guard($, 'wake retry', retryWake($)))
+}
+
+// A timer is a dispatch of its own, so this read is fresh. The row's one wake is already spent in the
+// shared module either way; if this fails too, the rows wait for the user's next prompt.
+async function retryWake($: EngineInterface): Promise<void> {
+  const s = await readSession($)
+  // A turn that started meanwhile reads the rows at its first step.
+  if (s.delivery.isMainTurnRunning || !s.isWakeQueued) return
+  const why = await submitWake($)
+  if (why === '') return
+  await transact($, cur => ({ session: { ...cur, isWakeQueued: false }, out: null }))
+  $.ui.log(`bridge: wake not submitted (${why})`, { to: 'debug' })
+  $.ui.toast(WAKE_FAIL_TOAST)
+}
+
+// isWakeAllowed is false only for the go-ahead typed at the prompt (Task 10): that prompt is itself the
+// turn that reads the row, so it must not also queue a wake.
+async function answerWith($: EngineInterface, id: number, answer: Answer, isWakeAllowed: boolean): Promise<boolean> {
+  const now = await $.clock.now()
+  const nonce = `${now}-${Math.random()}`
+  const until = now + ARM_DELAY_MS
+  // Claim it. Only the press whose nonce lands owns the delivery; a second press finds it answered.
+  // The same write starts the key pause (a debounce: see isDebounced), under this answer's own deadline.
+  const claimed = await transact($, s => {
+    const book = markAnswered(s.book, id, answer, nonce)
+    if (!isAnsweredBy(book, id, nonce)) return { session: s, out: undefined }
+    return { session: { ...s, book, view: { ...s.view, keysPausedUntil: until } }, out: book.decisions.find(d => d.id === id) }
+  })
+  if (claimed === undefined) return false
+  startKeysPause($, until)
+  const appended = await appendRow($, formatRow(claimed, answer))
+  if (!appended.isAppended) {
+    await transact($, s => ({ session: { ...s, book: reopen(s.book, id, nonce) }, out: null }))
+    $.ui.toast(`Bridge: decision #${id} could not be delivered (${appended.why}); it is pending again.`)
+    await fail($, 'append', appended.why)
+    return false
+  }
+  // Recorded after the append lands, so a step that begins between the two can only cause an extra
+  // wake, never a missed one. The shared module decides whether this row wakes; Bridge only declines
+  // a second submit while one is already queued (its turn then reads this row too).
+  const done = await transact($, s => {
+    const r = rowAppended(s.delivery, ROW_TAG)
+    const isWake = isWakeAllowed && r.isWake && !s.isWakeQueued
+    const view = s.view.otherFor === id ? { ...s.view, otherFor: null } : s.view
+    const after: BridgeSession = { ...s, delivery: r.delivery, isWakeQueued: s.isWakeQueued || isWake, view }
+    return { session: after, out: { isWake, session: after } }
+  })
+  if (done.isWake) startWake($)
+  await closePaneIfDone($, done.session)
+  return true
+}
+
+async function pickOption($: EngineInterface, id: number, index: number): Promise<void> {
+  const decision = (await readSession($)).book.decisions.find(d => d.id === id)
+  const option = decision?.options[index]
+  if (option === undefined) return
+  await answerWith($, id, { choice: 'label', label: option.label }, true)
+}
+
+async function makeItSo($: EngineInterface, id: number): Promise<void> {
+  const decision = (await readSession($)).book.decisions.find(d => d.id === id)
+  if (decision === undefined || decision.status !== 'pending') return
+  await answerWith($, id, recommendedAnswer(decision), true)
+}
+
+// Blank by Python's str.strip(), which Verbatim applies: such a row would carry no words of the user's.
+async function sendOther($: EngineInterface, id: number, text: string): Promise<void> {
+  if (isBlankText(text)) return
+  await answerWith($, id, { choice: 'other', text }, true)
+}
 
 // Runs a card press unless the key pause swallows it. sendOther is not gated: it comes from the field's
 // Enter, which is not a hotkey, and only one card has a field.
@@ -175,6 +293,62 @@ function cardActions($: EngineInterface): CardActions {
 }
 
 export const register: Register = on => {
+  // turn.start fires for the main loop only (a subagent's run raises none).
+  on('turn.start', async ($, e, next) => {
+    try {
+      await transact($, s => ({
+        session: { ...s, delivery: mainTurnStarted(s.delivery), isWakeQueued: false, turnText: '' },
+        out: null,
+      }))
+    } catch (err) {
+      await fail($, 'turn.start', err)
+    }
+    return next(e)
+  })
+
+  // The shared race guard: "a main step began" before next, so rows appended from here on are not
+  // marked read by this step. After next, the step's visible text joins the turn's text (the question
+  // check in Task 10 reads every text block of the turn, 00-shared Q7).
+  on('turn.step', async function* ($, e, next) {
+    const isMain = e.agentId === undefined
+    if (isMain) {
+      try {
+        await transact($, s => ({ session: { ...s, delivery: stepBegan(s.delivery) }, out: null }))
+      } catch (err) {
+        await fail($, 'turn.step', err)
+      }
+    }
+    const result = yield* next(e)
+    if (isMain && result.answer !== '') {
+      try {
+        await transact($, s => ({ session: withTurnText(s, result.answer), out: null }))
+      } catch (err) {
+        await fail($, 'turn.step', err)
+      }
+    }
+    return result
+  })
+
+  on('turn.complete', async ($, e, next) => {
+    const done = await next(e)
+    if (e.agentId !== undefined) return done
+    try {
+      const isWake = await transact($, s => {
+        const r = mainTurnEnded(s.delivery, e.reason)
+        const wake = r.isWake && !s.isWakeQueued
+        return {
+          session: { ...s, delivery: r.delivery, isWakeQueued: s.isWakeQueued || wake, last: lastTurn(s, e.reason, e.answer) },
+          out: wake,
+        }
+      })
+      // Not awaited: a submit from here may wait on this very turn ending (Task 2 (d)).
+      if (isWake) startWake($)
+    } catch (err) {
+      await fail($, 'turn.complete', err)
+    }
+    return done
+  })
+
   on('ui.render', { component: 'Pane', requestId: 'bridge' }, async ($, e, next) => {
     try {
       const s = await readSession($)
