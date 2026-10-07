@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import { findClaims, fnv1a, sentencesOf, stripNonClaims } from '../hooks/claims'
+import { REAL } from './fixtures/real'
 
 const families = (text: string) => findClaims(text).map(c => (c.op === null ? c.family : `${c.family}:${c.op}`))
 
@@ -144,5 +145,23 @@ describe('shape of what is found', () => {
     expect(stripNonClaims('a `b` "c" d')).toBe('a  CODE   QUOTE  d')
     expect(stripNonClaims("say 'tests pass' and I've pushed")).toBe("say  QUOTE  and I've pushed")
     expect(sentencesOf('One. Two!\n\nThree? Four')).toEqual(['One.', 'Two!', 'Three?', 'Four'])
+  })
+})
+
+describe('real examples, redacted (Task 7)', () => {
+  test('each labeled sentence', () => {
+    for (const { text, expect: want, why } of REAL) {
+      expect(families(text), `${why}: ${text}`).toEqual(want)
+    }
+  })
+
+  test('the tuning rules hold beside their neighbours', () => {
+    // A hedge between subject and verb cancels only the present-state forms; "type-check passes" is still a claim.
+    expect(families('The type-check passes.')).toEqual(['build'])
+    expect(families('The branch with the review fix is pushed.')).toEqual(['shipped:push'])
+    expect(families('Unit 10b is merged.')).toEqual(['shipped:merge'])
+    expect(families('The rows are committed.')).toEqual(['shipped:commit'])
+    expect(families('We are committed to keeping the old format readable.')).toEqual([])
+    expect(families('The tests pass against each mutation.')).toEqual([])
   })
 })

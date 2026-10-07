@@ -25,6 +25,7 @@ import {
 } from '../hooks/evidence'
 import type { Segment } from '../hooks/evidence'
 import type { Ledger } from '../types'
+import { REAL_GIT_RESULT } from './fixtures/real'
 
 const CONFIG = configOf(DEFAULT_TEST_COMMANDS, DEFAULT_BUILD_COMMANDS)
 const HOME = 'C:\\Users\\tester'
@@ -235,7 +236,8 @@ describe('git and gh', () => {
     expect(kinds(sh('git commit -q -m "fix: x" 2>&1 | tail -1'), said('925b391 fix: x'))).toEqual(['commit~masked'])
     expect(kinds(sh('gh pr merge 6 --merge 2>&1 | tail -2; gh pr view 6 --json state -q .state'), said('MERGED'))).toEqual(['merge'])
     expect(kinds(sh('gh pr merge 6 --squash 2>&1 | tail -3; gh pr view 6 --json state,mergeCommit'), said('{"mergeCommit":{"oid":"e021d03"},"state":"MERGED"}'))).toEqual(['merge'])
-    expect(kinds(sh('git commit -m x 2>&1 | tail -1; gh pr view 6 --json state -q .state'), said('MERGED'))).toEqual(['commit~masked'])
+    // MERGED never confirms the commit; since Task 7 the view is merge evidence of its own.
+    expect(kinds(sh('git commit -m x 2>&1 | tail -1; gh pr view 6 --json state -q .state'), said('MERGED'))).toEqual(['commit~masked', 'merge'])
     expect(kinds(sh('git push -u origin feat/x 2>&1 | tail -1'), said("branch 'feat/x' set up to track 'origin/feat/x'."))).toEqual(['push'])
     expect(kinds(sh('git push origin v1.2.0 2>&1 | tail -1'), said(' * [new tag]         v1.2.0 -> v1.2.0'))).toEqual(['push'])
   })
@@ -276,6 +278,37 @@ describe('git and gh', () => {
     expect(kinds(sh('./x.sh'), { result: { gitOperation: { pr: { number: 4, action: 'created' } } } })).toEqual(['pr-create'])
     expect(kinds(sh('./x.sh'), { result: { gitOperation: { pr: { number: 4, action: 'merged' } } } })).toEqual(['merge'])
     expect(classify(factsOf(sh('./ship.sh'), { result: { gitOperation: { push: { branch: 'main' } } } }), CONFIG, PLACES).runs[0]?.basis).toBe('gitOperation')
+  })
+})
+
+describe('merge and commit evidence found in real transcripts (Task 7)', () => {
+  test('a gh pr view in a call of its own shows a merge only when it printed MERGED', () => {
+    expect(kinds(sh('gh pr view 6 --json state -q .state'), said('MERGED'))).toEqual(['merge'])
+    expect(kinds(sh('gh pr view 6 --json state,mergedAt -q \'.state + " " + .mergedAt\''), said('MERGED 2026-01-02T03:04:05Z'))).toEqual(['merge'])
+    expect(kinds(sh('gh pr view 6 --json state -q .state'), said('OPEN'))).toEqual([])
+    // A `git log` line in the same call is not gh's word: an open PR beside an old merge commit is no merge.
+    expect(kinds(sh('gh pr view 6 --json state -q .state; git log --oneline -1'), said('OPEN\nabc1234 Merge pull request #5 from a/b'))).toEqual([])
+    expect(kinds(sh('gh pr view 6 --json state -q .state'), { deny: 'no' })).toEqual([])
+  })
+
+  test('a git merge is confirmed by its merge commit in a later git log, and fails on a conflict', () => {
+    const merge = "git merge origin/feat/x --no-edit 2>&1 | tail -5 && git log --oneline -3"
+    expect(kinds(sh(merge), said(" a.ts | 2 +-\n 1 file changed\na99bf06 Merge remote-tracking branch 'origin/feat/x' into feat/x\nc07f24c docs: y"))).toEqual(['merge'])
+    expect(kinds(sh(merge), said("CONFLICT (content): Merge conflict in a.ts\nAutomatic merge failed; fix conflicts and then commit the result.\n645fb13 Merge branch 'main' into feat/x"))).toEqual(['merge~failed'])
+    expect(kinds(sh('git merge --no-edit origin/main 2>&1 | tail -1'), said("Merge made by the 'ort' strategy."))).toEqual(['merge'])
+  })
+
+  test('a quiet commit is confirmed by git show --oneline, never by a bare stat', () => {
+    const commit = (show: string) => `git add a && git commit -q -F - <<'EOF'\nfix: x\nEOF\n${show}`
+    expect(kinds(sh(commit('git show --stat --oneline HEAD | tail -8')), said('925b391 fix: x\n a.ts | 2 +-\n 1 file changed, 1 insertion(+), 1 deletion(-)'))).toEqual(['commit'])
+    expect(kinds(sh(commit('git show --stat HEAD | tail -5')), said(' a.ts | 2 +-\n 1 file changed, 1 insertion(+), 1 deletion(-)'))).toEqual(['commit~masked'])
+  })
+})
+
+describe('a real gitOperation record (Task 7)', () => {
+  test('a commit is seen through gitOperation, even piped', () => {
+    const runs = classify(factsOf(sh('git commit -F C:/tmp/msg.txt 2>&1 | tail -1'), { result: REAL_GIT_RESULT }), CONFIG, PLACES).runs
+    expect(runs.map(r => [r.kind, r.basis])).toEqual([['commit', 'gitOperation']])
   })
 })
 

@@ -229,20 +229,27 @@ const SUMMARY: Readonly<Record<'tests' | 'build', { fail: RegExp; pass: RegExp }
     pass: /^\s*Finished\b|\bCompiled successfully\b|\bbuilt in \d|\bFound 0 errors\b|\bCOMPLETED\b.*\b0 ERRORS\b|\bBuild success\b/im,
   },
 }
-const SHIP_FAIL = /^(?:error|fatal):|\[rejected\]|\bnothing to commit\b|\bfailed to push\b/im
+const SHIP_FAIL = /^(?:error|fatal):|\[rejected\]|\bnothing to commit\b|\bfailed to push\b|\bAutomatic merge failed\b|^CONFLICT \(/im
 // Each op's own confirmation, so one op's output cannot confirm another (`MERGED` from `gh pr view` is not a commit).
 const SHIP_PASS: Readonly<Record<ShipOp, RegExp>> = {
   commit: /^\[[\w./-]+(?: \(root-commit\))? [0-9a-f]{7,}\]/m,
   push: /^\s*\+?\s*[0-9a-f]{7,}\.\.\.?[0-9a-f]{7,}\s+\S+\s+->\s+\S+|^\s*\*\s+\[new (?:branch|tag)\]|\bset up to track\b/im,
-  // `gh pr view --json state` prints MERGED bare, first in a --jq line, or as JSON.
-  merge: /\bMerged pull request\b|^\s*MERGED\b|"state"\s*:\s*"MERGED"/im,
+  // `gh pr view --json state` prints MERGED bare, first in a --jq line, or as JSON. `git merge` prints "Merge made by",
+  // and a `git log` after it shows the merge commit's own subject (Task 7: `git merge x | tail -5 && git log --oneline -3`).
+  merge: /\bMerged pull request\b|^\s*MERGED\b|"state"\s*:\s*"MERGED"|^Merge made by\b|^[0-9a-f]{7,40} +(?:\([^)]*\) +)?Merge (?:remote-tracking branch|branch|pull request #\d+)\b/im,
   'pr-create': /github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/i,
 }
 // `git commit -q` prints nothing; a later `git log --oneline` in the same command prints a sha line: the commit's own
 // when it carries the commit's subject (after any `(HEAD -> x)` decoration), or, with no subject known, when nothing
 // between the commit and the log moved to another branch, folder or repository (third round).
 const SHA_LINE = /^[0-9a-f]{7,40} +(?:\([^)]*\) +)?(\S.*)$/
-const GIT_LOG = /^git(?:\s+-[cC]\s+\S+)*\s+log(?![\w-])/i
+// `git show --oneline HEAD` prints the same sha line as `git log --oneline -1` (Task 7). Without `--oneline` it prints
+// `commit <sha>`, which SHA_LINE does not take.
+const GIT_LOG = /^git(?:\s+-[cC]\s+\S+)*\s+(?:log|show)(?![\w-])/i
+// `gh pr view` in a call of its own: its MERGED is merge evidence (Task 7), read only from gh's own forms, never from a
+// `git log` line another segment printed.
+const PR_VIEW = /^gh\s+pr\s+view(?![\w-])/i
+const VIEW_MERGED = /^\s*MERGED\b|"state"\s*:\s*"MERGED"|^state:\s+MERGED\b/im
 const GIT_ELSEWHERE = /^git(?:\s+-[cC]\s+\S+)*\s+(?:checkout|switch|pull|merge|reset)(?![\w-])/
 const CD = new Set(['cd', 'pushd', 'popd', 'chdir', 'set-location', 'sl'])
 const TSC = /(?:^|\s)tsc(?=$|\s)/i
@@ -664,6 +671,11 @@ export function classify(facts: Facts, config: Config, places: Places): Classifi
       if (run.ok && !run.masked) strong[i] = true
     }
   })
+  // A `gh pr view` that printed MERGED shows a merge, though the merge ran in an earlier call whose own output hid it
+  // (`gh pr merge N | tail -5`, then `gh pr view N --json state`). Not a run otherwise: an OPEN PR is no merge (Task 7).
+  if (!facts.denied && !facts.interrupted && plains.some(p => PR_VIEW.test(p)) && !runs.some(r => r.kind === 'merge') && VIEW_MERGED.test(facts.output)) {
+    runs.push({ kind: 'merge', ok: true, masked: false, basis: 'output' })
+  }
   // The result's gitOperation confirms an op whatever the command looked like (spec deviation 7).
   for (const op of SHIP_OPS) {
     if (facts.git[op] !== true) continue
