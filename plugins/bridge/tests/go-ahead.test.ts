@@ -221,3 +221,22 @@ test('two go-aheads before a turn starts: both rows are kept and land in order',
   expect(await pendingIds($)).toEqual([])
   expect(wakes(w)).toBe(0)
 })
+
+// A drop that arrives after another turn already delivered the row must not reopen the decision: the
+// claim stands once its row has been flushed, or a later press would append a second, contradictory answer.
+test('a drop after another turn flushed the row leaves the decision answered, with one row', async ($, on) => {
+  const w = world(on)
+  await oneDecisionThenAnswer($, w)
+  w.submitHoldMs = 100
+  const sending = submit($, 'make it so', { kind: 'composer' })
+  await w.clock.settle()
+  await $.turn.start({ text: 'something else', turnId: 'other-turn' })
+  await w.clock.settle()
+  expect(w.appends).toEqual([RESOLVED])
+  w.dropTyped = true
+  await w.clock.advance(100)
+  await sending
+  await w.clock.settle()
+  expect(w.appends).toEqual([RESOLVED])
+  expect(await pendingIds($)).toEqual([])
+})

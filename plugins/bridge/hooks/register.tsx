@@ -299,10 +299,15 @@ async function deferRow($: EngineInterface, id: number, answer: Answer | null): 
 // The prompt the entry was made for never entered (a settings hook dropped it): take the entry back
 // out and reopen the decision, as if the go-ahead had not been typed.
 async function undoDeferred($: EngineInterface, id: number, nonce: string): Promise<void> {
-  await transact($, s => ({
-    session: { ...s, book: reopen(s.book, id, nonce), pendingRows: s.pendingRows.filter(r => r.nonce !== nonce) },
-    out: null,
-  }))
+  // Only while its entry is still queued: once a turn.start has flushed the row it was delivered, the
+  // claim stands, and reopening would let a later press append a contradictory second answer.
+  await transact($, s => {
+    if (!s.pendingRows.some(r => r.nonce === nonce)) return { session: s, out: null }
+    return {
+      session: { ...s, book: reopen(s.book, id, nonce), pendingRows: s.pendingRows.filter(r => r.nonce !== nonce) },
+      out: null,
+    }
+  })
 }
 
 // A prompt typed while a turn runs is read at that turn's next step, and no turn.start need follow, so

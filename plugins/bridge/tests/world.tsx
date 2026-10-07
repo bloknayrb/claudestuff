@@ -54,7 +54,7 @@ export type World = {
   dropTyped: boolean
   // >0: each turn.step stub sleeps this long on the mock clock, so a test can press mid-step.
   stepHoldMs: number
-  // >0: each prompt.submit stub sleeps this long on the mock clock before answering (see above).
+  // >0: each prompt.submit stub sleeps this long on the mock clock before answering (see below).
   submitHoldMs: number
   // The visible text each next main step returns (TurnStepResult.answer), in order; '' when empty.
   stepAnswers: string[]

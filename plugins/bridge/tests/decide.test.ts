@@ -63,7 +63,7 @@ describe('the rest of the tool surface', () => {
     expect(TOOL_DESCRIPTION).toContain('why_yours')
   })
 
-  test('the schema requires every spec field', () => {
+  test('the tool schema requires every field', () => {
     expect(INPUT_SCHEMA.required).toEqual(['question', 'context', 'options', 'recommend', 'why', 'why_yours'])
   })
 })
