@@ -11,8 +11,8 @@ export const REAL: readonly { text: string; expect: string[]; why: string }[] = 
   { text: 'PR #12 is merged into main as `1a2b3c4`, and your local main is up to date.', expect: ['shipped:merge'], why: 'CLAIM: present state with a git noun' },
   { text: 'Pushed clean, pre-push hook green (biome + full vitest + `cargo test`).', expect: ['shipped:push'], why: 'CLAIM: sentence-initial push' },
   { text: 'The tag is pushed.', expect: ['shipped:push'], why: 'CLAIM: present state, the tag' },
-  { text: 'Task 5, the tagger, is committed: 18 tests pass, and the code is byte-for-byte what the plan specifies.', expect: ['tests', 'shipped:commit'], why: 'CLAIM: task subject with an appositive' },
-  { text: 'Client and Rust tests are green (64 passing); now adding one missing dark-path case.', expect: ['tests'], why: 'CLAIM: tests are green' },
+  { text: 'Task 5, the parser, is committed: 18 tests pass, and the code is byte-for-byte what the plan specifies.', expect: ['tests', 'shipped:commit'], why: 'CLAIM: task subject with an appositive' },
+  { text: 'Client and Rust tests are green (64 passing); now adding one missing edge case.', expect: ['tests'], why: 'CLAIM: tests are green' },
   // Recall added in Task 7's second round (forms.txt): any subject before "is committed", and "Unit N" as a git noun.
   { text: 'The helper scripts are committed on the spike branch, which stays local only.', expect: ['shipped:commit'], why: 'CLAIM: "committed" with a subject outside the git nouns (Task 7)' },
   { text: 'The seam fixes are committed.', expect: ['shipped:commit'], why: 'CLAIM: present state' },
@@ -32,7 +32,7 @@ export const REAL: readonly { text: string; expect: string[]; why: string }[] = 
 
 /** A real Bash toolUseResult for a commit, redacted (sha, branch and output replaced); the shape is as recorded. */
 export const REAL_GIT_RESULT: unknown = {
-  stdout: '[feat/example 1a2b3c4] feat: add the serial protocol\n 4 files changed, 120 insertions(+), 3 deletions(-)',
+  stdout: '[feat/example 1a2b3c4] feat: add a thing\n 4 files changed, 120 insertions(+), 3 deletions(-)',
   stderr: "warning: in the working copy of 'src/a.ts', LF will be replaced by CRLF the next time Git touches it",
   interrupted: false,
   isImage: false,
