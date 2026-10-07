@@ -213,14 +213,13 @@ function loopSegments(segments: readonly Segment[]): boolean[] {
   let depth = 0
   let toEnd = false
   return segments.map(s => {
-    const lead = s.words
-      .slice(0, headOf(s) + 1)
-      .filter(w => !w.quoted)
-      .map(w => w.text.toLowerCase())
+    const words = s.words.slice(0, headOf(s) + 1)
+    const lead = words.filter(w => !w.quoted).map(w => w.text.toLowerCase())
     if (lead.some(w => PS_LOOPS.has(w))) toEnd = true
     depth += lead.filter(w => BASH_LOOPS.has(w)).length
     const inside = toEnd || depth > 0
-    depth = Math.max(0, depth - lead.filter(w => w === 'done').length)
+    // `done` closes a loop, glued to a redirection too (`done>log`, `done<list`, `done>"$TEMP/x"`, which reads as quoted).
+    depth = Math.max(0, depth - words.filter(w => /^done(?![\w-])/.test(w.text)).length)
     return inside
   })
 }
@@ -293,24 +292,24 @@ const SUMMARY: Readonly<Record<'tests' | 'build', { fail: RegExp; pass: RegExp }
   tests: {
     // `FAILED` counts at a line's start (pytest's `FAILED tests/x.py::t`), not inside a test title. TAP and node:test
     // print `not ok N` and `# fail N`; unittest prints `OK` or `OK (skipped=1)`, not any line that starts with OK.
-    fail: /\b[1-9]\d*\s+(?:failed|failing|fail|failures?|errors?)\b|^FAILED\b|^\s*FAIL\b|^\(fail\)|test result: FAILED|^not ok\b|^#\s*fail\s+[1-9]/m,
+    fail: /\b[1-9]\d*\s+(?:failed|failing|fail|failures?|errors?)\b|^FAILED\b|^[ \t]*FAIL\b|^\(fail\)|test result: FAILED|^not ok\b|^#\s*fail\s+[1-9]/m,
     pass: /\b[1-9]\d*\s+(?:passed|passing|pass)\b|\btest result: ok\b|^OK(?: \(|$)|^ok\s+\S/m,
   },
   build: {
     // The last three: the compiler never started (npx found no tsc, or it is not on PATH), so its silence proves nothing.
     // ESP-IDF's `idf.py build`: "Project build complete" on success; ninja's "build stopped" or a FAILED step on failure.
     fail: /\berror TS\d+|\bFound [1-9]\d* errors?\b|^error(?:\[E\d+\])?:|\bBuild failed\b|\bFailed to compile\b|\bCOMPLETED\b.*\b[1-9]\d* ERRORS\b|This is not the tsc command|command not found|is not recognized as|\bninja: build stopped\b|^FAILED: /im,
-    pass: /^\s*Finished\b|\bCompiled successfully\b|\bbuilt in \d|\bFound 0 errors\b|\bCOMPLETED\b.*\b0 ERRORS\b|\bBuild success\b|\bProject build complete\b/im,
+    pass: /^[ \t]*Finished\b|\bCompiled successfully\b|\bbuilt in \d|\bFound 0 errors\b|\bCOMPLETED\b.*\b0 ERRORS\b|\bBuild success\b|\bProject build complete\b/im,
   },
 }
 const SHIP_FAIL = /^(?:error|fatal):|\[rejected\]|\bnothing to commit\b|\bfailed to push\b|\bAutomatic merge failed\b|^CONFLICT \(/im
 // Each op's own confirmation, so one op's output cannot confirm another (`MERGED` from `gh pr view` is not a commit).
 const SHIP_PASS: Readonly<Record<ShipOp, RegExp>> = {
   commit: /^\[[\w./-]+(?: \(root-commit\))? [0-9a-f]{7,}\]/m,
-  push: /^\s*\+?\s*[0-9a-f]{7,}\.\.\.?[0-9a-f]{7,}\s+\S+\s+->\s+\S+|^\s*\*\s+\[new (?:branch|tag)\]|\bset up to track\b/im,
+  push: /^[ \t]*\+?[ \t]*[0-9a-f]{7,}\.\.\.?[0-9a-f]{7,}\s+\S+\s+->\s+\S+|^[ \t]*\*\s+\[new (?:branch|tag)\]|\bset up to track\b/im,
   // `gh pr view --json state` prints MERGED bare, first in a --jq line, or as JSON. `git merge` prints "Merge made by",
   // and a `git log` after it shows the merge commit's own subject (`git merge x | tail -5 && git log --oneline -3`).
-  merge: /\bMerged pull request\b|^\s*MERGED\b|"state"\s*:\s*"MERGED"|\bstate\s*[=:]\s*"?MERGED\b|^Merge made by\b|^[0-9a-f]{7,40} +(?:\([^)]*\) +)?Merge (?:remote-tracking branch|branch|pull request #\d+)\b/im,
+  merge: /\bMerged pull request\b|^[ \t]*MERGED\b|"state"\s*:\s*"MERGED"|\bstate\s*[=:]\s*"?MERGED\b|^Merge made by\b|^[0-9a-f]{7,40} +(?:\([^)]*\) +)?Merge (?:remote-tracking branch|branch|pull request #\d+)\b/im,
   'pr-create': /github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/i,
 }
 // `git commit -q` prints nothing; a later `git log --oneline` in the same command prints a sha line: the commit's own
@@ -324,7 +323,7 @@ const GIT_LOG = /^git(?:\s+-[cC]\s+\S+)*\s+(?:log|show)(?![\w-])/i
 // `git log` line another segment printed.
 const PR_VIEW = /^gh\s+pr\s+view(?![\w-])/i
 // `--jq .state` prints MERGED bare; `--json state` prints `"state": "MERGED"`; a jq template can print `state=MERGED`.
-const VIEW_MERGED = /^\s*MERGED\b|"state"\s*:\s*"MERGED"|\bstate\s*[=:]\s*"?MERGED\b/im
+const VIEW_MERGED = /^[ \t]*MERGED\b|"state"\s*:\s*"MERGED"|\bstate\s*[=:]\s*"?MERGED\b/im
 const GIT_ELSEWHERE = /^git(?:\s+-[cC]\s+\S+)*\s+(?:checkout|switch|pull|merge|reset)(?![\w-])/
 const CD = new Set(['cd', 'pushd', 'popd', 'chdir', 'set-location', 'sl'])
 const TSC = /(?:^|\s)tsc(?=$|\s)/i
@@ -421,19 +420,41 @@ const VARIABLE = /\$\{[^}]*\}|\$[A-Za-z_?][\w]*/
 function statusShape(before: string, after: string): StatusShape {
   const head = before.split(VARIABLE)
   const tail = after.split(VARIABLE)
-  // Lines are trimmed: a variable that prints nothing must not leave a required space at either end.
-  if (head.length > 1 && head[0] === '') head[1] = (head[1] ?? '').trimStart()
-  if (tail.length > 1 && tail[tail.length - 1] === '') tail[tail.length - 2] = (tail[tail.length - 2] ?? '').trimEnd()
+  // Lines are trimmed, so a leading variable that printed nothing leaves its line starting at the next piece with the
+  // space trimmed off (and a trailing one likewise at the end). That reading is tried only anchored at the line's
+  // start (or end), never in place of the separator when the variable printed something.
+  const heads = [head]
+  if (head.length > 1 && head[0] === '' && (head[1] ?? '') !== (head[1] ?? '').trimStart()) heads.push([(head[1] ?? '').trimStart(), ...head.slice(2)])
+  const tails = [tail]
+  if (tail.length > 1 && tail[tail.length - 1] === '') {
+    const piece = tail[tail.length - 2] ?? ''
+    if (piece !== piece.trimEnd()) tails.push([...tail.slice(0, -2), piece.trimEnd()])
+  }
+  const exec = (line: string): [string, string] | null => {
+    for (const h of heads) {
+      for (const t of tails) {
+        const hit = shapeMatch(h, t, line)
+        if (hit !== null) return hit
+      }
+    }
+    return null
+  }
+  return { source: `${head.join('\u0000')}\u0001${tail.join('\u0000')}`, test: line => exec(line) !== null, exec }
+}
+
+/** One reading of a status line against the head and tail globs (see statusShape). */
+function shapeMatch(head: readonly string[], tail: readonly string[], line: string): [string, string] | null {
   const lastHead = head[head.length - 1] ?? ''
   const firstTail = tail[0] ?? ''
-  const exec = (line: string): [string, string] | null => {
+  {
     // Where the head's last piece may start (minStart), and where the tail's first piece may end (maxEnd).
     let minStart = 0
     if (head.length > 1) {
       const first = head[0] ?? ''
       if (!line.startsWith(first)) return null
       minStart = first.length
-      for (const piece of head.slice(1, -1)) {
+      for (let h = 1; h < head.length - 1; h += 1) {
+        const piece = head[h] ?? ''
         if (piece === '') continue
         const k = line.indexOf(piece, minStart)
         if (k < 0) return null
@@ -445,13 +466,16 @@ function statusShape(before: string, after: string): StatusShape {
       const last = tail[tail.length - 1] ?? ''
       if (!line.endsWith(last)) return null
       maxEnd = line.length - last.length
-      for (const piece of tail.slice(1, -1).reverse()) {
+      for (let t = tail.length - 2; t >= 1; t -= 1) {
+        const piece = tail[t] ?? ''
         if (piece === '') continue
         const k = line.lastIndexOf(piece, maxEnd - piece.length)
         if (k < 0) return null
         maxEnd = k
       }
     }
+    // The tail's first piece must occur somewhere after the head: a quick reject before any candidate scan.
+    if (firstTail !== '' && line.indexOf(firstTail, minStart) < 0) return null
     // The status at `at`: the head ends there and the tail starts right after the digits.
     const check = (at: number): [string, string] | null => {
       DIGITS.lastIndex = at
@@ -472,8 +496,9 @@ function statusShape(before: string, after: string): StatusShape {
       for (let at = a; at < b; at += 1) {
         const start = at - lastHead.length
         if (start < minStart || !line.startsWith(lastHead, start)) continue
-        const status = line.slice(at, b)
-        if (/^-?\d+$/.test(status)) return [line, status]
+        // Everything from `a` to `b` is digits, but for a minus sign at `a`: a lone `-` is no status.
+        if (b - at === 1 && line.charCodeAt(at) === 45) continue
+        return [line, line.slice(at, b)]
       }
       return null
     }
@@ -485,17 +510,25 @@ function statusShape(before: string, after: string): StatusShape {
       }
       return null
     }
-    // The head ends in a variable: each digit run (with or without its minus sign) from minStart on is a candidate.
-    for (let p = minStart; p < line.length; p += 1) {
+    // The head ends in a variable: each maximal digit run (with its minus sign) from minStart on is a candidate. Every
+    // start inside one run ends at the same place, so the tail is checked once per run; the run's own start wins.
+    const isDigit = (c: number): boolean => c >= 48 && c <= 57
+    for (let p = minStart; p < line.length; ) {
       const c = line.charCodeAt(p)
-      if ((c >= 48 && c <= 57) || c === 45) {
-        const hit = check(p)
-        if (hit !== null) return hit
+      // A `-` is a minus sign only where it cannot be a hyphen inside a word (`run-0` holds no status -0).
+      const minus = c === 45 && isDigit(line.charCodeAt(p + 1)) && (p === minStart || !/[A-Za-z0-9_]/.test(line.charAt(p - 1)))
+      if (!isDigit(c) && !minus) {
+        p += 1
+        continue
       }
+      let e = c === 45 ? p + 1 : p
+      while (e < line.length && isDigit(line.charCodeAt(e))) e += 1
+      const tailOk = tail.length === 1 ? line.length - e === firstTail.length && line.startsWith(firstTail, e) : line.startsWith(firstTail, e) && e + firstTail.length <= maxEnd
+      if (tailOk) return [line, line.slice(p, e)]
+      p = e
     }
     return null
   }
-  return { source: `${head.join('\u0000')}\u0001${tail.join('\u0000')}`, test: line => exec(line) !== null, exec }
 }
 
 const DIGITS = /-?\d+/y
@@ -753,8 +786,10 @@ function escapeRe(text: string): string {
 
 // One option with at most one value. The option name starts with a word character, so `--opt` splits only one way
 // (`--?[\w-]+` could read it as `-` plus `-opt`, which doubles the work per option when a match fails).
-// A launcher word is never an option's value, so `pnpm -a pnpm -a ...` reads one way only.
-const OPTION = String.raw`\s+--?\w[\w-]*(?:[= ](?!(?:npx|bunx|pnpx|pnpm|yarn|bun|uv|poetry|pdm|hatch|pipenv|python[\d.]*|py|npm|node)(?:\s|$))[^\s-]\S*)?`
+// A word that starts a launcher is never an option's value, so `pnpm -a pnpm -a ...` reads one way only. Only words
+// that really start one are kept out: a bare launcher word, `X run`, `npm exec`, `python -m`. A value such as `node`,
+// `py` or `python3.12` alone stays a value (`pnpm --filter node test`, `uv run --python python3.12 pytest`).
+const OPTION = String.raw`\s+--?\w[\w-]*(?:[= ](?!(?:npx|bunx|pnpx|pnpm|yarn|bun)(?:\s|$)|(?:uv|poetry|pdm|hatch|pipenv)\s+run(?:\s|$)|npm\s+exec(?:\s|$)|(?:python[\d.]*|py)\s+-m(?:\s|$))[^\s-]\S*)?`
 // Options between a runner's words: `idf.py -C firmware build`.
 const OPTIONS_BETWEEN = String.raw`(?:${OPTION})*\s+`
 // What may come before a runner that is not the command word itself: a launcher that runs it.
@@ -1156,10 +1191,11 @@ export function readBack(ledger: Ledger, facts: Facts, config: Config, places: P
   const numbered = /\b(?:grep|egrep|rg)\b[^|;&\n]*\s-[A-Za-z]*n/.test(facts.command ?? '')
   const output = facts.tool === 'Read' ? facts.output.replace(READ_PREFIX, '') : numbered ? facts.output.replace(/^\d+[:-]/gm, '') : facts.output
   const exit = EXITED.exec(output)
-  // A read that also runs another git, gh or npm-family command prints that command's output beside the run's: its
-  // status lines and summaries could be the other command's. Such a read judges nothing; a clean read can later.
-  // A read that runs a test or build runner of its own mixes that runner's output in too.
-  if (facts.command !== null && commandsOf(facts.command).some(s => MIXING.has(commandWord(s)) || kindsIn(plainOf(s), config).length > 0)) return []
+  // A read that also runs a test or build runner, or a git or gh op that changes something, prints that command's
+  // summaries and confirmations beside the run's. Such a read judges nothing; a clean read can later. Read-only git and
+  // gh (`ls-remote`, `rev-parse`, `status`, `log`, `show`, `branch`, `gh pr view/list/checks`) print no summary and
+  // do not withhold judgement.
+  if (facts.command !== null && commandsOf(facts.command).some(s => kindsIn(plainOf(s), config).length > 0)) return []
   const changed: Entry[] = []
   for (const seq of calls) {
     const waiting = ledger.entries.filter(e => e.seq === seq && e.background && e.watch !== undefined)
@@ -1203,11 +1239,9 @@ export function readBack(ledger: Ledger, facts: Facts, config: Config, places: P
   return changed
 }
 
-// Commands whose output, printed by a read beside a run's, could be taken for the run's own.
-const MIXING = new Set(['git', 'gh', 'npm', 'npx', 'pnpm', 'yarn'])
 // A test runner's own failure summary line, never a bare FAILED inside a test title or stderr: vitest and jest's
 // "Tests  1 failed", pytest's "1 failed, 3 passed" / "1 failed in", cargo's "test result: FAILED", TAP's "# fail 1".
-const TESTS_FAILED_SUMMARY = /^\s*(?:Test Files|Tests|Test Suites):?\s[^\n]*\b[1-9]\d*\s+failed\b|\b[1-9]\d* failed(?:,| in )|^test result: FAILED|^#\s*fail\s+[1-9]/m
+const TESTS_FAILED_SUMMARY = /^[ \t]*(?:Test Files|Tests|Test Suites):?\s[^\n]*\b[1-9]\d*\s+failed\b|\b[1-9]\d* failed(?:,| in )|^test result: FAILED|^#\s*fail\s+[1-9]/m
 
 /**
  * The suite a push's pre-push hook ran, from the push's read-back, as a `tests` entry at the push's place: a pass only

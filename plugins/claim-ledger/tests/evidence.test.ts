@@ -842,6 +842,16 @@ describe('runners are commands, not arguments; ops that do nothing', () => {
       ['watchexec -e ts -- pytest', ['tests']],
       // `-m` names a module through a launcher too.
       ['uv run python -m pytest -q', ['tests']],
+      // An option whose value merely names a launcher (`node`, `py`, `python3.12`) is still an option.
+      ['uv run --python python3.12 pytest', ['tests']],
+      ['uv run -p python3.11 pytest -q', ['tests']],
+      ['hatch run -e py pytest', ['tests']],
+      ['pnpm --filter node test', ['tests']],
+      ['yarn --cwd node test', ['tests']],
+      ['npx --package node vitest run', ['tests']],
+      ['pnpm --dir node test', ['tests']],
+      ['npm --prefix node test', ['tests']],
+      ['uv run --directory py pytest', ['tests']],
       ['npx vitest --help', []],
       ['pytest -h', []],
       ['pytest --co -q', []],
@@ -924,6 +934,26 @@ describe('time stays bounded on adversarial inputs', () => {
     expect(kinds(sh('npm test; echo "rc=$? $X"'), said('rc=0'))).toEqual(['tests'])
   })
 
+  test('a leading variable that printed something keeps its separator: its own digits are no status', () => {
+    expect(kinds(sh('npm test; echo "$T $? $SECONDS"'), said('spec0 1 12'))).toEqual(['tests~failed'])
+    expect(kinds(sh('npm test; echo "$T $? ${SECONDS}s"'), said('run-0 2 7s'))).toEqual(['tests~failed'])
+    expect(kinds(sh('npm test; echo "$T $?$X"'), said('v0 1'))).toEqual(['tests~failed'])
+  })
+
+  test('whitespace runs in a push output and digit-dense echo texts', () => {
+    // Each case runs once untimed on a slightly different input, so the budget times matching, not the engine's
+    // first compile of a pattern for large inputs (which a cubic pattern would not survive either: 3,000 lines took 33 s).
+    const push = (out: string) => kinds(sh('git push 2>&1 | tail -3'), said(out))
+    push(`To github.com:x/y.git\n${'\n'.repeat(2999)}done`)
+    expect(ms(() => push(`To github.com:x/y.git\n${'\n'.repeat(3000)}done`)), 'blank lines').toBeLessThan(50)
+    push(`a${' \r'.repeat(399)}\nb`)
+    expect(ms(() => push(`a${' \r'.repeat(400)}\nb`)), 'space and CR').toBeLessThan(50)
+    // 150 echoes whose texts end in 40 digits: the scan checks each maximal digit run once.
+    const echoes = (n: number) => Array.from({ length: n }, (_, i) => `pytest;echo "$A$?x${i}$B ${'1'.repeat(40)}"`).join('\n')
+    kinds(sh(echoes(149)), said(''))
+    expect(ms(() => kinds(sh(echoes(150)), said(''))), 'digit-dense echoes').toBeLessThan(50)
+  })
+
   test('a segment over 1,000 characters is not matched: no run', () => {
     expect(kinds(sh(`pytest ${'tests/t.py '.repeat(100)}`))).toEqual([])
     expect(kinds(sh(`pytest ${'tests/t.py '.repeat(80)}`))).toEqual(['tests'])
@@ -962,14 +992,21 @@ describe('read-backs judge a run only from its own output', () => {
     expect(judge('tests', ledger).status).toBe('backed')
   })
 
-  test('a read that also prints another file, or runs git, judges nothing', () => {
+  test('a read that also prints another file judges nothing; read-only git and gh beside it do not withhold', () => {
     const other = emptyLedger()
     call(other, 1, sh(PUSH), bg('b1'))
     expect(call(other, 2, sh('cat "$TEMP/npm-debug.log"; tail -3 "$TEMP/p.log"'), said('12 errors\nexit=0'))).toEqual([])
     expect(judge('push', other).status).toBe('background')
-    const git = emptyLedger()
-    call(git, 1, sh(PUSH), bg('b1'))
-    expect(call(git, 2, sh('tail -3 "$TEMP/p.log"; git ls-remote origin feat/x'), said('exit=0\nabc1234\trefs/heads/feat/x'))).toEqual([])
+    for (const extra of ['git ls-remote origin feat/x', 'git rev-parse HEAD', 'git status --short', 'git log --oneline -1', 'gh pr view 5 --json state', 'gh pr checks 5']) {
+      const git = emptyLedger()
+      call(git, 1, sh(PUSH), bg('b1'))
+      expect(call(git, 2, sh(`tail -3 "$TEMP/p.log"; ${extra}`), said('exit=0\nabc1234\trefs/heads/feat/x')).length, extra).toBe(1)
+      expect(judge('push', git).status, extra).toBe('backed')
+    }
+    // A git op that changes something, beside the read, still withholds.
+    const pushing = emptyLedger()
+    call(pushing, 1, sh(PUSH), bg('b1'))
+    expect(call(pushing, 2, sh('tail -3 "$TEMP/p.log"; git push origin v1'), said('exit=0'))).toEqual([])
     // The task's own output and its log together are one source.
     const both = emptyLedger()
     call(both, 1, sh(PUSH), bg('b1'))
@@ -999,6 +1036,10 @@ describe('read-backs judge a run only from its own output', () => {
     expect(kinds(sh('if true; then for s in a b; do pytest $s; done; fi'), said('4 passed'))).toEqual(['tests~masked'])
     expect(kinds(sh('time for s in a b; do pytest $s; done'), said('4 passed'))).toEqual(['tests~masked'])
     expect(kinds(sh('while read f; do pytest "$f"; done < list.txt'))).toEqual(['tests~masked'])
+    // A `done` glued to its redirection closes the loop too: the run after it keeps its strength.
+    expect(kinds(sh('for s in a b; do pytest $s; done>log.txt; npm test'))).toEqual(['tests~masked', 'tests'])
+    expect(kinds(sh('while read f; do pytest "$f"; done<list.txt; npm test'))).toEqual(['tests~masked', 'tests'])
+    expect(kinds(sh('for s in a b; do pytest $s; done>"$TEMP/l.log"; npm test'))).toEqual(['tests~masked', 'tests'])
     // A run after the loop's `done` is outside it, and keeps its own strength.
     expect(kinds(sh('for s in a b; do pytest $s; done; npm test'))).toEqual(['tests~masked', 'tests'])
     expect(kinds(sh('for n in 1 2; do gh issue view $n; done; gh pr view 5 --json state -q .state'), said('CLOSED\nCLOSED\nMERGED'))).toEqual(['merge'])

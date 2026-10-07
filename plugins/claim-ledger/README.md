@@ -18,3 +18,14 @@ puts one line beneath the answer for each claim with no evidence or only weak ev
   own `cd`s, with `$TEMP`, `$HOME` and assignments made on the line expanded. A log named through a loop variable or an
   environment variable set elsewhere is matched only when the reader names it the same way.
 - **A push's pre-push suite counts as test evidence** only when a read-back of that push shows the runner's summary.
+- **Some PowerShell loops can be credited.** Runs inside a loop are never strong evidence, but PowerShell's `%` alias,
+  `do { ... } while (...)` / `do { ... } until (...)` and `.ForEach({ ... })` are not recognised as loops.
+- **Some bash loops can be credited:** a loop inside backtick substitution, `until bash -c "..."`, a function called
+  inside a loop, and `select`.
+- **PowerShell loops weaken runs to the end of the command.** Braces are not tracked, so a run after a `foreach`,
+  `ForEach-Object`, `while` or `for` block in the same command is weak too.
+- **Temp-file names are shared machine-wide.** A read-back matches a log by path; `$TEMP/push.log` written by another
+  session at the same time would be read as this session's run.
+- **Log paths resolve from the session root,** not the shell's persisted working directory: relative log names written
+  from two different persisted directories can collide.
+- **`cmd /c`, `cargo +nightly test` and `node --test` are not recognised** as runs.
