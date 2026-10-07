@@ -4,6 +4,7 @@ import type { EngineInterface, Register, RenderViewport } from 'claude-code'
 import type { Answer, BridgeSession, DecideInput } from '../types'
 import { addDecision, idForUse, isAnsweredBy, markAnswered, pending, recommendedAnswer, reopen } from './book'
 import { mainTurnEnded, mainTurnStarted, rowAppended, stepBegan } from './delivery'
+import { asksQuestion, isFromUser, isGoAhead, stillPendingLine } from './prompt'
 import { APPEND_MARK, formatRow, isBlankText } from './row'
 import { denialFor, INPUT_SCHEMA, isSubagentCall, receipt, SUBAGENT_DENIAL, TOOL_DESCRIPTION, TOOL_NAME, validateDecide } from './decide'
 import { freshSession, lastTurn, normalize, withTurnText } from './session'
@@ -257,6 +258,16 @@ async function answerWith($: EngineInterface, id: number, answer: Answer, isWake
   return true
 }
 
+// Recorded with the shared module so a step marks it read; never a wake (the user's prompt is the turn).
+async function noteStillPending($: EngineInterface, id: number): Promise<void> {
+  const appended = await appendRow($, stillPendingLine(id))
+  if (!appended.isAppended) {
+    $.ui.log(`bridge: still-pending note not appended: ${appended.why}`, { to: 'debug' })
+    return
+  }
+  await transact($, s => ({ session: { ...s, delivery: rowAppended(s.delivery, NOTE_TAG).delivery }, out: null }))
+}
+
 async function pickOption($: EngineInterface, id: number, index: number): Promise<void> {
   const decision = (await readSession($)).book.decisions.find(d => d.id === id)
   const option = decision?.options[index]
@@ -293,6 +304,34 @@ function cardActions($: EngineInterface): CardActions {
 }
 
 export const register: Register = on => {
+  // Spec item 4. Only the user's own prompt (composer or Remote Control; see prompt.ts), only the
+  // whole text "make it so"/"engage", only with exactly one decision pending. The prompt passes on
+  // exactly as received, with no context from Bridge (brief item 2); what Bridge has to say goes in
+  // its own appended rows, after the prompt entered.
+  on('prompt.submit', async ($, e, next) => {
+    if (!isFromUser(e.origin) || !isGoAhead(e.text)) return next(e)
+    const s = await readSession($)
+    const open = pending(s.book)
+    const decision = open[0]
+    if (open.length !== 1 || decision === undefined) return next(e)
+    // Typed mid-turn, the answer it follows is still streaming: note only. The question check reads
+    // the whole visible text of the last main turn.
+    const canResolve = e.turnId === undefined && s.last?.reason === 'answer' && !asksQuestion(s.last.text)
+    const entered = await next(e)
+    if (entered.drop !== undefined) return entered
+    try {
+      if (canResolve) await answerWith($, decision.id, recommendedAnswer(decision), false)
+      else await noteStillPending($, decision.id)
+    } catch (err) {
+      await fail($, 'make it so', err)
+    }
+    return entered
+  }).catch(async ($, e, next) => {
+    if (next.error.kind !== 're-entry') await fail($, 'prompt.submit', next.error.message ?? next.error.kind)
+    // Never drop the user's prompt: when next was called this replays what it settled to.
+    return next(e)
+  })
+
   // turn.start fires for the main loop only (a subagent's run raises none).
   on('turn.start', async ($, e, next) => {
     try {
