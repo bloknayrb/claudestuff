@@ -217,7 +217,7 @@ export const DENIALS_MAX = 50
 export const SPAWN_MODELS_MAX = 200
 export const SOURCE_TOASTS_MAX = 200
 
-async function judge(_$: EngineInterface, view: SpawnView, label: string): Promise<Fired> {
+async function judge($: EngineInterface, view: SpawnView, label: string): Promise<Fired> {
   const cfg = current.cfg
   const fired: Fired = { guards: [], denyTexts: [], toastTexts: [], windowKey: null }
   if (modelGuardFires(view, cfg)) {
@@ -225,7 +225,18 @@ async function judge(_$: EngineInterface, view: SpawnView, label: string): Promi
     fired.denyTexts.push(MODEL_TEXT)
     fired.toastTexts.push(`Quartermaster: ${label} spawned ${view.subagentType} with no model set.`)
   }
-  // Task 5 adds the heavy-model guard here.
+  const model = effectiveModel(view, cfg)
+  if (isHeavy(model, cfg.heavyModels)) {
+    const window = fiveHour((await $.session.usage()).rateLimits)
+    if (window !== null && window.pct >= cfg.warnAt) {
+      const held = window.resetsAt === null ? null : await windowReadings($, window.resetsAt)
+      const reading = windowText(window.pct, window.resetsAt, held === null ? null : fitCap(held.readings))
+      fired.windowKey = held === null ? null : held.key
+      fired.guards.push('heavy')
+      fired.denyTexts.push(`Quartermaster: ${reading}. Re-issue unchanged to spend it anyway.`)
+      fired.toastTexts.push(`Quartermaster: ${label} spawned an agent on ${model}; ${reading}.`)
+    }
+  }
   return fired
 }
 
