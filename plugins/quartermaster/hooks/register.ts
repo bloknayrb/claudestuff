@@ -406,6 +406,12 @@ export const onSessionStart: Hook<'session.start'> = async ($, e, next) => {
   $.ui.log(`quartermaster: list options arrived as ${current.shapes}`, { to: 'debug' })
   // session.start fires on every hot reload too: each load gets a fresh heartbeat (00-shared).
   await ensureHeartbeat($, true)
+  try {
+    await $.command.register({ name: COMMAND, description: 'Quartermaster: guard fires and re-issues, and the five-hour pace' })
+  } catch (error) {
+    // A failed registration must not cost this load its reading and status line.
+    await noteFailure($, 'command.register', error)
+  }
   const { rateLimits } = await $.session.usage()
   await recordReading($, rateLimits)
   await refreshStatus($, rateLimits)
@@ -427,6 +433,40 @@ export const onSessionEnd: Hook<'session.end'> = async ($, e, next) => {
     await refreshStatus($)
   }
   return next(e)
+}
+
+// ==== report ====
+
+export const COMMAND = 'quartermaster'
+export const REPORT_FAILED = 'Quartermaster: the report failed; the debug log has the reason.'
+
+/** `model guard: 12 fires · 3 re-issued (25%) · 8 changed (67%)`: a high re-issue rate means narrow or remove it. */
+export function guardLine(name: string, c: Counter): string {
+  const rate = (n: number) => (c.fires === 0 ? '—' : `${Math.round((100 * n) / c.fires)}%`)
+  return `${name}: ${c.fires} fires · ${c.reissued} re-issued (${rate(c.reissued)}) · ${c.changed} changed (${rate(c.changed)})`
+}
+
+export const onCommand: Hook<'command.run'> = async $ => {
+  const cfg = current.cfg
+  const counters = await readCounters($)
+  const ring = await readRing($)
+  const window = fiveHour((await $.session.usage()).rateLimits)
+  const cap =
+    window === null || window.resetsAt === null ? null : fitCap((await windowReadings($, window.resetsAt)).readings)
+  const sources = Object.entries(await read($, sourceSpawns)).map(([source, n]) => `${source} ${n}`)
+  const lines = [
+    'Quartermaster',
+    guardLine('model guard', counters.model),
+    guardLine('heavy guard', counters.heavy),
+    window === null
+      ? 'pace: no five-hour reading (rate limits come with a subscription)'
+      : `pace: ${paceClause(cap, window.resetsAt)}, window at ${window.pct}%`,
+    `this session: ${agentsClause(await read($, agents), cfg.heavyModels)}`,
+    `toast-only spawns this session: ${sources.join(', ') || 'none'}`,
+    `ring: ${ring.length} of the last ${RING_MAX} fires kept`,
+    `config: warnAt ${cfg.warnAt}% · heavy ${cfg.heavyModels.join(', ') || 'none'} · guard types ${cfg.guardTypes.join(', ') || 'none'} · requireModel ${cfg.requireModel ? 'on' : 'off'} · list options arrived as ${current.shapes}`,
+  ]
+  return { text: lines.join('\n') }
 }
 
 // ==== register ====
@@ -455,5 +495,9 @@ export const register: Register = (on, options) => {
   on('session.end', onSessionEnd).catch(async ($, e, next) => {
     await noteFailure($, 'session.end', next.error)
     return next(e)
+  })
+  on('command.run', { command: COMMAND }, onCommand).catch(async ($, _e, next) => {
+    await noteFailure($, 'command.run', next.error)
+    return { text: REPORT_FAILED }
   })
 }
