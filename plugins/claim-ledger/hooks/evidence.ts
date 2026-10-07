@@ -6,7 +6,8 @@ import type { AsOf, Basis, Claim, Entry, Family, Kind, Ledger, Pending, ShipOp, 
 export const DEFAULT_TEST_COMMANDS: readonly string[] = ['pytest', 'uv run pytest', 'npm test', 'npm run test', 'npm run test:e2e', 'pnpm test', 'yarn test', 'vitest', 'jest', 'npx playwright test', 'cargo test', 'go test', 'claude plugin test']
 export const DEFAULT_BUILD_COMMANDS: readonly string[] = ['tsc', 'cargo build', 'npm run build', 'npm run typecheck', 'npm run typecheck:tests', 'idf.py build']
 
-export type Config = { tests: readonly RegExp[]; build: readonly RegExp[] }
+/** `firsts`: the words a run can start with (each runner's first word, and every launcher's), lowercased. */
+export type Config = { tests: readonly RegExp[]; build: readonly RegExp[]; firsts?: ReadonlySet<string> }
 /** What a tool call answered (the ToolCallResult arms, read loosely). `text` is the result as the model read it. */
 export type Ran = { readonly deny?: string; readonly isError?: boolean; readonly result?: unknown; readonly text?: string }
 export type Facts = {
@@ -69,7 +70,12 @@ function heredocsOf(command: string): RegExpExecArray[] {
   const lastAt = new Map<string, number>()
   let at = 0
   for (const line of command.split('\n')) {
-    lastAt.set(line.trim(), at)
+    // Strip exactly what HEREDOC's closing line allows ([ \t] before, [ \t\r] after), never trim()'s wider set.
+    let a = 0
+    let b = line.length
+    while (a < b && (line[a] === ' ' || line[a] === '\t')) a += 1
+    while (b > a && (line[b - 1] === ' ' || line[b - 1] === '\t' || line[b - 1] === '\r')) b -= 1
+    lastAt.set(line.slice(a, b), at)
     at += line.length + 1
   }
   const found: RegExpExecArray[] = []
@@ -846,8 +852,12 @@ export function runnerRe(command: string): RegExp {
   return new RegExp(`^(?:${LAUNCHER}){0,3}${body}(?=$|\\s)`, 'i')
 }
 
+// Words that start a launcher (see LAUNCHER); `python3.12` and the like are matched by PYTHONS.
+const LAUNCH_WORDS = ['npx', 'bunx', 'pnpx', 'uvx', 'pnpm', 'yarn', 'bun', 'uv', 'poetry', 'pdm', 'hatch', 'pipenv', 'pipx', 'npm', 'py']
+
 export function configOf(tests: readonly string[], build: readonly string[]): Config {
-  return { tests: tests.map(runnerRe), build: build.map(runnerRe) }
+  const firsts = new Set([...tests, ...build].map(c => (c.trim().split(/\s+/)[0] ?? '').toLowerCase()).concat(LAUNCH_WORDS))
+  return { tests: tests.map(runnerRe), build: build.map(runnerRe), firsts }
 }
 
 function runnerIn(plain: string, res: readonly RegExp[]): boolean {
@@ -951,8 +961,12 @@ const SEGMENT_CAP = 1000
 function kindsIn(plain: string, config: Config): Kind[] {
   if (plain === '' || plain.length > SEGMENT_CAP) return []
   const found: Kind[] = []
-  if (runnerIn(plain, config.tests)) found.push('tests')
-  if (runnerIn(plain, config.build)) found.push('build')
+  // Runners are anchored at the segment's start: a first word that no runner or launcher begins with runs nothing,
+  // and skipping their patterns keeps a command of thousands of segments cheap.
+  const first = plain.slice(0, plain.indexOf(' ') < 0 ? plain.length : plain.indexOf(' ')).toLowerCase()
+  const mayRun = config.firsts === undefined || config.firsts.has(first) || PYTHONS.test(first)
+  if (mayRun && runnerIn(plain, config.tests)) found.push('tests')
+  if (mayRun && runnerIn(plain, config.build)) found.push('build')
   for (const op of SHIP_OPS) if (SHIP_RES[op].test(plain) && !SHIP_SKIP[op].test(plain)) found.push(op)
   return found
 }
@@ -1216,6 +1230,7 @@ const keyIn = (text: string, key: string): boolean => new RegExp(`(?<![\\w.-])${
  */
 const STATUS_VARIABLE = /\$\?|\$\{\?\}|\$LASTEXITCODE|PIPESTATUS/i
 const NUMBERING_GREPS = new Set(['grep', 'egrep', 'rg'])
+const OWN_ECHO_CAP = 20
 
 /**
  * A reader's git or gh command that withholds judgement: any but `git ls-remote`, `gh pr view`, and `git rev-parse`
@@ -1279,20 +1294,24 @@ export function readBack(ledger: Ledger, facts: Facts, config: Config, places: P
   // a failing check in `gh pr checks`, a ref update from `git fetch`). Such a read judges nothing; a clean read can later.
   if (readerSegments.some(s => kindsIn(plainOf(s), config).length > 0 || mixingGit(s, facts.output))) return []
   // A status echo the reader itself runs prints the reader's status, never the run's: its lines are dropped before the
-  // run is judged, even when the run echoed the same template (then neither line can be told apart).
-  const ownEchoes = readerSegments
-    .filter(s => ECHO_HEADS.has(commandWord(s)))
+  // run is judged. An echo redirected to a file prints nothing here. When more lines match the reader's echo shapes
+  // than the reader has such echoes, one of them is the run's and no line can be told apart: the read judges nothing.
+  const ownTexts = readerSegments
+    .filter(s => ECHO_HEADS.has(commandWord(s)) && !s.words.some(w => !w.quoted && /^[0-9&]?>/.test(w.text)))
     .map(echoText)
     .filter(t => STATUS_VARIABLE.test(t))
-    .map(t => t.split(VARIABLE))
+  // Identical templates are one shape; a reader with very many distinct shapes judges nothing (bounded work).
+  const ownShapes = [...new Set(ownTexts)]
+  if (ownShapes.length > OWN_ECHO_CAP) return []
+  const ownEchoes = ownShapes.map(t => t.split(VARIABLE))
   const read = facts.tool === 'Read' ? facts.output.replace(READ_PREFIX, '') : numbered ? facts.output.replace(/^\d+[:-]/gm, '') : facts.output
-  const output =
-    ownEchoes.length === 0
-      ? read
-      : read
-          .split('\n')
-          .filter(line => !ownEchoes.some(pieces => globLine(pieces, line.trim())))
-          .join('\n')
+  let output = read
+  if (ownEchoes.length > 0) {
+    const lines = read.split('\n')
+    const kept = lines.filter(line => !ownEchoes.some(pieces => globLine(pieces, line.trim())))
+    if (lines.length - kept.length > ownTexts.length) return []
+    output = kept.join('\n')
+  }
   const exit = EXITED.exec(output)
   const changed: Entry[] = []
   for (const seq of calls) {

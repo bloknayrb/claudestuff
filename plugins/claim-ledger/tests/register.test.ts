@@ -333,10 +333,12 @@ describe('delivery, flag once, reset', () => {
 
 describe('failure and health', () => {
   test('the health file is written at start, and a refused append is recorded without hiding the line', async ($, on) => {
+    // The refusal is staged here, beneath the plugin, so the test does not depend on whether the kit serves a
+    // plugin's append (CLI 2.1.292 did not; 2.1.293 does). Registered before the test's first call on `$`.
+    on('session.append', () => ({ deny: 'append refused' }) as never)
     const { world } = await boot($, on, 5 * MIN)
     expect(world.writes.map(w => w.path)).toEqual([HEALTH])
 
-    // The kit serves no plugin append, so this append is refused by the host.
     await $.tool.call(edit(CODE))
     expect((await complete($, 'All tests pass.')).text).toContain('Claim Ledger:')
     expect(lastHealth(world).lastError?.message).toContain('session.append')

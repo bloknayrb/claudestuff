@@ -963,6 +963,15 @@ describe('time stays bounded on adversarial inputs', () => {
     expect(ms(() => kinds(sh(echoes(150)), said(''))), 'digit-dense echoes').toBeLessThan(50)
   })
 
+  test('heredoc openers whose only closer differs by a character trim() would strip', () => {
+    // \f, \v, NBSP and BOM before the word, or \r leading it, are not what a closing line allows around its word.
+    for (const closer of ['\fA', 'A\v', ' A', '\rA', '﻿A']) {
+      const command = (n: number) => `${'<<A\n'.repeat(n)}${closer}`
+      kinds(sh(command(2494)))
+      expect(ms(() => kinds(sh(command(2495)))), JSON.stringify(closer)).toBeLessThan(50)
+    }
+  })
+
   test('unterminated heredoc openers and long `${` runs', () => {
     const openers = (n: number) => `${'cat <<A '.repeat(n)}\nnpm test`
     kinds(sh(openers(2499)))
@@ -1077,6 +1086,29 @@ describe('read-backs judge a run only from its own output', () => {
     // The tail cut off the run's own EXIT=1; the EXIT=0 in view is the reader's own echo after git ls-remote.
     call(ledger, 2, sh('git ls-remote origin feat/x; echo "EXIT=$?"; tail -3 "$TEMP/p.log"'), said('EXIT=0\nhusky - pre-push script failed (code 1)\nerror: failed to push some refs'))
     expect(judge('push', ledger).status).toBe('failed')
+  })
+
+  test('when the reader shares the run\'s echo template, more matching lines than its own echoes judge nothing', () => {
+    const T = 'npm test > "$TEMP/t.log" 2>&1; echo "EXIT=$?" >> "$TEMP/t.log"'
+    const P = 'git push origin feat/x > "$TEMP/p.log" 2>&1; echo "EXIT=$?" >> "$TEMP/p.log"'
+    const B = 'npm run build > "$TEMP/b.log" 2>&1; echo "EXIT=$?" >> "$TEMP/b.log"'
+    for (const [run, reader, out, kind] of [
+      [T, 'tail -3 "$TEMP/t.log"; echo "EXIT=$?"', 'EXIT=1\nEXIT=0', 'tests'],
+      [T, 'echo "EXIT=$?"; tail -3 "$TEMP/t.log"', 'EXIT=0\nEXIT=1', 'tests'],
+      [T, 'tail -3 "$TEMP/t.log"; echo "EXIT=$?"', ' Tests  4 passed (4)\nERROR: Coverage for lines (79%) does not meet threshold (80%)\nEXIT=1\nEXIT=0', 'tests'],
+      [P, 'tail -2 "$TEMP/p.log"; echo "EXIT=$?"', '   abc1234..def5678  feat/x -> feat/x\nEXIT=1\nEXIT=0', 'push'],
+      [B, 'tail -2 "$TEMP/b.log"; echo "EXIT=$?"', ' built in 2.1s\nEXIT=1\nEXIT=0', 'build'],
+    ] as const) {
+      const ledger = emptyLedger()
+      call(ledger, 1, sh(run), bg('b1'))
+      expect(call(ledger, 2, sh(reader), said(out)), reader).toEqual([])
+      expect(judge(kind, ledger).status, `${kind}: ${reader}`).toBe('background')
+    }
+    // An echo the reader redirects to a file prints nothing in view: the run's own EXIT=1 is read.
+    const redirected = emptyLedger()
+    call(redirected, 1, sh(T), bg('b1'))
+    call(redirected, 2, sh('tail -3 "$TEMP/t.log"; echo "EXIT=$?" > "$TEMP/r.txt"'), said('EXIT=1'))
+    expect(judge('tests', redirected).status).toBe('failed')
   })
 
   test('a looping background command stays weak through every read-back', () => {

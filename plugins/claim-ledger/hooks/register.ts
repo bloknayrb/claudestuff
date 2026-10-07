@@ -146,7 +146,7 @@ async function track($: EngineInterface, input: Readonly<Record<string, unknown>
   await mirror($)
 }
 
-/** The seam around $.session.append: the trail records each attempt, which a test can read (the kit serves no plugin append). */
+/** The seam around $.session.append: the trail records each attempt, which a test can read whether or not the kit serves the append. */
 async function deliver($: EngineInterface, text: string, now: number): Promise<void> {
   trace({ ts: now, ev: 'append', text })
   try {
