@@ -390,6 +390,18 @@ export const onTurnComplete: Hook<'turn.complete'> = async ($, e, next) => {
 
 // ==== lifecycle ====
 
+/** Empties every session-scoped value (00-shared), and this module's toast claims. Values never go undefined. */
+async function clearSession($: EngineInterface): Promise<void> {
+  claimed.clear()
+  await update($, denied, () => [])
+  await update($, agents, () => ({}))
+  await update($, spawnModels, () => ({}))
+  await update($, sourceToasts, () => [])
+  await update($, sourceSpawns, () => ({}))
+  // No session.start follows: the next measure or main turn re-arms the heartbeat under the new id (D5).
+  await update($, health, () => null)
+}
+
 export const onSessionStart: Hook<'session.start'> = async ($, e, next) => {
   $.ui.log(`quartermaster: list options arrived as ${current.shapes}`, { to: 'debug' })
   // session.start fires on every hot reload too: each load gets a fresh heartbeat (00-shared).
@@ -405,6 +417,15 @@ export const onMeasure: Hook<'session.measure'> = async ($, e, next) => {
   await ensureHeartbeat($)
   await recordReading($, e.rateLimits)
   await refreshStatus($, e.rateLimits)
+  return next(e)
+}
+
+export const onSessionEnd: Hook<'session.end'> = async ($, e, next) => {
+  // Before next(e): one 1.5 s bound covers the whole session.end chain, core's end step included.
+  if (e.reason === 'clear' || e.reason === 'resume') {
+    await clearSession($)
+    await refreshStatus($)
+  }
   return next(e)
 }
 
@@ -429,6 +450,10 @@ export const register: Register = (on, options) => {
   })
   on('turn.complete', onTurnComplete).catch(async ($, e, next) => {
     await noteFailure($, 'turn.complete', next.error)
+    return next(e)
+  })
+  on('session.end', onSessionEnd).catch(async ($, e, next) => {
+    await noteFailure($, 'session.end', next.error)
     return next(e)
   })
 }
