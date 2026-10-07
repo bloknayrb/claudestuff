@@ -18,6 +18,12 @@ A Claude Code mod that keeps subagent spending deliberate.
 Spawns made by other plugins or by workflow scripts can't re-issue, so for them the guards never deny: they
 toast, once per plugin and agent type (model guard) or per plugin and window (heavy guard).
 
+## Requirements
+
+Quartermaster is a function-hooks plugin, built against Claude Code 2.1.292. That hooks API is early access
+and moves between releases, so a newer build may need changes here. The pace line and toasts need a
+subscription that reports rate limits.
+
 ## Install
 
 ```
@@ -52,6 +58,7 @@ narrowed or removed.
   ring).
 - A heartbeat at `~/.claude/state/mods/quartermaster/<sessionId>.json`:
   `{ "loadedAt", "lastError" }`.
+  One file is written per session id and never pruned; they are small and safe to delete.
 
 It makes no model calls. A guard that fails lets the spawn through and logs to the debug log.
 

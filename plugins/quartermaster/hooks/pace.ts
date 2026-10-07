@@ -59,9 +59,11 @@ export function clockText(ms: number): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-/** `cap ~15:40 (resets 17:00)`, `no cap before reset (resets 17:00)`, or `— (resets 17:00)`. */
-export function paceClause(cap: number | null, resetsAt: number | null): string {
+/** `capped (resets 17:00)`, `cap ~15:40 (resets 17:00)`, `no cap before reset (resets 17:00)`, or `— (resets 17:00)`. */
+export function paceClause(cap: number | null, resetsAt: number | null, pct = 0): string {
   const resets = resetsAt === null ? '' : ` (resets ${clockText(resetsAt)})`
+  // At 100% the fitted cap time is in the past: say so instead of projecting it.
+  if (pct >= 100) return `capped${resets}`
   if (cap === null) return `—${resets}`
   if (resetsAt !== null && cap >= resetsAt) return `no cap before reset${resets}`
   return `cap ~${clockText(cap)}${resets}`
@@ -71,7 +73,9 @@ export function paceClause(cap: number | null, resetsAt: number | null): string 
 export function windowText(pct: number, resetsAt: number | null, cap: number | null): string {
   const resets = resetsAt === null ? '' : `, resets ${clockText(resetsAt)}`
   const pace =
-    cap === null
+    pct >= 100
+      ? 'already capped'
+      : cap === null
       ? 'pace unknown'
       : resetsAt !== null && cap >= resetsAt
         ? 'not on pace to cap before the reset'

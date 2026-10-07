@@ -108,3 +108,14 @@ describe('pace line', () => {
     expect(keys.sort()).toEqual([windowKey(nextReset), windowKey(nextReset + 300 * MIN)].sort())
   })
 })
+
+describe('capped window', () => {
+  test('at 100% the line says capped instead of a past cap time', async ($, on) => {
+    const w = world(on)
+    for (const pct of [60, 80, 100, 100]) {
+      await $.session.measure(measure([fiveHourAt(pct)]))
+      await w.clock.advance(30 * MIN)
+    }
+    expect(last(w.status)).toBe(`QM pace: capped (resets ${clockText(RESET)}) · agents 0`)
+  })
+})

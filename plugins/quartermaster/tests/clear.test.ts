@@ -58,3 +58,15 @@ describe('heartbeat re-arm', () => {
     expect(w.writes.some(x => x.path.endsWith('/mods/quartermaster/S2.json'))).toBe(true)
   })
 })
+
+describe('command re-registration', () => {
+  test('a re-arm after /clear declares /quartermaster again', async ($, on) => {
+    const w = world(on)
+    await $.session.start(START)
+    expect(w.registered).toEqual(['quartermaster'])
+    await $.session.end(END_CLEAR)
+    w.setSessionId('S2')
+    await $.turn.complete(turnEnd())
+    expect(w.registered).toEqual(['quartermaster', 'quartermaster'])
+  })
+})

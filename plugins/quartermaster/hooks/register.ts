@@ -65,6 +65,18 @@ async function ensureHeartbeat($: EngineInterface, fresh = false): Promise<void>
   const loadedAt = await $.clock.now()
   await update($, health, () => ({ sessionId, loadedAt, lastError: null }))
   await writeHealth($)
+  // A command is declared "for this session" and no session.start follows a /clear, so a re-arm declares it
+  // again (registering a name twice replaces it).
+  if (!fresh) await registerCommand($)
+}
+
+async function registerCommand($: EngineInterface): Promise<void> {
+  try {
+    await $.command.register({ name: COMMAND, description: 'Quartermaster: guard fires and re-issues, and the five-hour pace' })
+  } catch (error) {
+    // A failed registration must not cost the caller its other work.
+    await noteFailure($, 'command.register', error)
+  }
 }
 
 function describeError(error: unknown): string {
@@ -226,7 +238,7 @@ async function refreshStatus($: EngineInterface, limits?: readonly SessionRateLi
   }
   const cap = window.resetsAt === null ? null : fitCap((await windowReadings($, window.resetsAt)).readings)
   const tally = agentsClause(await read($, agents), current.cfg.heavyModels)
-  $.ui.status(statusText(paceClause(cap, window.resetsAt), tally))
+  $.ui.status(statusText(paceClause(cap, window.resetsAt, window.pct), tally))
 }
 
 // ==== guards ====
@@ -411,12 +423,7 @@ const onSessionStart: Hook<'session.start'> = async ($, e, next) => {
   $.ui.log(`quartermaster: list options arrived as ${current.shapes}`, { to: 'debug' })
   // session.start fires on every hot reload too: each load gets a fresh heartbeat.
   await ensureHeartbeat($, true)
-  try {
-    await $.command.register({ name: COMMAND, description: 'Quartermaster: guard fires and re-issues, and the five-hour pace' })
-  } catch (error) {
-    // A failed registration must not cost this load its reading and status line.
-    await noteFailure($, 'command.register', error)
-  }
+  await registerCommand($)
   const { rateLimits } = await $.session.usage()
   await recordReading($, rateLimits)
   await refreshStatus($, rateLimits)
@@ -465,7 +472,7 @@ const onCommand: Hook<'command.run'> = async $ => {
     guardLine('heavy guard', counters.heavy),
     window === null
       ? 'pace: no five-hour reading (rate limits come with a subscription)'
-      : `pace: ${paceClause(cap, window.resetsAt)}, window at ${window.pct}%`,
+      : `pace: ${paceClause(cap, window.resetsAt, window.pct)}, window at ${window.pct}%`,
     `this session: ${agentsClause(await read($, agents), cfg.heavyModels)}`,
     `toast-only spawns this session: ${sources.join(', ') || 'none'}`,
     `ring: ${ring.length} of the last ${RING_MAX} fires kept`,
