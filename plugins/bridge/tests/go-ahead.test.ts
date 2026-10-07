@@ -7,12 +7,30 @@ import type { World } from './world'
 const RESOLVED = 'Bridge decision: {"id":1,"question":"Which database?","choice":"label","label":"Postgres"}'
 const STILL = 'Bridge: decision #1 is still pending; that prompt did not resolve it.'
 
+type Submit = Parameters<Engine['prompt']['submit']>[0]
+
+function submit($: Engine, text: string, origin: Record<string, unknown>, turnId?: string) {
+  return $.prompt.submit({ text, origin, wait: false, ...(turnId === undefined ? {} : { turnId }) } as Submit)
+}
+
+// Models the engine's order. Typed while idle, the prompt starts a turn, and next() resolves only once
+// that turn has started: the stub holds the submit open while turn.start runs. Typed mid-turn, the prompt
+// is queued behind the running turn and no new turn starts. A prompt a hook drops starts no turn.
 async function say($: Engine, w: World, text: string, origin: Record<string, unknown> = { kind: 'composer' }, turnId?: string) {
-  const r = await $.prompt.submit({ text, origin, wait: false, ...(turnId === undefined ? {} : { turnId }) } as Parameters<Engine['prompt']['submit']>[0])
+  if (turnId !== undefined) {
+    const queued = await submit($, text, origin, turnId)
+    await w.clock.settle()
+    return queued
+  }
+  w.submitHoldMs = 100
+  const sending = submit($, text, origin)
   await w.clock.settle()
-  // The turn the prompt starts: Bridge's row is appended from its turn.start, before the first step.
-  await $.turn.start({ text, turnId: 'u-turn' })
+  if (!w.dropTyped) await $.turn.start({ text, turnId: 'u-turn' })
   await w.clock.settle()
+  await w.clock.advance(100)
+  const r = await sending
+  await w.clock.settle()
+  w.submitHoldMs = 0
   return r
 }
 
@@ -115,7 +133,7 @@ test('a ? right after a URL is a question', async ($, on) => {
   expect(await pendingIds($)).toEqual([1])
 })
 
-test('typed while a turn runs: only the still-pending note', async ($, on) => {
+test('typed while a turn runs: only the still-pending note, appended at once', async ($, on) => {
   const w = world(on)
   await oneDecisionThenAnswer($, w)
   await $.turn.start({ text: 'more', turnId: 't1' })
@@ -124,7 +142,7 @@ test('typed while a turn runs: only the still-pending note', async ($, on) => {
   expect(w.appends).toEqual([STILL])
   expect(await pendingIds($)).toEqual([1])
   // The note is never a wake: the typed prompt is itself the turn that reads it.
-  await endTurn($, w, 'u-turn', 'answer')
+  await endTurn($, w, 't1', 'answer')
   expect(wakes(w)).toBe(0)
 })
 
@@ -143,4 +161,63 @@ test('a prompt a settings hook drops resolves nothing and appends nothing', asyn
   await say($, w, 'make it so')
   expect(w.appends).toEqual([])
   expect(await pendingIds($)).toEqual([1])
+})
+
+// The documented order: next() resolves after the prompt's turn started, so the turn's turn.start runs
+// while the hook still waits on it. The row must already be queued then, and land before the first step.
+test('turn.start runs while next() is held: the row is appended before the first step, with no wake', async ($, on) => {
+  const w = world(on)
+  await oneDecisionThenAnswer($, w)
+  w.submitHoldMs = 100
+  const sending = submit($, 'make it so', { kind: 'composer' })
+  await w.clock.settle()
+  await $.turn.start({ text: 'make it so', turnId: 'u-turn' })
+  await w.clock.settle()
+  expect(w.appends).toEqual([RESOLVED])
+  await w.clock.advance(100)
+  await sending
+  await w.clock.settle()
+  w.stepAnswers.push('ok')
+  await step($, 'u-turn')
+  await endTurn($, w, 'u-turn', 'answer', 'ok')
+  expect(w.appends).toEqual([RESOLVED])
+  expect(await pendingIds($)).toEqual([])
+  expect(wakes(w)).toBe(0)
+})
+
+test('a dropped prompt: the claim is undone, no row ever lands, and a later go-ahead still works', async ($, on) => {
+  const w = world(on)
+  await oneDecisionThenAnswer($, w)
+  w.dropTyped = true
+  await say($, w, 'make it so')
+  expect(w.appends).toEqual([])
+  expect(await pendingIds($)).toEqual([1])
+  await runTurn($, w, 't9')
+  expect(w.appends).toEqual([])
+  w.dropTyped = false
+  await say($, w, 'make it so')
+  expect(w.appends).toEqual([RESOLVED])
+  expect(await pendingIds($)).toEqual([])
+})
+
+test('two go-aheads before a turn starts: both rows are kept and land in order', async ($, on) => {
+  const w = world(on)
+  await oneDecisionThenAnswer($, w)
+  w.submitHoldMs = 100
+  const first = submit($, 'make it so', { kind: 'composer' })
+  await w.clock.settle()
+  await decide($)
+  const second = submit($, 'engage', { kind: 'composer' })
+  await w.clock.settle()
+  await $.turn.start({ text: 'make it so', turnId: 'u-turn' })
+  await w.clock.settle()
+  await w.clock.advance(100)
+  await Promise.all([first, second])
+  await w.clock.settle()
+  expect(w.appends).toEqual([
+    RESOLVED,
+    'Bridge decision: {"id":2,"question":"Which database?","choice":"label","label":"Postgres"}',
+  ])
+  expect(await pendingIds($)).toEqual([])
+  expect(wakes(w)).toBe(0)
 })

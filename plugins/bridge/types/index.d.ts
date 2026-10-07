@@ -54,8 +54,8 @@ export type LastTurn = { reason: EndReason; text: string }
 // until it has been let go for the whole delay. Each pause's timer clears only its own deadline.
 export type ViewState = { isPaneUp: boolean; otherFor: number | null; keysPausedUntil: number | null }
 
-// A row the prompt hook decided on, held until turn.start appends it: the engine may have built the
-// turn's first request by the time the hook's next() resolves, so the row goes in just before it.
+// Rows the prompt hook decided on for a prompt typed while idle, held until turn.start appends them in order.
+// next() resolves after that turn started, so they are claimed before it and flushed by its turn.start.
 export type PendingRow = { tag: 'decision' | 'note'; text: string; id: number; nonce: string }
 
 export type BridgeSession = {
@@ -67,7 +67,7 @@ export type BridgeSession = {
   // The running main turn's visible text so far (capped); copied into `last` when it ends.
   turnText: string
   last: LastTurn | null
-  pendingRow: PendingRow | null
+  pendingRows: PendingRow[]
   view: ViewState
 }
 

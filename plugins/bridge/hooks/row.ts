@@ -11,7 +11,7 @@ export const ROW_PREFIX = 'Bridge decision: '
 export const APPEND_MARK = 'bridge: append: '
 
 // Python's str.isspace() set, which a strict consumer strips with str.strip(); JS trim() differs (U+0085,
-// U+001C-U+001F, U+FEFF), so Bridge uses this set to refuse an Other text Verbatim would discard.
+// U+001C-U+001F, U+FEFF), so Bridge uses this set to refuse an Other text a strict consumer would discard.
 const PY_BLANK = /^[\t\n\v\f\r\x1c-\x1f \x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]*$/
 
 export function isBlankText(text: string): boolean {

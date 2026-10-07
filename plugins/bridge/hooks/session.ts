@@ -12,7 +12,7 @@ export function freshSession(): BridgeSession {
     isWakeQueued: false,
     turnText: '',
     last: null,
-    pendingRow: null,
+    pendingRows: [],
     view: { isPaneUp: false, otherFor: null, keysPausedUntil: null },
   }
 }
@@ -27,7 +27,7 @@ export function normalize(value: Partial<BridgeSession> | undefined): BridgeSess
     isWakeQueued: value.isWakeQueued ?? false,
     turnText: value.turnText ?? '',
     last: value.last ?? null,
-    pendingRow: value.pendingRow ?? null,
+    pendingRows: value.pendingRows ?? [],
     view: { ...fresh.view, ...(value.view ?? {}) },
   }
 }

@@ -57,7 +57,7 @@ describe('formatRow', () => {
   })
 })
 
-describe('isBlankText (what Verbatim would discard)', () => {
+describe('isBlankText (what a strict consumer would discard)', () => {
   for (const text of ['', '   ', '\t\n', '\u0085', '\u001c', '\u001f', '\u00a0', '\u3000 \u2028']) {
     test(`blank: ${JSON.stringify(text)}`, () => expect(isBlankText(text)).toBe(true))
   }

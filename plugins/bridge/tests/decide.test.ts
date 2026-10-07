@@ -43,7 +43,7 @@ describe('the rest of the tool surface', () => {
     expect(text).toContain('call again')
   })
 
-  test('the receipt is the spec text', () => {
+  test('the receipt text is exact', () => {
     expect(receipt(3)).toBe("Logged as decision #3. Keep going on what doesn't depend on it; the answer arrives as a message.")
   })
 

@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderViewport } from 'claude-code'
 
-import type { Answer, BridgeSession, DecideInput } from '../types'
+import type { Answer, BridgeSession, DecideInput, PendingRow } from '../types'
 import { addDecision, idForUse, isAnsweredBy, markAnswered, pending, recommendedAnswer, reopen } from './book'
 import { mainTurnEnded, mainTurnStarted, rowAppended, stepBegan } from './delivery'
 import { asksQuestion, isFromUser, isGoAhead, stillPendingLine } from './prompt'
@@ -11,7 +11,7 @@ import { freshSession, lastTurn, normalize, resetSession, withTurnText } from '.
 import { ARM_DELAY_MS, bandTree, PANE_ID, paneTree, PANE_TITLE } from './ui'
 import type { CardActions } from './ui'
 
-// A new decision opens the pane unasked only from this width, as the spec says; the engine's own
+// A new decision opens the pane unasked only from this width (a fixed rule); the engine's own
 // floor is 110 for a pane id the person has opened before, so the mod checks 144 itself too.
 const UNASKED_PANE_COLUMNS = 144
 
@@ -109,7 +109,7 @@ async function queueDecision($: EngineInterface, input: DecideInput, useId: stri
   return id
 }
 
-// The engine's record, not the module's (T: ui.panes): a pane closed by an unload or a refused draw
+// The engine's record, not the module's (ui.panes): a pane closed by an unload or a refused draw
 // runs none of this plugin's hooks, so the stored isPaneUp can be stale.
 async function isPaneOpen($: EngineInterface): Promise<boolean> {
   return (await $.ui.panes()).some(pane => pane.id === PANE_ID && pane.isPlaced)
@@ -277,41 +277,64 @@ async function answerWith($: EngineInterface, id: number, answer: Answer): Promi
   return true
 }
 
-// The decision is claimed now (a press in between loses to it, by the nonce) and its row, or the
-// still-pending note when answer is null, waits in the session for turn.start.
-async function deferRow($: EngineInterface, id: number, answer: Answer | null): Promise<void> {
+// A prompt typed while idle: the decision is claimed now (a press in between loses to it, by the
+// nonce) and its row, or the still-pending note when answer is null, waits in a queue for turn.start.
+// Queued, never a single slot, so a later go-ahead cannot overwrite a claimed row not yet flushed.
+// Returns the entry's nonce, or null when the claim was lost.
+async function deferRow($: EngineInterface, id: number, answer: Answer | null): Promise<string | null> {
   const nonce = `${await $.clock.now()}-${Math.random()}`
-  await transact($, s => {
-    if (answer === null) return { session: { ...s, pendingRow: { tag: NOTE_TAG, text: stillPendingLine(id), id, nonce } }, out: null }
+  return transact($, s => {
+    if (answer === null) {
+      const row: PendingRow = { tag: NOTE_TAG, text: stillPendingLine(id), id, nonce }
+      return { session: { ...s, pendingRows: [...s.pendingRows, row] }, out: nonce }
+    }
     const book = markAnswered(s.book, id, answer, nonce)
     const claimed = book.decisions.find(d => d.id === id)
     if (!isAnsweredBy(book, id, nonce) || claimed === undefined) return { session: s, out: null }
-    return { session: { ...s, book, pendingRow: { tag: ROW_TAG, text: formatRow(claimed, answer), id, nonce } }, out: null }
+    const row: PendingRow = { tag: ROW_TAG, text: formatRow(claimed, answer), id, nonce }
+    return { session: { ...s, book, pendingRows: [...s.pendingRows, row] }, out: nonce }
   })
 }
 
-// From turn.start, after mainTurnStarted: the row lands before the turn's first step, so that step
-// reads it, and it never wakes (the user's prompt is the turn). A failed append reopens the decision.
-// The still-pending note is deliberately not recorded with the delivery module: nothing needs to track
-// it, and a recorded note still unread at an answered turn end would cause a pointless wake.
-async function flushPendingRow($: EngineInterface): Promise<void> {
-  const row = await transact($, s => ({ session: { ...s, pendingRow: null }, out: s.pendingRow }))
-  if (row === null) return
-  const appended = await appendRow($, row.text)
-  if (!appended.isAppended) {
-    if (row.tag === ROW_TAG) {
-      await transact($, s => ({ session: { ...s, book: reopen(s.book, row.id, row.nonce) }, out: null }))
-      $.ui.toast(`Bridge: decision #${row.id} could not be delivered (${appended.why}); it is pending again.`)
+// The prompt the entry was made for never entered (a settings hook dropped it): take the entry back
+// out and reopen the decision, as if the go-ahead had not been typed.
+async function undoDeferred($: EngineInterface, id: number, nonce: string): Promise<void> {
+  await transact($, s => ({
+    session: { ...s, book: reopen(s.book, id, nonce), pendingRows: s.pendingRows.filter(r => r.nonce !== nonce) },
+    out: null,
+  }))
+}
+
+// A prompt typed while a turn runs is read at that turn's next step, and no turn.start need follow, so
+// its still-pending note is appended at once. Like every note, it is not recorded with the delivery
+// module: nothing needs to track it, and a recorded note still unread at an answered turn end would
+// cause a pointless wake.
+async function appendNote($: EngineInterface, id: number): Promise<void> {
+  const appended = await appendRow($, stillPendingLine(id))
+  if (!appended.isAppended) await fail($, 'append', appended.why)
+}
+
+// From turn.start, after mainTurnStarted: the rows land before the turn's first step, so that step
+// reads them, and they never wake (the user's prompt is the turn). A failed append reopens its decision.
+async function flushPendingRows($: EngineInterface): Promise<void> {
+  const rows = await transact($, s => ({ session: { ...s, pendingRows: [] }, out: s.pendingRows }))
+  for (const row of rows) {
+    const appended = await appendRow($, row.text)
+    if (!appended.isAppended) {
+      if (row.tag === ROW_TAG) {
+        await transact($, s => ({ session: { ...s, book: reopen(s.book, row.id, row.nonce) }, out: null }))
+        $.ui.toast(`Bridge: decision #${row.id} could not be delivered (${appended.why}); it is pending again.`)
+      }
+      await fail($, 'append', appended.why)
+      continue
     }
-    await fail($, 'append', appended.why)
-    return
+    if (row.tag !== ROW_TAG) continue
+    const after = await transact($, s => {
+      const next: BridgeSession = { ...s, delivery: rowAppended(s.delivery, row.tag).delivery }
+      return { session: next, out: next }
+    })
+    await closePaneIfDone($, after)
   }
-  if (row.tag !== ROW_TAG) return
-  const after = await transact($, s => {
-    const next: BridgeSession = { ...s, delivery: rowAppended(s.delivery, row.tag).delivery }
-    return { session: next, out: next }
-  })
-  await closePaneIfDone($, after)
 }
 
 async function pickOption($: EngineInterface, id: number, index: number): Promise<void> {
@@ -327,7 +350,7 @@ async function makeItSo($: EngineInterface, id: number): Promise<void> {
   await answerWith($, id, recommendedAnswer(decision))
 }
 
-// Blank by Python's str.strip(), which Verbatim applies: such a row would carry no words of the user's.
+// Blank by Python's str.strip(), which a strict consumer applies: such a row would carry no words of the user's.
 async function sendOther($: EngineInterface, id: number, text: string): Promise<void> {
   if (isBlankText(text)) return
   await answerWith($, id, { choice: 'other', text })
@@ -362,11 +385,14 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // Spec item 4. Only the user's own prompt (composer or Remote Control; see prompt.ts), only the
-  // whole text "make it so"/"engage", only with exactly one decision pending. The prompt passes on
-  // exactly as received, with no context from Bridge, so nothing Bridge writes can pass for the user's
-  // words; what Bridge has to say goes in its own appended rows. The row waits for turn.start (see
-  // flushPendingRow), because the turn's first request may be built before next() resolves here.
+  // "Make it so" typed at the prompt. Only the user's own prompt (composer or Remote Control; see
+  // prompt.ts), only the whole text "make it so"/"engage", only with exactly one decision pending. The
+  // prompt passes on exactly as received, with no context from Bridge, so nothing Bridge writes can
+  // pass for the user's words; what Bridge has to say goes in its own appended rows.
+  //
+  // Typed while idle, the prompt starts a turn, and next() resolves only after that turn has started
+  // (its turn.start has already run). So the row is claimed and queued BEFORE next, and turn.start
+  // appends it ahead of the first step. If the prompt turns out dropped, the claim is undone.
   on('prompt.submit', async ($, e, next) => {
     if (!isFromUser(e.origin) || !isGoAhead(e.text)) return next(e)
     const s = await readSession($)
@@ -375,14 +401,21 @@ export const register: Register = on => {
     if (open.length !== 1 || decision === undefined) return next(e)
     // Typed mid-turn, the answer it follows is still streaming: note only. The question check reads
     // the whole visible text of the last main turn.
-    const canResolve = e.turnId === undefined && s.last?.reason === 'answer' && !asksQuestion(s.last.text)
-    const entered = await next(e)
-    if (entered.drop !== undefined) return entered
+    const isIdle = e.turnId === undefined
+    const canResolve = isIdle && s.last?.reason === 'answer' && !asksQuestion(s.last.text)
+    const queued = isIdle ? await deferRow($, decision.id, canResolve ? recommendedAnswer(decision) : null) : null
+    let entered: Awaited<ReturnType<typeof next>>
     try {
-      await deferRow($, decision.id, canResolve ? recommendedAnswer(decision) : null)
+      entered = await next(e)
     } catch (err) {
-      await fail($, 'make it so', err)
+      if (queued !== null) await guard($, 'make it so', undoDeferred($, decision.id, queued))
+      throw err
     }
+    if (entered.drop !== undefined) {
+      if (queued !== null) await guard($, 'make it so', undoDeferred($, decision.id, queued))
+      return entered
+    }
+    if (!isIdle) await guard($, 'make it so', appendNote($, decision.id))
     return entered
   }).catch(async ($, e, next) => {
     if (next.error.kind !== 're-entry') await fail($, 'prompt.submit', next.error.message ?? next.error.kind)
@@ -398,7 +431,7 @@ export const register: Register = on => {
         out: null,
       }))
       void guard($, 'heartbeat', refreshHeartbeat($))
-      await flushPendingRow($)
+      await flushPendingRows($)
     } catch (err) {
       await fail($, 'turn.start', err)
     }
