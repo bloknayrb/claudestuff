@@ -1,8 +1,10 @@
-import type { AgentSpawnResult, EngineInterface, Hook, Register } from 'claude-code'
+import type { AgentSpawnResult, EngineInterface, Hook, Register, SessionRateLimit } from 'claude-code'
 import { atom, read, update } from 'claude-code'
 import type { QmDenial, QmGuard, QmHealth } from '../types'
 import { current, parseConfig, shapeOf } from './config'
 import { spawnHash, taskHash } from './hash'
+import type { Reading } from './pace'
+import { agentsClause, fitCap, fiveHour, matchWindow, paceClause, statusText, windowText } from './pace'
 import type { Fired, SpawnView } from './rules'
 import {
   DENIAL_TTL_MS,
@@ -145,6 +147,67 @@ function recordFires($: EngineInterface, guards: readonly QmGuard[], hash: strin
   })
 }
 
+export const READINGS_MAX = 300
+export const DUPLICATE_MS = 60_000
+
+/** Keeps the current window and the one before it (the two latest resets). */
+export function keepTwoWindows<T>(byWindow: Record<string, T>): Record<string, T> {
+  const keys = Object.keys(byWindow)
+    .sort((a, b) => Number(a) - Number(b))
+    .slice(-2)
+  return Object.fromEntries(keys.map(key => [key, byWindow[key] as T]))
+}
+
+type WindowReadings = { key: string; readings: Reading[] }
+
+async function allReadings($: EngineInterface): Promise<Record<string, Reading[]>> {
+  return ((await $.store.get('readings')) ?? {}) as Record<string, Reading[]>
+}
+
+/** The readings of the window that resets at resetsAt, under the key matchWindow picks. */
+async function windowReadings($: EngineInterface, resetsAt: number): Promise<WindowReadings> {
+  const all = await allReadings($)
+  const key = matchWindow(Object.keys(all), resetsAt)
+  return { key, readings: all[key] ?? [] }
+}
+
+/** Adds a reading to its window and returns the window; a repeat within a minute is skipped (D10). */
+function addReading($: EngineInterface, resetsAt: number, reading: Reading): Promise<WindowReadings> {
+  return serial(async () => {
+    const all = await allReadings($)
+    const key = matchWindow(Object.keys(all), resetsAt)
+    const list = all[key] ?? []
+    const prior = list[list.length - 1]
+    if (prior !== undefined && prior[1] === reading[1] && reading[0] - prior[0] < DUPLICATE_MS) {
+      return { key, readings: list }
+    }
+    const kept = [...list, reading].slice(-READINGS_MAX)
+    await $.store.set('readings', keepTwoWindows({ ...all, [key]: kept }))
+    return { key, readings: kept }
+  })
+}
+
+// ==== pacing ====
+
+/** Stores a five-hour reading under its window; readings reset with the window (keyed by resetsAt). */
+async function recordReading($: EngineInterface, limits: readonly SessionRateLimit[]): Promise<void> {
+  const window = fiveHour(limits)
+  if (window === null || window.resetsAt === null) return
+  await addReading($, window.resetsAt, [await $.clock.now(), window.pct])
+}
+
+/** The one status line; hidden with no five-hour reading (D9). */
+async function refreshStatus($: EngineInterface, limits?: readonly SessionRateLimit[]): Promise<void> {
+  const window = fiveHour(limits ?? (await $.session.usage()).rateLimits)
+  if (window === null) {
+    $.ui.status(undefined)
+    return
+  }
+  const cap = window.resetsAt === null ? null : fitCap((await windowReadings($, window.resetsAt)).readings)
+  const tally = agentsClause(await read($, agents), current.cfg.heavyModels)
+  $.ui.status(statusText(paceClause(cap, window.resetsAt), tally))
+}
+
 // ==== guards ====
 
 type SpawnEvent = Parameters<Hook<'agent.spawn'>>[1]
@@ -281,6 +344,17 @@ export const onSessionStart: Hook<'session.start'> = async ($, e, next) => {
   $.ui.log(`quartermaster: list options arrived as ${current.shapes}`, { to: 'debug' })
   // session.start fires on every hot reload too: each load gets a fresh heartbeat (00-shared).
   await ensureHeartbeat($, true)
+  const { rateLimits } = await $.session.usage()
+  await recordReading($, rateLimits)
+  await refreshStatus($, rateLimits)
+  return next(e)
+}
+
+export const onMeasure: Hook<'session.measure'> = async ($, e, next) => {
+  // Re-arms the heartbeat under a new session id after /clear (D5).
+  await ensureHeartbeat($)
+  await recordReading($, e.rateLimits)
+  await refreshStatus($, e.rateLimits)
   return next(e)
 }
 
@@ -297,6 +371,10 @@ export const register: Register = (on, options) => {
   // Fail open: a broken guard lets the spawn through (next.called replays, never re-runs).
   on('agent.spawn', onSpawn).catch(async ($, e, next) => {
     await noteFailure($, 'agent.spawn', next.error)
+    return next(e)
+  })
+  on('session.measure', onMeasure).catch(async ($, e, next) => {
+    await noteFailure($, 'session.measure', next.error)
     return next(e)
   })
 }
