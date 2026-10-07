@@ -829,8 +829,23 @@ describe('runners are commands, not arguments; ops that do nothing', () => {
       ['pnpm exec vitest run', ['tests']],
       ['npx -y -p typescript@5 tsc -p .', ['build']],
       ['$out = idf.py -C firmware build 2>&1', ['build']],
+      // pnpm, yarn and bun run a runner word directly.
+      ['pnpm vitest run', ['tests']],
+      ['yarn jest --ci', ['tests']],
+      ['bun x vitest', ['tests']],
+      // Wrappers and their own options.
+      ['nice -n 10 pytest', ['tests']],
+      ['xvfb-run -a npm test', ['tests']],
+      ['cross-env CI=1 npm test', ['tests']],
+      ['dotenv -e .env.test -- npm test', ['tests']],
+      ['watchexec -e ts -- pytest', ['tests']],
+      // `-m` names a module through a launcher too.
+      ['uv run python -m pytest -q', ['tests']],
       ['npx vitest --help', []],
       ['pytest -h', []],
+      ['pytest --co -q', []],
+      ['pytest --collect-only', []],
+      ['pnpm add -D vitest', []],
     ] as const) {
       expect(kinds(sh(command)), command).toEqual(want)
     }
@@ -868,6 +883,16 @@ describe('time stays bounded on adversarial inputs', () => {
       const vars = Array.from({ length: k }, (_, i) => `$V${i}`).join(' ')
       expect(ms(() => kinds(sh(`npm test; echo "${vars} rc=$?"`), said('ab '.repeat(len)))), `${k} variables`).toBeLessThan(50)
     }
+  })
+
+  test('a status echo whose variables are joined by a literal separator', () => {
+    for (const [sep, k, unit] of [[',', 8, ',a'], [',', 10, ',a'], [':', 8, ':x'], [':', 10, ':x'], [', ', 10, ', b'], ['/', 10, '/p']] as const) {
+      const vars = Array.from({ length: k }, (_, i) => `$V${i}`).join(sep)
+      const line = unit.repeat(Math.floor(298 / unit.length)) // just under the status-line cap
+      expect(ms(() => kinds(sh(`npm test; echo "${vars} rc=$?"`), said(line))), `${JSON.stringify(sep)} x${k}`).toBeLessThan(50)
+    }
+    // Mixed separators still read the status.
+    expect(kinds(sh('npm test; echo "$A,$B:$C/$D rc=$?"'), said('a,b:c/d rc=1'))).toEqual(['tests~failed'])
   })
 
   test('many options before a word that is not the runner', () => {
@@ -923,13 +948,48 @@ describe('read-backs judge a run only from its own output', () => {
     expect(call(both, 2, sh('cat "C:/t/tasks/b1.output"; tail -2 "$TEMP/p.log"'), said('exit=0\n[exited with code 0]')).length).toBe(1)
   })
 
-  test("a looping command is judged only by the task's exit line", () => {
-    const LOOP = 'for s in a b c; do npx vitest run $s; echo "rc=$?"; done > "$TEMP/loop.log" 2>&1'
+  test("a looping command is judged only once the task's exit line is in view, never by a status echo", () => {
+    const LOOP = 'for s in a b c; do npx vitest run $s; done > "$TEMP/loop.log" 2>&1'
     const ledger = emptyLedger()
     call(ledger, 1, sh(LOOP), bg('b9'))
-    expect(call(ledger, 2, sh('tail -2 "$TEMP/loop.log"'), said(' Tests  4 passed (4)\nrc=0'))).toEqual([])
+    expect(call(ledger, 2, sh('tail -2 "$TEMP/loop.log"'), said(' Tests  4 passed (4)'))).toEqual([])
     expect(judge('tests', ledger).status).toBe('background')
-    call(ledger, 3, sh('cat "C:/t/tasks/b9.output"'), said('rc=0\n[exited with code 1]'))
+    call(ledger, 3, sh('cat "C:/t/tasks/b9.output"'), said('[exited with code 1]'))
     expect(judge('tests', ledger)).toMatchObject({ status: 'failed', entry: { basis: 'exit' } })
+    // The loop's status echo prints once per pass: with an echo after the runner, the body's status is masked.
+    const echoed = emptyLedger()
+    call(echoed, 1, sh('for s in a b; do npx vitest run $s; echo "rc=$?"; done'), bg('b8'))
+    expect(call(echoed, 2, sh('cat "C:/t/tasks/b8.output"'), said('rc=0\nrc=0\n[exited with code 0]'))).toEqual([])
+  })
+
+  test('a masked loop body is credited only as classify would: a failure in view fails it', () => {
+    for (const body of ['npx vitest run $s | tail -3', 'pytest $s || true']) {
+      const ledger = emptyLedger()
+      call(ledger, 1, sh(`for s in a b; do ${body}; done`), bg('b7'))
+      call(ledger, 2, sh('cat "C:/t/tasks/b7.output"'), said(' Tests  1 failed (4)\n1 failed, 3 passed\n Tests  4 passed (4)\n[exited with code 0]'))
+      expect(judge('tests', ledger), body).toMatchObject({ status: 'failed', entry: { basis: 'output' } })
+    }
+    const plain = emptyLedger()
+    call(plain, 1, sh('for s in a b; do pytest $s; done'), bg('b6'))
+    call(plain, 2, sh('cat "C:/t/tasks/b6.output"'), said('[exited with code 0]'))
+    expect(judge('tests', plain)).toMatchObject({ status: 'backed', entry: { basis: 'exit' } })
+  })
+
+  test('the word "for" inside an echo or a commit message does not make a loop', () => {
+    const echo = emptyLedger()
+    call(echo, 1, sh('npm test > "$TEMP/t.log" 2>&1; echo "done for now rc=$?" >> "$TEMP/t.log"'), bg('b5'))
+    call(echo, 2, sh('tail -2 "$TEMP/t.log"'), said('done for now rc=0'))
+    expect(judge('tests', echo)).toMatchObject({ status: 'backed', entry: { basis: 'echo' } })
+    const commit = emptyLedger()
+    call(commit, 1, sh('git commit -m "guard for null" && npm test 2>&1 | tail -5'), bg('b4'))
+    call(commit, 2, sh('cat "C:/t/tasks/b4.output"'), said(' Tests  1 failed (4)\n[exited with code 0]'))
+    expect(judge('tests', commit).status).toBe('failed')
+  })
+
+  test('a read that also runs a test runner judges nothing', () => {
+    const ledger = emptyLedger()
+    call(ledger, 1, sh('git push > "$TEMP/p.log" 2>&1; echo "exit=$?" >> "$TEMP/p.log"'), bg('b3'))
+    call(ledger, 2, sh('tail -3 "$TEMP/p.log"; cargo test'), said('exit=0\ntest result: FAILED. 3 passed; 1 failed'))
+    expect(judge('push', ledger).status).toBe('background')
   })
 })

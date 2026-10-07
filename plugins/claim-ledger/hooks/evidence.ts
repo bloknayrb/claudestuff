@@ -32,6 +32,11 @@ export type Facts = {
   exitKnown?: boolean
   /** The result says `gh pr merge` only enabled auto-merge (`gitOperation.pr.action`): nothing was merged yet. */
   autoMerge?: boolean
+  /**
+   * The command loops and `isError` is the loop's exit status (a read-back of its task output): a run that ends the
+   * loop body takes that status, and no status echo or `&& echo` is read, since they print once per pass.
+   */
+  loopExit?: boolean
 }
 export type Run = { kind: Kind; ok: boolean; masked: boolean; basis: Basis }
 /**
@@ -149,7 +154,9 @@ const SHELL_PAYLOAD: Readonly<Record<string, readonly string[]>> = {
   powershell: ['-command', '-c'],
   cmd: ['/c'],
 }
-const WRAPPERS = new Set(['sudo', 'time', 'env', 'command', 'exec', 'nice', 'nohup'])
+const WRAPPERS = new Set(['sudo', 'time', 'env', 'command', 'exec', 'nice', 'nohup', 'xvfb-run', 'cross-env', 'dotenv', 'watchexec'])
+// Wrappers whose own options end at `--` (`dotenv -e .env -- npm test`, `watchexec -e ts -- pytest`).
+const DASHDASH_WRAPPERS = new Set(['dotenv', 'watchexec'])
 // Commands whose arguments are data: a runner word inside them is not a run.
 const DATA_HEADS = new Set(['echo', 'printf', 'grep', 'egrep', 'fgrep', 'rg', 'sed', 'awk', 'cat', 'head', 'tail', 'less', 'jq', 'which', 'where', 'pip', 'pip3', 'write-output', 'write-host', 'select-string', 'sls', 'findstr', 'get-content', 'set-content', 'out-file'])
 const ECHO_HEADS = new Set(['echo', 'printf', 'write-output', 'write-host'])
@@ -158,6 +165,28 @@ const PAYLOAD_FLAGS = new Set(['-m', '--message', '--body', '-b', '--title', '-t
 
 // Shell keywords that open a loop or conditional body: `do gh pr merge $n`, `then git push`.
 const KEYWORDS = new Set(['do', 'then', 'else', 'elif', 'if', 'while', 'until', '!'])
+
+/**
+ * The index past a wrapper's own options: `nice -n 10`, `xvfb-run -a`, `xvfb-run -s "-screen 0 1x1x24"`. An option's
+ * value is skipped when it is a number or quoted; a `--`-terminated wrapper skips everything up to its `--`.
+ */
+function pastWrapperOptions(segment: Segment, from: number, toDashDash: boolean): number {
+  const words = segment.words
+  if (toDashDash) {
+    const dd = words.findIndex((w, k) => k >= from && !w.quoted && w.text === '--')
+    if (dd >= 0) return dd + 1
+  }
+  let i = from
+  while (i < words.length) {
+    const w = words[i]
+    if (w === undefined || w.quoted || !w.text.startsWith('-')) break
+    i += 1
+    if (w.text === '--') break
+    const value = words[i]
+    if (value !== undefined && (value.quoted || /^\d+$/.test(value.text))) i += 1
+  }
+  return i
+}
 
 /** The index of a segment's command word, past keywords, `X=1` assignments (quoted or not) and wrappers such as `sudo` or `timeout 60`. */
 function headOf(segment: Segment): number {
@@ -169,7 +198,8 @@ function headOf(segment: Segment): number {
     if (/^[A-Za-z_]\w*=/.test(word.text)) i += 1
     // PowerShell's `$out = idf.py build`: the command is what is assigned.
     else if (/^\$[\w:]+$/.test(word.text) && segment.words[i + 1]?.text === '=') i += 2
-    else if (WRAPPERS.has(t) || KEYWORDS.has(t)) i += 1
+    else if (KEYWORDS.has(t)) i += 1
+    else if (WRAPPERS.has(t)) i = pastWrapperOptions(segment, i + 1, DASHDASH_WRAPPERS.has(t))
     else if (t === 'timeout') i += 2
     else break
   }
@@ -211,7 +241,7 @@ function plainOf(segment: Segment): string {
     if (word === undefined) continue
     const before = segment.words[i - 1]
     // `python -m pytest`: there `-m` names a module to run, not a message.
-    const isPayload = word.quoted || (i > head && before !== undefined && !before.quoted && PAYLOAD_FLAGS.has(before.text) && !(before.text === '-m' && PYTHONS.test(head0)))
+    const isPayload = word.quoted || (i > head && before !== undefined && !before.quoted && PAYLOAD_FLAGS.has(before.text) && !(before.text === '-m' && segment.words.slice(head, i - 1).some(w => PYTHONS.test(w.text.toLowerCase()))))
     out.push(isPayload ? 'Q' : word.text)
   }
   return out.join(' ')
@@ -220,7 +250,7 @@ function plainOf(segment: Segment): string {
 // ---- Runners, git ops and their outcome ----
 
 // After the runner, in its segment: flags that make it run nothing.
-const NON_RUN = /\s(?:--(?:version|help|init|collect-only|no-run|listTests)|-h)(?=\s|$)/i
+const NON_RUN = /\s(?:--(?:version|help|init|co|collect-only|no-run|listTests)|-h)(?=\s|$)/i
 
 const GIT = String.raw`^git(?:\s+-[cC]\s+\S+)*\s+`
 const SHIP_RES: Readonly<Record<ShipOp, RegExp>> = {
@@ -300,10 +330,12 @@ type Line = {
   shapes: (string | null)[]
   /** The echoes matching each status pattern seen so far, by pattern source. */
   like: Map<string, number[]>
+  /** See Facts.loopExit. */
+  loopExit: boolean
 }
 
 /** An `echo` of a run's own status: the line pattern (status as group 1), and which of the echoes printing lines of that shape it is. */
-type Echoed = { pattern: RegExp; n: number; of: number }
+type Echoed = { pattern: StatusShape; n: number; of: number }
 
 type Place = {
   /** Something after the run can replace its exit status. */
@@ -350,24 +382,52 @@ function echoText(segment: Segment): string {
  * it counts only for the last member of that pipeline; `${PIPESTATUS[n]}` names the n-th member; `$LASTEXITCODE` is
  * PowerShell's. Any other variable in the echo matches any text.
  */
-function statusPattern(template: string, last: boolean, member: number, piped: boolean): RegExp | null {
+function statusPattern(template: string, last: boolean, member: number, piped: boolean): StatusShape | null {
   const own = [...(last ? [String.raw`\$\?`, String.raw`\$\{\?\}`] : []), ...(piped ? [String.raw`\$\{PIPESTATUS\[${member}\]\}`] : []), String.raw`\$LASTEXITCODE\b`]
   const found = new RegExp(own.join('|'), 'i').exec(template)
   if (found === null) return null
-  // Variables become one wildcard each, and variables separated only by spaces share one (`$A $B rc=` is `.*? rc=`):
-  // a run of `.*?` against a long line backtracks as length^k.
-  const literal = (text: string): string => {
-    const parts = text.split(/\$\{[^}]*\}|\$[A-Za-z_?][\w]*/)
-    let out = escapeRe(parts[0] ?? '')
-    let wild = false
-    for (const part of parts.slice(1)) {
-      if (!wild) out += '.*?'
-      wild = part.trim() === ''
-      if (!wild) out += escapeRe(part)
-    }
-    return out
+  return statusShape(template.slice(0, found.index), template.slice(found.index + found[0].length))
+}
+
+/** The shape of a status line, matched like a regex (`source`, `test`, `exec` with the status as group 1). */
+type StatusShape = { source: string; test: (line: string) => boolean; exec: (line: string) => [string, string] | null }
+
+const VARIABLE = /\$\{[^}]*\}|\$[A-Za-z_?][\w]*/
+
+/**
+ * Whether `text` is the template's literal pieces in order with anything at each variable: a glob with `*` for every
+ * variable, matched with indexOf (first piece at the start, last at the end, the middle ones leftmost in between).
+ * Linear in the line, however many variables the echo has; a regex of lazy wildcards backtracks as length^k.
+ */
+function globMatch(pieces: readonly string[], text: string): boolean {
+  if (pieces.length === 1) return text === pieces[0]
+  const first = pieces[0] ?? ''
+  const lastPiece = pieces[pieces.length - 1] ?? ''
+  if (text.length < first.length + lastPiece.length || !text.startsWith(first) || !text.endsWith(lastPiece)) return false
+  let at = first.length
+  const end = text.length - lastPiece.length
+  for (const piece of pieces.slice(1, -1)) {
+    if (piece === '') continue
+    const k = text.indexOf(piece, at)
+    if (k < 0 || k + piece.length > end) return false
+    at = k + piece.length
   }
-  return new RegExp(String.raw`^${literal(template.slice(0, found.index))}(-?\d+)${literal(template.slice(found.index + found[0].length))}$`)
+  return true
+}
+
+/** A status line: the text before the status (a glob), the status itself (`-?\d+`), the text after it (a glob). */
+function statusShape(before: string, after: string): StatusShape {
+  const head = before.split(VARIABLE)
+  const tail = after.split(VARIABLE)
+  const exec = (line: string): [string, string] | null => {
+    // Each maximal run of digits (with its minus sign) is a candidate status; the globs decide.
+    for (const m of line.matchAll(/-?\d+/g)) {
+      const at = m.index ?? 0
+      if (globMatch(head, line.slice(0, at)) && globMatch(tail, line.slice(at + m[0].length))) return [line, m[0]]
+    }
+    return null
+  }
+  return { source: `${head.join('\u0000')}\u0001${tail.join('\u0000')}`, test: line => exec(line) !== null, exec }
 }
 
 const STATUS_LINE_CAP = 300
@@ -442,7 +502,7 @@ function subjectOf(segment: Segment, heredoc: string | undefined): string | null
  * The echoes on the line that print a line of this pattern's shape, in order. Each echo's shape is computed once per
  * line and each distinct pattern is scanned once, so a line of many runs and echoes stays linear.
  */
-function echoesLike(line: Line, pattern: RegExp): number[] {
+function echoesLike(line: Line, pattern: StatusShape): number[] {
   const cached = line.like.get(pattern.source)
   if (cached !== undefined) return cached
   if (line.shapes.length === 0) {
@@ -480,6 +540,16 @@ function placeOf(line: Line, i: number): Place {
       if (after !== undefined && ECHO_HEADS.has(commandWord(after))) {
         masked = true
         if (credits && chain) echoes.push(echoText(after))
+      }
+      continue
+    }
+    // A loop judged by its exit status: `done` ends the body, and the loop's status is its last command's, unless
+    // `done` is itself piped.
+    const after = segments[k + 1]
+    if (line.loopExit && (op === ';' || op === '\n') && after !== undefined && commandWord(after) === 'done') {
+      if (after.op === '|') {
+        masked = true
+        break
       }
       continue
     }
@@ -536,7 +606,7 @@ function placeOf(line: Line, i: number): Place {
   }
   return {
     masked,
-    last: j === segments.length - 1,
+    last: j === segments.length - 1 || (line.loopExit && segments.slice(j + 1).every(s => commandWord(s) === 'done')),
     echoes,
     status,
     chained,
@@ -574,14 +644,15 @@ function strengthOf(kind: Kind, facts: Facts, place: Place, plain: string): Omit
   // The exit status speaks for this run only when nothing after it can replace it; isError speaks for the last segment.
   if (facts.exitKnown !== false && !place.masked && (place.last || !facts.isError)) return { ok: !facts.isError, masked: false, basis: 'exit' }
   // An echo of this run's own status is its exit code; echoed lines that do not pair off with their echoes are unsure.
-  const status = place.status === null ? null : statusIn(facts.output, place.status)
+  // A loop prints one status line per pass: never read one as the loop's.
+  const status = place.status === null || facts.loopExit === true ? null : statusIn(facts.output, place.status)
   // Unsure status lines still let a visible failure speak; a visible pass does not outvote them.
   if (status === 'unsure') {
     const seen = shownBy(kind, facts.output, [], false, null)
     return seen === 'fail' ? { ok: false, masked: false, basis: 'output' } : { ok: true, masked: true, basis: 'none' }
   }
   if (status !== null) return { ok: status === 0, masked: false, basis: 'echo' }
-  const shown = shownBy(kind, facts.output, place.echoes, place.logged, place.subject)
+  const shown = shownBy(kind, facts.output, facts.loopExit === true ? [] : place.echoes, place.logged, place.subject)
   if (shown === 'fail') return { ok: false, masked: false, basis: 'output' }
   if (shown === 'pass') return { ok: true, masked: false, basis: 'output' }
   // A later `&&` member that showed its own pass summary ran, so this run exited 0. (A failure summary is not used:
@@ -611,7 +682,7 @@ const OPTION = String.raw`\s+--?\w[\w-]*(?:[= ][^\s-]\S*)?`
 // Options between a runner's words: `idf.py -C firmware build`.
 const OPTIONS_BETWEEN = String.raw`(?:${OPTION})*\s+`
 // What may come before a runner that is not the command word itself: a launcher that runs it.
-const LAUNCHER = String.raw`(?:(?:npx|bunx|pnpx)(?:${OPTION})*\s+|(?:uv|poetry|pdm|hatch|pipenv)\s+run(?:${OPTION})*\s+|(?:pnpm|npm)\s+exec(?:${OPTION})*\s+(?:--\s+)?|yarn\s+|python[\d.]*\s+-m\s+|py\s+-m\s+)`
+const LAUNCHER = String.raw`(?:(?:npx|bunx|pnpx)(?:${OPTION})*\s+|(?:uv|poetry|pdm|hatch|pipenv)\s+run(?:${OPTION})*\s+|(?:pnpm|npm)\s+exec(?:${OPTION})*\s+(?:--\s+)?|(?:pnpm|yarn)(?:${OPTION})*\s+|bun(?:\s+run|\s+x)?(?:${OPTION})*\s+|python[\d.]*\s+-m\s+|py\s+-m\s+)`
 
 /**
  * A runner as whole tokens at the start of a segment's command, or after a launcher: `pytest -q`, `npx vitest run`,
@@ -769,7 +840,7 @@ export function classify(facts: Facts, config: Config, places: Places): Classifi
     return first
   })
   const strong: boolean[] = segments.map(() => false)
-  const line: Line = { segments, plains, kindsAt, strong, heredocAt, shapes: [], like: new Map() }
+  const line: Line = { segments, plains, kindsAt, strong, heredocAt, shapes: [], like: new Map(), loopExit: facts.loopExit === true }
   const runs: Run[] = []
   kindsAt.forEach((kinds, i) => {
     if (kinds.length === 0) return
@@ -998,7 +1069,8 @@ export function readBack(ledger: Ledger, facts: Facts, config: Config, places: P
   const exit = EXITED.exec(output)
   // A read that also runs another git, gh or npm-family command prints that command's output beside the run's: its
   // status lines and summaries could be the other command's. Such a read judges nothing; a clean read can later.
-  if (facts.command !== null && segmentsOf(facts.command).some(s => MIXING.has(commandWord(s)))) return []
+  // A read that runs a test or build runner of its own mixes that runner's output in too.
+  if (facts.command !== null && commandsOf(facts.command).some(s => MIXING.has(commandWord(s)) || kindsIn(plainOf(s), config).length > 0)) return []
   const changed: Entry[] = []
   for (const seq of calls) {
     const waiting = ledger.entries.filter(e => e.seq === seq && e.background && e.watch !== undefined)
@@ -1010,17 +1082,11 @@ export function readBack(ledger: Ledger, facts: Facts, config: Config, places: P
     if (foreign) continue
     // The exit line is the task's own only when the read names the task (its id has no dot; a file name has one).
     const status = taskIds.some(k => keyIn(text, k)) ? exit : null
-    // A command that loops prints one status line per pass and may still be running: only the task's own exit line
-    // judges it, never a status echo or summary from a pass that happens to be in view.
-    if (LOOPS.test(watch.command)) {
-      if (status === null) continue
-      for (const entry of waiting) {
-        Object.assign(entry, { background: false, ok: status[1] === '0', masked: false, basis: 'exit', done: ledger.done })
-        if (isShipKind(entry.kind) && entry.ok) ledger.ships[entry.kind] = entry
-        changed.push(entry)
-      }
-      continue
-    }
+    // A command that loops prints one status line per pass and may still be running: it is judged only once the task's
+    // own exit line is in view, by classify with that status (a masked body stays masked, a visible failure fails it),
+    // and never by a status echo.
+    const loop = loops(watch.command)
+    if (loop && status === null) continue
     const again = classify(
       {
         tool: watch.tool,
@@ -1035,6 +1101,7 @@ export function readBack(ledger: Ledger, facts: Facts, config: Config, places: P
         git: {},
         changed: [],
         exitKnown: status !== null,
+        loopExit: loop,
       },
       config,
       places,
@@ -1042,6 +1109,8 @@ export function readBack(ledger: Ledger, facts: Facts, config: Config, places: P
     for (const entry of waiting) {
       const run = again.filter(r => r.kind === entry.kind)[entry.watch?.n ?? 0]
       if (run === undefined || run.masked) continue
+      // A loop's exit 0 is its last pass's: a failure summary from an earlier pass in view still fails it.
+      if (loop && run.ok && shownBy(entry.kind, output, [], false, null) === 'fail') Object.assign(run, { ok: false, basis: 'output' })
       Object.assign(entry, { background: false, ok: run.ok, masked: false, basis: run.basis, done: ledger.done })
       if (isShipKind(entry.kind) && entry.ok) ledger.ships[entry.kind] = entry
       changed.push(entry)
@@ -1054,8 +1123,14 @@ export function readBack(ledger: Ledger, facts: Facts, config: Config, places: P
 
 // Commands whose output, printed by a read beside a run's, could be taken for the run's own.
 const MIXING = new Set(['git', 'gh', 'npm', 'npx', 'pnpm', 'yarn'])
-// A loop keyword as a word of its own, in bash or PowerShell.
-const LOOPS = /(?:^|[\s;&|(])(?:for|while|until|foreach)\s|\bForEach-Object\b/i
+// Loop keywords as a segment's first word (bash `for`/`while`/`until`, PowerShell `foreach`/`ForEach-Object`), so the
+// word "for" inside an echo or a commit message is no loop.
+const LOOP_WORDS = new Set(['for', 'while', 'until', 'foreach', 'foreach-object'])
+const loops = (command: string): boolean =>
+  commandsOf(command).some(s => {
+    const first = s.words[0]
+    return first !== undefined && !first.quoted && LOOP_WORDS.has(first.text.toLowerCase())
+  })
 // A test runner's own failure summary line, never a bare FAILED inside a test title or stderr: vitest and jest's
 // "Tests  1 failed", pytest's "1 failed, 3 passed" / "1 failed in", cargo's "test result: FAILED", TAP's "# fail 1".
 const TESTS_FAILED_SUMMARY = /^\s*(?:Test Files|Tests|Test Suites):?\s[^\n]*\b[1-9]\d*\s+failed\b|\b[1-9]\d* failed(?:,| in )|^test result: FAILED|^#\s*fail\s+[1-9]/m
