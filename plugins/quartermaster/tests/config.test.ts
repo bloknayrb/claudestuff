@@ -21,7 +21,7 @@ describe('config', () => {
     expect(parseConfig({ warnAt: '60' })).toMatchObject({ warnAt: 60 })
   })
 
-  test('list options arrive in a shape parseConfig reads (pins Q8)', async ($, on) => {
+  test('list options arrive in a shape parseConfig reads', async ($, on) => {
     const w = world(on)
     await $.session.start(START)
     const line = w.logs.find(l => l.text.startsWith('quartermaster: list options arrived as'))

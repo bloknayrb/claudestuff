@@ -24,7 +24,7 @@ describe('/clear and fail-open', () => {
     expect(w.writes.some(x => x.path.endsWith('/mods/quartermaster/S2.json'))).toBe(true)
   })
 
-  test('a resume resets session state too (D17)', async ($, on) => {
+  test('a resume resets session state too', async ($, on) => {
     world(on)
     await $.agent.spawn(spawn())
     await $.session.end({ ...END_CLEAR, reason: 'resume' })
@@ -45,5 +45,16 @@ describe('/clear and fail-open', () => {
     expect(started.agentId).toBe('agent-1')
     expect(w.logs.some(l => l.to === 'debug' && l.text.startsWith('quartermaster: agent.spawn'))).toBe(true)
     expect(JSON.parse(w.writes[w.writes.length - 1]!.text).lastError.message).toContain('agent.spawn')
+  })
+})
+
+describe('heartbeat re-arm', () => {
+  test('a main-loop turn after /clear writes the heartbeat under the new session id', async ($, on) => {
+    const w = world(on)
+    await $.session.start(START)
+    await $.session.end(END_CLEAR)
+    w.setSessionId('S2')
+    await $.turn.complete(turnEnd())
+    expect(w.writes.some(x => x.path.endsWith('/mods/quartermaster/S2.json'))).toBe(true)
   })
 })

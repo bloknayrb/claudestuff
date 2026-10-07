@@ -7,7 +7,7 @@ import type { QmConfig } from './config'
 export const MODEL_TEXT =
   'Quartermaster: set `model` for this agent from its task (haiku: mechanical; sonnet: well-specified; opus: judgement). Re-issue unchanged to keep the inherited model.'
 
-/** A denial answers a re-issue or a changed call only this long (Task 3, re-issue edges). */
+/** A denial answers a re-issue or a changed call only this long. */
 export const DENIAL_TTL_MS = 10 * 60_000
 
 /** What the guards read of a spawn. A blank model is unset; `loop` is `parentAgentId`, or `main`. */
@@ -28,7 +28,7 @@ type LooseSpawn = Partial<Record<keyof AgentSpawnInput, unknown>> & { subagent_t
 
 /**
  * Reads a spawn event in either shape: AgentSpawnInput, or the Agent tool's input that the 2.1.292 test kit
- * gives a plugin's own spawn (`subagent_type`; no `subagentType`, `fork` or `parentModel`; 00-shared).
+ * gives a plugin's own spawn (`subagent_type`; no `subagentType`, `fork` or `parentModel`).
  */
 export function viewOf(input: AgentSpawnInput): SpawnView {
   const e = input as unknown as LooseSpawn
@@ -38,7 +38,7 @@ export function viewOf(input: AgentSpawnInput): SpawnView {
   return {
     prompt: text(e.prompt),
     description: text(e.description),
-    // An Agent call with no subagent_type is general-purpose (Q8).
+    // An Agent call with no subagent_type is general-purpose.
     subagentType: type === '' ? 'general-purpose' : type,
     fork: e.fork === true,
     parentModel: text(e.parentModel),
@@ -48,7 +48,7 @@ export function viewOf(input: AgentSpawnInput): SpawnView {
 }
 
 /**
- * Who can't re-issue a denied spawn (D4, D15): a workflow script's `agent()` (`e.workflow` set), or another
+ * Who can't re-issue a denied spawn: a workflow script's `agent()` (`e.workflow` set), or another
  * plugin's `$.agent.spawn` (`next.origin`). null is the model's own Agent call, the only one ever denied.
  */
 export function sourceOf(isWorkflow: boolean, originPlugin: string): string | null {
@@ -70,7 +70,7 @@ export function modelGuardFires(view: SpawnView, cfg: QmConfig): boolean {
 }
 
 /**
- * The model a spawn will run on, where that is knowable before it starts (D2). A fork always inherits; an
+ * The model a spawn will run on, where that is knowable before it starts. A fork always inherits; an
  * unset model on a guarded type inherits the parent's (assuming no default subagent model is configured);
  * an unset model on any other type is its definition's, which no event shows, so it is unknown.
  */
@@ -80,7 +80,7 @@ export function effectiveModel(view: SpawnView, cfg: QmConfig): string | null {
   return cfg.guardTypes.includes(view.subagentType) ? view.parentModel : null
 }
 
-/** Substring, any case (D3): `opus` matches the alias and `claude-opus-5-5`. heavyModels is lower-cased. */
+/** Substring, any case: `opus` matches the alias and `claude-opus-5-5`. heavyModels is lower-cased. */
 export function isHeavy(model: string | null, heavyModels: readonly string[]): boolean {
   if (model === null || model === '') return false
   const id = model.toLowerCase()
@@ -100,7 +100,7 @@ export function takeOne(list: readonly QmDenial[], match: (d: QmDenial) => boole
 }
 
 /**
- * How a call repeating an earlier denial's task (D6) settles each guard (D16):
+ * How a call repeating an earlier denial's task settles each guard:
  * - a guard of the denial that the new call no longer trips is `changed`;
  * - after a heavy deny, a call that names a model itself and still trips the heavy guard is an informed
  *   override: `changed`, and it does not deny again;

@@ -14,7 +14,6 @@ describe('pace (pure)', () => {
     expect(fitCap([[T0, 10], [T0 + 30 * MIN, 30], [T0 + 60 * MIN, 50]])).toBe(T0 + 135 * MIN)
   })
 
-  // Review Focus 4
   test('resetsAt jitter under a minute stays one window, on either side of hh:mm:30', () => {
     const k = windowKey(RESET)
     expect(matchWindow([k], RESET - 300)).toBe(k)
@@ -78,7 +77,6 @@ describe('pace line', () => {
     expect((w.store.get('readings') as Record<string, unknown[]>)[windowKey(RESET)]).toEqual([[T0, 12]])
   })
 
-  // Review Focus 5
   test('a reading from each hot reload within a minute is kept once', async ($, on) => {
     const w = world(on, { limits: [fiveHourAt(12)] })
     await $.session.start(START)
@@ -87,7 +85,6 @@ describe('pace line', () => {
     expect((w.store.get('readings') as Record<string, unknown[]>)[windowKey(RESET)]).toHaveLength(1)
   })
 
-  // Review Focus 4
   test('readings either side of hh:mm:30 land in one window', async ($, on) => {
     const w = world(on)
     await $.session.measure(measure([fiveHourAt(10, RESET - 30_100)]))
@@ -97,7 +94,6 @@ describe('pace line', () => {
     expect(Object.values(readings)[0]).toHaveLength(2)
   })
 
-  // Review Focus 4
   test('a new window starts its pace afresh and the store keeps two windows', async ($, on) => {
     const w = world(on)
     for (const pct of [10, 30, 50]) {

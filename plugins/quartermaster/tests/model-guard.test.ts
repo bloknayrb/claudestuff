@@ -59,14 +59,14 @@ describe('model guard', () => {
     expect(ring.map(f => f.outcome)).toEqual(['denied', 'changed'])
   })
 
-  test('switching to a typed agent after the deny counts as changed (D6)', async ($, on) => {
+  test('switching to a typed agent after the deny counts as changed', async ($, on) => {
     const w = world(on)
     await $.agent.spawn(spawn())
     expect((await $.agent.spawn(spawn({ subagentType: 'Explore' }))).deny).toBeUndefined()
     expect(w.store.get('counters')).toEqual({ model: { fires: 1, reissued: 0, changed: 1 }, heavy: ZERO })
   })
 
-  test('the same task on another guarded type, still bare, is denied afresh (D16)', async ($, on) => {
+  test('the same task on another guarded type, still bare, is denied afresh', async ($, on) => {
     const w = world(on)
     await $.agent.spawn(spawn())
     expect((await $.agent.spawn(spawn({ subagentType: 'claude' }))).deny).toBe(MODEL_TEXT)
@@ -82,7 +82,6 @@ describe('model guard', () => {
     expect(ring[0]?.input_hash).toBe(second)
   })
 
-  // Review Focus 1
   test('parallel spawns are judged independently and counted exactly', async ($, on) => {
     const w = world(on)
     const calls = ['a', 'b', 'c'].map(prompt => spawn({ prompt }))
@@ -120,7 +119,6 @@ describe('model guard', () => {
     expect((await $.agent.spawn(spawn())).deny).toBeUndefined()
   })
 
-  // Review Focus 2
   test('a store that refuses writes still denies, and the failure reaches the health file', async ($, on) => {
     const w = world(on, { failStoreSet: true })
     expect((await $.agent.spawn(spawn())).deny).toBe(MODEL_TEXT)
@@ -130,7 +128,6 @@ describe('model guard', () => {
     expect(w.logs.some(l => l.to === 'debug' && l.text.startsWith('quartermaster: fire ledger'))).toBe(true)
   })
 
-  // D4, D15, Review Focus 6
   test('parallel workflow spawns with no model start and toast once', async ($, on) => {
     const w = world(on)
     const started = await Promise.all([1, 2, 3, 4, 5].map(i => $.agent.spawn(spawn({ prompt: `step ${i}`, workflow: { ...WORKFLOW, agentIndex: i } }))))
@@ -141,7 +138,7 @@ describe('model guard', () => {
     expect((w.store.get('ring') as { outcome: string }[]).map(f => f.outcome)).toEqual(['toast'])
   })
 
-  // U6, D4: the kit gives this spawn the Agent tool's input shape (00-shared)
+  // The kit gives this spawn the Agent tool's input shape
   test('a plugin spawn with no model is never denied and toasts once per plugin and type', { plugins: [SPAWNER_BARE] }, async ($, on) => {
     const w = world(on)
     await $.session.start(START)
@@ -150,5 +147,42 @@ describe('model guard', () => {
     expect(w.toasts).toEqual(['Quartermaster: spawner-bare spawned general-purpose with no model set.'])
     expect(w.store.get('counters')).toBeUndefined()
     expect((w.store.get('ring') as { outcome: string }[]).map(f => f.outcome)).toEqual(['toast'])
+  })
+})
+
+describe('re-issue edges', () => {
+  test('after a fresh deny on the same task, an unchanged re-issue of the first call still passes', async ($, on) => {
+    const w = world(on)
+    expect((await $.agent.spawn(spawn())).deny).toBe(MODEL_TEXT)
+    expect((await $.agent.spawn(spawn({ subagentType: 'claude' }))).deny).toBe(MODEL_TEXT)
+    expect((await $.agent.spawn(spawn())).deny).toBeUndefined()
+    expect(w.store.get('counters')).toEqual({ model: { fires: 2, reissued: 1, changed: 0 }, heavy: ZERO })
+  })
+
+  test('a toast already claimed in session state stays quiet, as after a hot reload', { plugins: [SPAWNER_BARE] }, async ($, on) => {
+    const w = world(on)
+    // Module memory is empty on the first spawn; only the claim persisted in $.state can silence it.
+    on('state.get', async (_$, e, next) => {
+      const read = await next(e)
+      if (e.key !== 'sourceToasts') return read
+      return { value: { value: ['model/spawner-bare/general-purpose'], version: read.value?.version ?? 0 } }
+    })
+    await $.session.start(START)
+    expect(w.spawned).toHaveLength(1)
+    expect(w.toasts).toEqual([])
+  })
+
+  test('a failure after the spawn started still returns the started agent', async ($, on) => {
+    const w = world(on)
+    on('state.set', (_$, e, next) => {
+      // A deny rejects the plugin's $.state.set; a throw would only skip this test hook.
+      if (e.key === 'spawnModels') return { deny: 'state refused' }
+      return next(e)
+    })
+    const started = await $.agent.spawn(spawn({ model: 'haiku' }))
+    expect(started.deny).toBeUndefined()
+    expect(started.agentId).toBe('agent-1')
+    expect(w.spawned).toHaveLength(1)
+    expect(w.logs.some(l => l.text.startsWith('quartermaster: agent.spawn'))).toBe(true)
   })
 })

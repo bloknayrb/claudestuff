@@ -21,7 +21,7 @@ export function spawnHash(f: SpawnFields): string {
 
 /**
  * Task identity: the same prompt and description under any model or agent type. Links a changed call
- * back to its deny (D6); switching to a typed agent such as Explore is acting on the deny too.
+ * back to its deny; switching to a typed agent such as Explore is acting on the deny too.
  */
 export function taskHash(f: Pick<SpawnFields, 'prompt' | 'description'>): string {
   return cyrb53(JSON.stringify([f.prompt, f.description]))

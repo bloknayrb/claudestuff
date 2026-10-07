@@ -39,12 +39,12 @@ describe('heavy-model guard', () => {
     expect((await $.agent.spawn(spawn({ prompt: 'other', model: 'opus' }))).deny).toBeUndefined()
   })
 
-  test('matches a full model id by substring, any case (D3)', async ($, on) => {
+  test('matches a full model id by substring, any case', async ($, on) => {
     world(on, { limits: [fiveHourAt(80)] })
     expect((await $.agent.spawn(spawn({ model: 'Claude-Fable-1' }))).deny).toBe(heavyText(80))
   })
 
-  test('a bare general-purpose spawn inherits the parent: both guards, one deny, one re-issue (D7)', async ($, on) => {
+  test('a bare general-purpose spawn inherits the parent: both guards, one deny, one re-issue', async ($, on) => {
     const w = world(on, { limits: [fiveHourAt(90)] })
     expect((await $.agent.spawn(spawn())).deny).toBe(`${MODEL_TEXT}\n${heavyText(90)}`)
     expect((await $.agent.spawn(spawn())).deny).toBeUndefined()
@@ -54,7 +54,7 @@ describe('heavy-model guard', () => {
     })
   })
 
-  // D16: per-guard credit, and the informed override
+  // Credit is per guard; naming a heavy model after seeing the reading passes
   test('after both guards deny, naming opus passes as an informed override: both changed', async ($, on) => {
     const w = world(on, { limits: [fiveHourAt(90)] })
     await $.agent.spawn(spawn())
@@ -81,7 +81,6 @@ describe('heavy-model guard', () => {
     expect((await $.agent.spawn(spawn({ fork: true, subagentType: 'fork' }))).deny).toBe(heavyText(90))
   })
 
-  // Review Focus 3, D2
   test('an agent type with its own model is not judged on the parent model', async ($, on) => {
     world(on, { limits: [fiveHourAt(95)] })
     expect((await $.agent.spawn(spawn({ subagentType: 'Explore' }))).deny).toBeUndefined()
@@ -99,7 +98,6 @@ describe('heavy-model guard', () => {
     expect((await $.agent.spawn(spawn({ model: 'opus' }))).deny).toBe(heavyText(60))
   })
 
-  // D15, Review Focus 6
   test('parallel workflow spawns on a heavy model start and toast once per window', async ($, on) => {
     const w = world(on, { limits: [fiveHourAt(80)] })
     const calls = [1, 2, 3].map(i =>
@@ -117,7 +115,7 @@ describe('heavy-model guard', () => {
     const w = world(on, { limits: [fiveHourAt(80)] })
     await $.session.start(START)
     expect(w.spawned).toHaveLength(1)
-    // Filtered: from Task 6 on, session.start's 80% reading also raises a threshold toast.
+    // Filtered: session.start's 80% reading also raises a threshold toast.
     expect(w.toasts.filter(t => t.includes('spawner-opus'))).toEqual([
       `Quartermaster: spawner-opus spawned an agent on opus; five-hour window at 80%, resets ${clockText(RESET)}; pace unknown.`,
     ])

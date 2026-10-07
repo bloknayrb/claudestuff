@@ -36,7 +36,7 @@ function copy<T>(value: T): T {
 
 /**
  * Answers every op and event the mod touches, beneath the plugin, and records what it was asked.
- * The kit answers $.state itself (U4). Stubs for calls on `$` answer `{ value }` (00-shared).
+ * The kit answers $.state itself. Stubs for calls on `$` answer `{ value }`.
  */
 export function world(on: On, init: WorldInit = {}): World {
   let limits = init.limits ?? []
@@ -89,7 +89,7 @@ export function world(on: On, init: WorldInit = {}): World {
     return { value: undefined }
   })
   on('fs.write', (_$, e) => {
-    // fs hooks see the native path, backslashes on Windows (00-shared): record it with forward slashes.
+    // fs hooks see the native path, backslashes on Windows: record it with forward slashes.
     w.writes.push({ path: e.path.split('\\').join('/'), text: e.text })
     return { value: undefined }
   })
@@ -99,7 +99,7 @@ export function world(on: On, init: WorldInit = {}): World {
   })
   on('agent.spawn', (_$, e) => {
     w.spawned.push(copy(e) as AgentSpawnInput)
-    // Always a defined model: the kit's plugin spawns arrive with no model or parentModel (00-shared).
+    // Always a defined model: the kit's plugin spawns arrive with no model or parentModel.
     return { model: e.model ?? e.parentModel ?? 'inherited', agentId: `agent-${w.spawned.length}` }
   })
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
@@ -169,9 +169,9 @@ export function command(name: string) {
 
 /**
  * Inline plugins that spawn from their own session.start hook, so the spawn's next.origin is the
- * plugin (U6). Raise $.session.start(START) once per spawn. The kit raises these spawns in the Agent
- * tool's input shape (00-shared), which the mod reads through viewOf; a live session's shape is a
- * residual for the Red Team build (U6).
+ * plugin. Raise $.session.start(START) once per spawn. The kit raises these spawns in the Agent
+ * tool's input shape, which the mod reads through viewOf; a live session's shape is a
+ * residual to check against a live session.
  */
 export const SPAWNER_BARE: Plugin = {
   name: 'spawner-bare',

@@ -13,7 +13,7 @@ describe('threshold toasts', () => {
     expect(w.toasts).toEqual([toast(51), toast(76), toast(95)])
   })
 
-  test('a jump across thresholds toasts once and marks them all (D8)', async ($, on) => {
+  test('a jump across thresholds toasts once and marks them all', async ($, on) => {
     const w = world(on)
     await $.session.measure(measure([fiveHourAt(80)]))
     await $.session.measure(measure([fiveHourAt(85)]))
@@ -21,7 +21,6 @@ describe('threshold toasts', () => {
     expect((w.store.get('toasts') as Record<string, number[]>)[windowKey(RESET)]).toEqual([50, 75])
   })
 
-  // Review Focus 4
   test('a new window re-arms the thresholds', async ($, on) => {
     const w = world(on)
     await $.session.measure(measure([fiveHourAt(60)]))

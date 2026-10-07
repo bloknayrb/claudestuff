@@ -3,7 +3,7 @@ import type { SessionRateLimit } from 'claude-code'
 export type Reading = [ts: number, pct: number]
 export type FiveHour = { pct: number; resetsAt: number | null }
 
-/** The five-hour window from rateLimits, an array by kind (D1); resetsAt may be missing. */
+/** The five-hour window from rateLimits, an array by kind; resetsAt may be missing. */
 export function fiveHour(limits: readonly SessionRateLimit[]): FiveHour | null {
   const window = limits.find(limit => limit.kind === 'five_hour')
   if (window === undefined) return null
@@ -20,7 +20,7 @@ export const WINDOW_SLACK_MS = 60_000
 
 /**
  * The store key for resetsAt: the nearest existing key within a minute of it, else a new windowKey.
- * Sub-minute jitter stays one window on either side of hh:mm:30 (Review Focus 4).
+ * Sub-minute jitter stays one window on either side of hh:mm:30.
  */
 export function matchWindow(keys: readonly string[], resetsAt: number): string {
   let best: string | null = null
@@ -53,13 +53,13 @@ export function fitCap(readings: readonly Reading[]): number | null {
   return t0 + Math.round(((100 - intercept) / slope) * 60_000)
 }
 
-/** HH:MM in the hooks environment's local time (U7: checked live in Task 11). */
+/** HH:MM in the hooks environment's local time (not UTC). */
 export function clockText(ms: number): string {
   const d = new Date(ms)
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-/** `cap ~15:40 (resets 17:00)`, `no cap before reset (resets 17:00)` (D9), or `— (resets 17:00)`. */
+/** `cap ~15:40 (resets 17:00)`, `no cap before reset (resets 17:00)`, or `— (resets 17:00)`. */
 export function paceClause(cap: number | null, resetsAt: number | null): string {
   const resets = resetsAt === null ? '' : ` (resets ${clockText(resetsAt)})`
   if (cap === null) return `—${resets}`

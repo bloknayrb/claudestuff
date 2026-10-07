@@ -22,7 +22,7 @@ describe('agent tally', () => {
     expect(w.status.filter(s => s?.includes('agents 1'))).toHaveLength(0)
   })
 
-  test('an agent this load never saw spawn falls back to the turn usage model (D11)', async ($, on) => {
+  test('an agent this load never saw spawn falls back to the turn usage model', async ($, on) => {
     const w = world(on, { limits: [fiveHourAt(10)] })
     await $.turn.complete(turnEnd('agent-x', 'claude-opus-5-5'))
     expect(last(w.status)).toBe(`QM pace: — (resets ${clockText(RESET)}) · agents 1 (1 opus)`)

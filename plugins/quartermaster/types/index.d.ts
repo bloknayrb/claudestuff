@@ -1,7 +1,7 @@
 export type QmGuard = 'model' | 'heavy'
 
 /**
- * A spawn denied once and waiting for its re-issue: the full hash, the task hash (D6), the loop it was
+ * A spawn denied once and waiting for its re-issue: the full hash, the task hash, the loop it was
  * denied in (`parentAgentId`, or `main`), the guards that denied it, and when.
  */
 export type QmDenial = { hash: string; task: string; loop: string; guards: QmGuard[]; ts: number }

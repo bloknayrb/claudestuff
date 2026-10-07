@@ -20,14 +20,14 @@ export const current: { cfg: QmConfig; shapes: string } = {
   shapes: 'unknown',
 }
 
-/** A list option arrives as an array or as a comma-separated string (00-shared); either reads the same. */
+/** A list option arrives as an array or as a comma-separated string; either reads the same. */
 export function toList(value: unknown, fallback: string[]): string[] {
   if (Array.isArray(value)) return value.map(v => String(v).trim()).filter(v => v !== '')
   if (typeof value === 'string') return value.split(',').map(v => v.trim()).filter(v => v !== '')
   return [...fallback]
 }
 
-/** How an option value arrived, for the debug log and /quartermaster (pins Q8's open half). */
+/** How an option value arrived, for the debug log and /quartermaster (pins how list options arrive). */
 export function shapeOf(value: unknown): string {
   return Array.isArray(value) ? 'array' : typeof value
 }
@@ -42,7 +42,7 @@ export function parseConfig(options: PluginOptions): QmConfig {
   const requireModel = options['requireModel']
   return {
     warnAt: toPercent(options['warnAt']),
-    // Lower-cased once here: heavy matching is a case-insensitive substring (D3).
+    // Lower-cased once here: heavy matching is a case-insensitive substring.
     heavyModels: toList(options['heavyModels'], DEFAULTS.heavyModels).map(m => m.toLowerCase()),
     guardTypes: toList(options['guardTypes'], DEFAULTS.guardTypes),
     requireModel: typeof requireModel === 'boolean' ? requireModel : DEFAULTS.requireModel,
