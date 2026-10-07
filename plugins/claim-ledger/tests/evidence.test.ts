@@ -1026,11 +1026,21 @@ describe('read-backs judge a run only from its own output', () => {
       expect(call(git, 2, sh(`tail -3 "$TEMP/p.log"; ${extra}`), said('exit=0\nabc1234\trefs/heads/feat/x')).length, extra).toBe(1)
       expect(judge('push', git).status, extra).toBe('backed')
     }
-    for (const extra of ['git rev-parse HEAD', 'git status --short', 'git log --oneline -1', 'git show --stat HEAD', 'gh pr checks 5', 'gh pr list', 'git fetch origin']) {
+    for (const extra of ['git status --short', 'git log --oneline -1', 'git show --stat HEAD', 'gh pr checks 5', 'gh pr list', 'git fetch origin']) {
       const git = emptyLedger()
       call(git, 1, sh(PUSH), bg('b1'))
       expect(call(git, 2, sh(`tail -3 "$TEMP/p.log"; ${extra}`), said('exit=0')), extra).toEqual([])
     }
+    // A clean `git rev-parse` beside `git ls-remote` prints shas only: the read is judged.
+    const clean = emptyLedger()
+    call(clean, 1, sh(PUSH), bg('b1'))
+    call(clean, 2, sh('tail -3 "$TEMP/p.log"; git ls-remote origin feat/x; git rev-parse HEAD'), said('exit=0\nabc1234\trefs/heads/feat/x\nabc1234'))
+    expect(judge('push', clean).status).toBe('backed')
+    // A `git rev-parse` that printed `fatal:` withholds: the line could be read as the run's failure.
+    const fatal = emptyLedger()
+    call(fatal, 1, sh('git push origin feat/x > "$TEMP/q.log" 2>&1'), bg('b1'))
+    expect(call(fatal, 2, sh('tail -3 "$TEMP/q.log"; git rev-parse origin/feat/y'), said("   abc1234..def5678  feat/x -> feat/x\nfatal: ambiguous argument 'origin/feat/y'"))).toEqual([])
+    expect(judge('push', fatal).status).toBe('background')
     // A git op that changes something, beside the read, still withholds.
     const pushing = emptyLedger()
     call(pushing, 1, sh(PUSH), bg('b1'))

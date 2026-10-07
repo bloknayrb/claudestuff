@@ -1217,8 +1217,11 @@ const keyIn = (text: string, key: string): boolean => new RegExp(`(?<![\\w.-])${
 const STATUS_VARIABLE = /\$\?|\$\{\?\}|\$LASTEXITCODE|PIPESTATUS/i
 const NUMBERING_GREPS = new Set(['grep', 'egrep', 'rg'])
 
-/** A reader's git or gh command that withholds judgement: any but `git ls-remote` and `gh pr view`. */
-function mixingGit(segment: Segment): boolean {
+/**
+ * A reader's git or gh command that withholds judgement: any but `git ls-remote`, `gh pr view`, and `git rev-parse`
+ * when the read printed no `fatal:` line.
+ */
+function mixingGit(segment: Segment, output: string): boolean {
   const word = commandWord(segment)
   if (word !== 'git' && word !== 'gh') return false
   // The subcommand: the first word after the command word that is no option (or option value: `-C dir`, `-c k=v`).
@@ -1230,7 +1233,8 @@ function mixingGit(segment: Segment): boolean {
     else if (!w.startsWith('-')) rest.push(w.toLowerCase())
     if (rest.length === 2) break
   }
-  if (word === 'git') return rest[0] !== 'ls-remote'
+  // `git rev-parse` prints shas only, unless it fails: a `fatal:` line could be read as the run's failure.
+  if (word === 'git') return rest[0] !== 'ls-remote' && !(rest[0] === 'rev-parse' && !/^fatal:/m.test(output))
   return !(rest[0] === 'pr' && rest[1] === 'view')
 }
 
@@ -1269,11 +1273,11 @@ export function readBack(ledger: Ledger, facts: Facts, config: Config, places: P
   // `grep -n` prefixes each line with its number ("31024:exit=0"); the status lines are matched without it. Read from
   // the parsed words: a pattern over the raw command grew with the number of grep words times the line length.
   const numbered = readerSegments.some(s => NUMBERING_GREPS.has(commandWord(s)) && s.words.some(w => !w.quoted && /^-[A-Za-z]*n/.test(w.text)))
-  // A read that also runs a test or build runner, or any git or gh command but `git ls-remote` and `gh pr view`,
-  // prints that command's summaries, failures and sha lines beside the run's (`nothing to commit` from `git status`,
-  // `fatal:` from `git rev-parse`, "2 failed" in a `git log` subject, a failing check in `gh pr checks`, a ref update
-  // from `git fetch`). Such a read judges nothing; a clean read can later.
-  if (readerSegments.some(s => kindsIn(plainOf(s), config).length > 0 || mixingGit(s))) return []
+  // A read that also runs a test or build runner, or any git or gh command but `git ls-remote`, `gh pr view` and a
+  // `git rev-parse` that printed no `fatal:`, prints that command's summaries, failures and sha lines beside the run's
+  // (`nothing to commit` from `git status`, `fatal:` from a failed `git rev-parse`, "2 failed" in a `git log` subject,
+  // a failing check in `gh pr checks`, a ref update from `git fetch`). Such a read judges nothing; a clean read can later.
+  if (readerSegments.some(s => kindsIn(plainOf(s), config).length > 0 || mixingGit(s, facts.output))) return []
   // A status echo the reader itself runs prints the reader's status, never the run's: its lines are dropped before the
   // run is judged, even when the run echoed the same template (then neither line can be told apart).
   const ownEchoes = readerSegments
