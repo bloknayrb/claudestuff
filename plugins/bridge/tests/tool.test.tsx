@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import { MAIN_SCREEN, NARROW, SAMPLE, WIDE, decide, mountBand, pendingIds, start, world } from './world'
 
 // Surfacing depends on the last band draw's viewport, not on the surface that drew it, so these tests
-// mount the terminal band only; the band's drawing per surface is looped in Task 8.
+// mount the terminal band only; the band's drawing per surface is looped in surface.test.tsx.
 
 test('the tool is registered at session.start', async ($, on) => {
   const w = world(on)

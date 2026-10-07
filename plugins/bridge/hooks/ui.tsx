@@ -10,7 +10,7 @@ export const PANE_TITLE = 'Bridge'
 export const ARM_DELAY_MS = 400
 
 // What the trees need from a surface's table. Typing UI is gated on the surface, never on whether the
-// table has an Input: every surface's table hands one out, and on mobile it draws nothing (00-shared).
+// table has an Input: every surface's table hands one out, and on mobile it draws nothing.
 export type Els = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button' | 'Markdown'> & {
   Input?: Elements['terminal']['Input']
 }
@@ -104,7 +104,7 @@ export function paneTree(
   // The hotkeys stay bound during a pause: a press then only restarts the pause (see register.tsx).
   const isArmed = view.otherFor === null
   const keysLine = view.otherFor !== null
-    ? 'Typing an Other answer: Enter sends it; the keys are off until it closes.'
+    ? 'Typing an Other answer: Enter sends it; Tab to Other and press Enter (or click it) to cancel.'
     : view.keysPausedUntil !== null
       ? 'Keys paused a moment: let go of the key.'
       : `Keys answer #${first.id}: 1-${first.options.length} pick · m make it so${canType ? ' · o other' : ''}`

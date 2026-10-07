@@ -31,7 +31,7 @@ describe('asksQuestion', () => {
   test('in an unclosed fence it does not', () => expect(asksQuestion('```\nwhy?')).toBe(false))
   test('inside a URL it does not', () => expect(asksQuestion('See https://x.test/a?b=1 for it.')).toBe(false))
   test('prose after code still counts', () => expect(asksQuestion('`a?b` passed. Merge it?')).toBe(true))
-  // A question that ends in a URL: the URL match stops before trailing punctuation (review, asks.mjs).
+  // A question that ends in a URL: the URL match stops before trailing punctuation.
   test('a ? right after a URL counts', () => expect(asksQuestion('Shall I merge https://github.com/o/r/pull/7?')).toBe(true))
   test('a ? after a URL ending in a slash counts', () => expect(asksQuestion('Tests pass. Want me to open https://x.test/p?')).toBe(true))
   test('a ? after a bracketed URL counts', () => expect(asksQuestion('Ready to push (see https://x.test/a?b=1)?')).toBe(true))

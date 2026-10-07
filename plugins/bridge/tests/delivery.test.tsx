@@ -150,7 +150,7 @@ test('during a turn: append only; a later main step reads it, so no wake', async
   expect(wakes(w)).toBe(0)
 })
 
-// The race guard's defining case (review): the row lands while the final step's request is in flight.
+// The race guard's defining case the row lands while the final step's request is in flight.
 // That request was built without it, so the step must not mark it read, and the answered end wakes once.
 test('a press during the final step wakes once when the turn answers', async ($, on) => {
   const w = world(on)
@@ -238,7 +238,7 @@ test('a refused wake retries once from a timer, then toasts', async ($, on) => {
   expect(w.toasts.filter(t => t.includes('next prompt'))).toHaveLength(1)
 })
 
-// The blocker the review found: the plugin's own close runs none of its ui.close hook, so a stale
+// A regression guard: the plugin's own close runs none of its ui.close hook, so a stale
 // isPaneUp would hide the band and every later toast.
 test('answering the last card by key closes the pane, and the next decision is surfaced again', async ($, on) => {
   const w = world(on)

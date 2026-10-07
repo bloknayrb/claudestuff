@@ -10,6 +10,9 @@ const STILL = 'Bridge: decision #1 is still pending; that prompt did not resolve
 async function say($: Engine, w: World, text: string, origin: Record<string, unknown> = { kind: 'composer' }, turnId?: string) {
   const r = await $.prompt.submit({ text, origin, wait: false, ...(turnId === undefined ? {} : { turnId }) } as Parameters<Engine['prompt']['submit']>[0])
   await w.clock.settle()
+  // The turn the prompt starts: Bridge's row is appended from its turn.start, before the first step.
+  await $.turn.start({ text, turnId: 'u-turn' })
+  await w.clock.settle()
   return r
 }
 
@@ -120,6 +123,9 @@ test('typed while a turn runs: only the still-pending note', async ($, on) => {
   expect(typed(w).at(-1)?.context).toEqual([])
   expect(w.appends).toEqual([STILL])
   expect(await pendingIds($)).toEqual([1])
+  // The note is never a wake: the typed prompt is itself the turn that reads it.
+  await endTurn($, w, 'u-turn', 'answer')
+  expect(wakes(w)).toBe(0)
 })
 
 test('a longer prompt is not a go-ahead', async ($, on) => {

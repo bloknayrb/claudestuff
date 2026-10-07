@@ -1,6 +1,6 @@
 /**
- * Delivery bookkeeping for a mod that appends rows for the main loop to read (00-shared "Delivering a
- * message to me", race guard as settled 2026-10-06). Pure and `$`-free, and imports nothing, so another mod
+ * Delivery bookkeeping for a mod that appends rows for the main loop to read, and may wake it to read them.
+ * Pure and `$`-free, and imports nothing, so another mod
  * copies this file whole; the `$` calls (the append, the wake prompt) stay in the mod's register file.
  *
  * - A main-loop step marks read only the rows appended before that step began.

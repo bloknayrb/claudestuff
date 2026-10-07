@@ -66,7 +66,7 @@ describe('isBlankText (what Verbatim would discard)', () => {
   }
 })
 
-describe('parseRowStrict (the 05 grammar)', () => {
+describe('parseRowStrict (the strict row grammar)', () => {
   const good = 'Bridge decision: {"id":3,"question":"Q","choice":"label","label":"A"}'
 
   test('accepts a canonical row', () => {

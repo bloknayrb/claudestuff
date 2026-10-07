@@ -1,6 +1,6 @@
-// Mirrors 05-verbatim.md's strict grammar: the whole text is the prefix plus exactly one JSON object;
+// Mirrors the strict grammar of a row consumer: the whole text is the prefix plus exactly one JSON object;
 // a duplicate key or text after the object rejects it; id is an integer; choice is "label" or
-// "other"; an "other" text must be non-blank by Python's str.strip(), which is what 05's parser runs
+// "other"; an "other" text must be non-blank by Python's str.strip(), which is what such a consumer runs
 // (it differs from JS trim(): it strips U+0085 and U+001C-U+001F, and keeps U+FEFF). Tightened to
 // canonical form: Bridge writes JSON.stringify output, so a body that is not byte-identical to the
 // re-serialised object (whitespace, trailing text, a duplicate key that JSON.parse collapsed) is

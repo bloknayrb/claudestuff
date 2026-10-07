@@ -45,8 +45,8 @@ function isText(value: unknown): value is string {
   return typeof value === 'string' && value.trim() !== ''
 }
 
-// The engine documents no check of a plugin tool's input against its schema (Task 2 settles it live),
-// so the hook checks every field itself.
+// The engine documents no check of a plugin tool's input against its schema, so the hook checks every
+// field itself.
 export function validateDecide(raw: Record<string, unknown>): Checked {
   const problems: string[] = []
   for (const key of ['question', 'context', 'why', 'why_yours'] as const) {

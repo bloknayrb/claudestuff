@@ -15,22 +15,21 @@ import type { CardActions } from './ui'
 // floor is 110 for a pane id the person has opened before, so the mod checks 144 itself too.
 const UNASKED_PANE_COLUMNS = 144
 
-// Shared convention: a minimal wake starting with '<'. It is stored plugin-framed (00-shared Q3);
-// never submit it asUser, or it would pass for typed text.
+// A minimal wake starting with '<'. It is stored plugin-framed; never submit it asUser, or it would
+// pass for typed text.
 const WAKE_TEXT = '<bridge-wake/>'
 const WAKE_RETRY_MS = 500
 const WAKE_FAIL_TOAST = 'Bridge: answer saved; it reaches Claude with your next prompt.'
 
-// The shared module's row tags: an answer row, and a still-pending note (Task 10).
+// The delivery module's row tags: an answer row, and a still-pending note.
 const ROW_TAG = 'decision'
 const NOTE_TAG = 'note'
 
-// The test kit's refusal of a plugin append (00-shared); a live engine always serves one. The same
-// seam as Red Team's appendRow.
+// The test kit's refusal of a plugin append; a live engine always serves one.
 const KIT_NO_APPEND = 'no implementation for session.append'
 
 // The one state value. Defined here, beside every read/update of it: the 2.1.292 validator refuses a
-// state library read of an atom imported from another file (00-shared, Validator rules).
+// state library read of an atom imported from another file.
 const SESSION = atom({ plugin: 'bridge', key: 'session' } as const, freshSession())
 
 // Module variables are lost on hot reload and refilled by the next start or draw. Nothing the
@@ -40,7 +39,7 @@ let lastViewport: RenderViewport | undefined
 let loadedAt = 0
 let heartbeatFor = ''
 
-// Every get of one dispatch reads one moment (T:3361), so nothing reads SESSION after writing it in
+// Every get of one dispatch reads one moment, so nothing reads SESSION after writing it in
 // the same dispatch. A change computes its own result from the value update hands it, and that result
 // is what the caller acts on. update retries on a version miss; the last run is the one written.
 async function transact<T>($: EngineInterface, change: (s: BridgeSession) => { session: BridgeSession; out: T }): Promise<T> {
@@ -70,7 +69,7 @@ async function writeHealth($: EngineInterface, error?: string): Promise<void> {
     await $.fs.write(`${home.replace(/\\/g, '/')}/.claude/state/mods/bridge/${sessionId}.json`, JSON.stringify(body))
     heartbeatFor = sessionId
   } catch {
-    // Best effort by convention (00-shared, Health file): a failed write is ignored.
+    // Best effort: a failed health write is ignored.
   }
 }
 
@@ -86,7 +85,7 @@ async function fail($: EngineInterface, where: string, err: unknown): Promise<vo
 
 async function refreshHeartbeat($: EngineInterface): Promise<void> {
   // After /clear or /resume the session id changes and no session.start fires; write the new id's
-  // heartbeat once (00-shared, Health file).
+  // heartbeat once.
   if (heartbeatFor !== (await $.session.id())) await writeHealth($)
 }
 
@@ -116,13 +115,26 @@ async function isPaneOpen($: EngineInterface): Promise<boolean> {
   return (await $.ui.panes()).some(pane => pane.id === PANE_ID && pane.isPlaced)
 }
 
+// Open and also the pane the surface shows: a placed pane can sit as a background tab behind another
+// plugin's pane, where the user would see neither it nor, if the band hid, any sign of a decision.
+async function isPaneVisible($: EngineInterface): Promise<boolean> {
+  return (await $.ui.panes()).some(pane => pane.id === PANE_ID && pane.isPlaced && pane.isShown)
+}
+
 async function surfaceDecision($: EngineInterface, id: number): Promise<void> {
-  const isUp = await isPaneOpen($)
+  const panes = await $.ui.panes()
+  const mine = panes.find(pane => pane.id === PANE_ID && pane.isPlaced)
+  const isUp = mine !== undefined
   await transact($, s => {
     if (s.view.isPaneUp === isUp) return { session: s, out: null }
     return { session: { ...s, view: { ...s.view, isPaneUp: isUp, otherFor: isUp ? s.view.otherFor : null } }, out: null }
   })
-  if (isUp) return
+  if (mine?.isShown === true) return
+  // Placed but behind another pane: no reopen, just a toast so the decision is not missed.
+  if (isUp) {
+    $.ui.toast(`Bridge: decision #${id} queued · /bridge to answer`)
+    return
+  }
   const canDock = lastViewport?.isFullscreen === true && lastViewport.columns >= UNASKED_PANE_COLUMNS
   if (canDock) {
     const opened = await $.ui.open({ id: PANE_ID, title: PANE_TITLE })
@@ -202,7 +214,8 @@ async function submitWake($: EngineInterface): Promise<string> {
   }
 }
 
-// Fire and forget, from whatever dispatch decided to wake. Task 2 Step 7 may route this through a timer.
+// Fire and forget, from whatever dispatch decided to wake. If an engine refuses a direct submit from a
+// press, this could be routed through a timer instead.
 function startWake($: EngineInterface): void {
   void guard($, 'wake', wakeOnce($))
 }
@@ -227,9 +240,9 @@ async function retryWake($: EngineInterface): Promise<void> {
   $.ui.toast(WAKE_FAIL_TOAST)
 }
 
-// isWakeAllowed is false only for the go-ahead typed at the prompt (Task 10): that prompt is itself the
-// turn that reads the row, so it must not also queue a wake.
-async function answerWith($: EngineInterface, id: number, answer: Answer, isWakeAllowed: boolean): Promise<boolean> {
+// A press answers while Claude may be idle, so the row may need a wake. The typed go-ahead takes the
+// deferred path instead (that prompt is itself the turn that reads the row).
+async function answerWith($: EngineInterface, id: number, answer: Answer): Promise<boolean> {
   const now = await $.clock.now()
   const nonce = `${now}-${Math.random()}`
   const until = now + ARM_DELAY_MS
@@ -254,7 +267,7 @@ async function answerWith($: EngineInterface, id: number, answer: Answer, isWake
   // a second submit while one is already queued (its turn then reads this row too).
   const done = await transact($, s => {
     const r = rowAppended(s.delivery, ROW_TAG)
-    const isWake = isWakeAllowed && r.isWake && !s.isWakeQueued
+    const isWake = r.isWake && !s.isWakeQueued
     const view = s.view.otherFor === id ? { ...s.view, otherFor: null } : s.view
     const after: BridgeSession = { ...s, delivery: r.delivery, isWakeQueued: s.isWakeQueued || isWake, view }
     return { session: after, out: { isWake, session: after } }
@@ -264,33 +277,60 @@ async function answerWith($: EngineInterface, id: number, answer: Answer, isWake
   return true
 }
 
-// Recorded with the shared module so a step marks it read; never a wake (the user's prompt is the turn).
-async function noteStillPending($: EngineInterface, id: number): Promise<void> {
-  const appended = await appendRow($, stillPendingLine(id))
+// The decision is claimed now (a press in between loses to it, by the nonce) and its row, or the
+// still-pending note when answer is null, waits in the session for turn.start.
+async function deferRow($: EngineInterface, id: number, answer: Answer | null): Promise<void> {
+  const nonce = `${await $.clock.now()}-${Math.random()}`
+  await transact($, s => {
+    if (answer === null) return { session: { ...s, pendingRow: { tag: NOTE_TAG, text: stillPendingLine(id), id, nonce } }, out: null }
+    const book = markAnswered(s.book, id, answer, nonce)
+    const claimed = book.decisions.find(d => d.id === id)
+    if (!isAnsweredBy(book, id, nonce) || claimed === undefined) return { session: s, out: null }
+    return { session: { ...s, book, pendingRow: { tag: ROW_TAG, text: formatRow(claimed, answer), id, nonce } }, out: null }
+  })
+}
+
+// From turn.start, after mainTurnStarted: the row lands before the turn's first step, so that step
+// reads it, and it never wakes (the user's prompt is the turn). A failed append reopens the decision.
+// The still-pending note is deliberately not recorded with the delivery module: nothing needs to track
+// it, and a recorded note still unread at an answered turn end would cause a pointless wake.
+async function flushPendingRow($: EngineInterface): Promise<void> {
+  const row = await transact($, s => ({ session: { ...s, pendingRow: null }, out: s.pendingRow }))
+  if (row === null) return
+  const appended = await appendRow($, row.text)
   if (!appended.isAppended) {
-    $.ui.log(`bridge: still-pending note not appended: ${appended.why}`, { to: 'debug' })
+    if (row.tag === ROW_TAG) {
+      await transact($, s => ({ session: { ...s, book: reopen(s.book, row.id, row.nonce) }, out: null }))
+      $.ui.toast(`Bridge: decision #${row.id} could not be delivered (${appended.why}); it is pending again.`)
+    }
+    await fail($, 'append', appended.why)
     return
   }
-  await transact($, s => ({ session: { ...s, delivery: rowAppended(s.delivery, NOTE_TAG).delivery }, out: null }))
+  if (row.tag !== ROW_TAG) return
+  const after = await transact($, s => {
+    const next: BridgeSession = { ...s, delivery: rowAppended(s.delivery, row.tag).delivery }
+    return { session: next, out: next }
+  })
+  await closePaneIfDone($, after)
 }
 
 async function pickOption($: EngineInterface, id: number, index: number): Promise<void> {
   const decision = (await readSession($)).book.decisions.find(d => d.id === id)
   const option = decision?.options[index]
   if (option === undefined) return
-  await answerWith($, id, { choice: 'label', label: option.label }, true)
+  await answerWith($, id, { choice: 'label', label: option.label })
 }
 
 async function makeItSo($: EngineInterface, id: number): Promise<void> {
   const decision = (await readSession($)).book.decisions.find(d => d.id === id)
   if (decision === undefined || decision.status !== 'pending') return
-  await answerWith($, id, recommendedAnswer(decision), true)
+  await answerWith($, id, recommendedAnswer(decision))
 }
 
 // Blank by Python's str.strip(), which Verbatim applies: such a row would carry no words of the user's.
 async function sendOther($: EngineInterface, id: number, text: string): Promise<void> {
   if (isBlankText(text)) return
-  await answerWith($, id, { choice: 'other', text }, true)
+  await answerWith($, id, { choice: 'other', text })
 }
 
 // Runs a card press unless the key pause swallows it. sendOther is not gated: it comes from the field's
@@ -324,8 +364,9 @@ export const register: Register = on => {
 
   // Spec item 4. Only the user's own prompt (composer or Remote Control; see prompt.ts), only the
   // whole text "make it so"/"engage", only with exactly one decision pending. The prompt passes on
-  // exactly as received, with no context from Bridge (brief item 2); what Bridge has to say goes in
-  // its own appended rows, after the prompt entered.
+  // exactly as received, with no context from Bridge, so nothing Bridge writes can pass for the user's
+  // words; what Bridge has to say goes in its own appended rows. The row waits for turn.start (see
+  // flushPendingRow), because the turn's first request may be built before next() resolves here.
   on('prompt.submit', async ($, e, next) => {
     if (!isFromUser(e.origin) || !isGoAhead(e.text)) return next(e)
     const s = await readSession($)
@@ -338,8 +379,7 @@ export const register: Register = on => {
     const entered = await next(e)
     if (entered.drop !== undefined) return entered
     try {
-      if (canResolve) await answerWith($, decision.id, recommendedAnswer(decision), false)
-      else await noteStillPending($, decision.id)
+      await deferRow($, decision.id, canResolve ? recommendedAnswer(decision) : null)
     } catch (err) {
       await fail($, 'make it so', err)
     }
@@ -358,6 +398,7 @@ export const register: Register = on => {
         out: null,
       }))
       void guard($, 'heartbeat', refreshHeartbeat($))
+      await flushPendingRow($)
     } catch (err) {
       await fail($, 'turn.start', err)
     }
@@ -366,7 +407,7 @@ export const register: Register = on => {
 
   // The shared race guard: "a main step began" before next, so rows appended from here on are not
   // marked read by this step. After next, the step's visible text joins the turn's text (the question
-  // check in Task 10 reads every text block of the turn, 00-shared Q7).
+  // check for "make it so" reads every text block of the turn, not only the last one).
   on('turn.step', async function* ($, e, next) {
     const isMain = e.agentId === undefined
     if (isMain) {
@@ -399,7 +440,7 @@ export const register: Register = on => {
           out: wake,
         }
       })
-      // Not awaited: a submit from here may wait on this very turn ending (Task 2 (d)).
+      // Not awaited: a submit from here may wait on this very turn ending.
       if (isWake) startWake($)
     } catch (err) {
       await fail($, 'turn.complete', err)
@@ -497,7 +538,7 @@ export const register: Register = on => {
       if (count === 0 || e.props.hasSurvey) return next(e)
       // The engine's record, not the stored flag: an unload close runs none of our hooks, and a draw may
       // read the pane list though it may not write state.
-      if (await isPaneOpen($)) return next(e)
+      if (await isPaneVisible($)) return next(e)
       return bandTree($.ui.resolve(e), count)
     } catch (err) {
       // Not awaited: a draw must not wait on the health write (which may be refused mid-draw; it is

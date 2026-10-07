@@ -8,7 +8,7 @@ export const SURFACES = ['terminal', 'desktop'] as const
 
 export const WAKE = '<bridge-wake/>'
 
-// fs.* hooks see native Windows paths (backslashes) whatever the plugin wrote (00-shared).
+// fs.* hooks see native Windows paths (backslashes) whatever the plugin wrote.
 export function norm(path: string): string {
   return path.replace(/\\/g, '/')
 }
@@ -48,6 +48,8 @@ export type World = {
   clock: MockClock
   sessionId: string
   placed: boolean
+  // false: the pane is placed but sits as a background tab behind another plugin's pane.
+  isShown: boolean
   dropWakes: boolean
   dropTyped: boolean
   // >0: each turn.step stub sleeps this long on the mock clock, so a test can press mid-step.
@@ -64,7 +66,6 @@ export type World = {
   paneQueries: number
   // Set: the ui.open stub refuses with this text (another plugin's hook refusing the open).
   openRefusal: string | null
-  focuses: string[]
   toasts: string[]
   writes: { path: string; text: string }[]
   commands: string[]
@@ -78,6 +79,7 @@ export function world(on: On, options: WorldOptions = {}): World {
     clock: mock.clock(on, { now: 1000 }),
     sessionId: 'sess-1',
     placed: options.placed ?? true,
+    isShown: true,
     dropWakes: false,
     dropTyped: false,
     stepHoldMs: 0,
@@ -89,7 +91,6 @@ export function world(on: On, options: WorldOptions = {}): World {
     openPanes: new Set<string>(),
     paneQueries: 0,
     openRefusal: null,
-    focuses: [],
     toasts: [],
     writes: [],
     commands: [],
@@ -118,7 +119,7 @@ export function world(on: On, options: WorldOptions = {}): World {
     return { value: undefined }
   })
   on('ui.open', (_$, e) => {
-    // An op hook may answer { deny }, which rejects the caller's promise (00-shared).
+    // An op hook may answer { deny }, which rejects the caller's promise.
     if (w.openRefusal !== null) return { deny: w.openRefusal }
     w.opens.push({ id: e.id, ...(e.focus ? { focus: true as const } : {}) })
     w.openPanes.add(e.id)
@@ -131,16 +132,12 @@ export function world(on: On, options: WorldOptions = {}): World {
   })
   on('ui.panes', () => {
     w.paneQueries += 1
-    const panes = [...w.openPanes].map(id => ({ id, title: 'Bridge', isShown: true, isFocused: false, isPlaced: w.placed }))
+    const panes = [...w.openPanes].map(id => ({ id, title: 'Bridge', isShown: w.isShown, isFocused: false, isPlaced: w.placed }))
     return { value: panes }
   })
-  // ui.focus is an engine event (T:4036, T:4522), answered directly, not { value }; the element's key
-  // arrives as `element` (UiFocusInput).
-  on('ui.focus', (_$, e) => {
-    w.focuses.push(e.element ?? '')
-    return {}
-  })
-  // No session.append stub: the kit never runs a test hook for a plugin's own append (00-shared). The
+  // The kit cannot observe $.ui.focus (it rejects a plugin's call, and runs no test hook for it), so the
+  // focus move into the Other field is checked in a live session.
+  // No session.append stub: the kit never runs a test hook for a plugin's own append. The
   // plugin's append seam treats the kit's refusal as appended and logs the row under APPEND_MARK.
   on('prompt.submit', (_$, e) => {
     if (e.origin.kind === 'plugin' && w.dropWakes) return { drop: 'wake refused in test' }
@@ -154,7 +151,7 @@ export function world(on: On, options: WorldOptions = {}): World {
   on('turn.complete', (_$, e) => ({ text: e.answer }))
   on('turn.step', async function* (_$, e) {
     // Holding the step open on the mock clock lets a test press while the model request is in flight
-    // (proved by the review's kitprobe2: marks=step-start,press,step-end).
+    // (a press can land while a model request is in flight).
     if (w.stepHoldMs > 0) await w.clock.sleep(w.stepHoldMs)
     const result: TurnStepResult = {
       turnId: e.turnId,
@@ -232,8 +229,8 @@ export async function mountPane<S extends RenderSurface>($: Engine, surface: S) 
   return $.ui.mount({ plugin: 'bridge', surface, component: 'Pane', requestId: 'bridge', props: PANE_PROPS, viewport: WIDE })
 }
 
-// A press, then let what it started run: a wake sent through $.clock.after(0) (Task 2 branch (b)) has
-// then happened, and with the direct path this changes nothing.
+// A press, then let what it started run: a wake sent from a timer callback has then happened, and with
+// a direct submit this changes nothing.
 export async function press(ui: { press: (args: { key: string }) => Promise<unknown> }, w: World, key: string): Promise<void> {
   await ui.press({ key })
   await w.clock.settle()
@@ -244,7 +241,7 @@ export async function mountBand($: Engine, surface: 'terminal' | 'desktop', view
 }
 
 // The pending decisions as the pane draws them (card-<id> Boxes): an observable read of the book. One
-// surface is enough here: it reads state, and the drawing per surface is checked in Task 8.
+// surface is enough here: it reads state, and the drawing per surface is checked in surface.test.tsx.
 export async function pendingIds($: Engine): Promise<number[]> {
   const ui = await mountPane($, 'terminal')
   const ids = (await ui.findAll({ type: 'Box' }))

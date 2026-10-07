@@ -122,7 +122,7 @@ test('/bridge says why when the pane is not placed, and does not leave it waitin
 })
 
 // The engine's $ in tests has no ui.close noun, so a close by the person cannot be raised here
-// (review: TS2339 and "$.ui.close is not a function"); Task 13 checks it live. This test covers the
+// ("$.ui.close is not a function"); a live session has to check it. This test covers the
 // other way the stored flag goes stale: the pane vanishes with no hook of ours running (an unload).
 test('a pane gone without any hook running is found again by the band, and by the next decision', async ($, on) => {
   const w = world(on)
@@ -136,6 +136,27 @@ test('a pane gone without any hook running is found again by the band, and by th
   await stale.unmount()
   await decide($, { ...SAMPLE, question: 'Two?' })
   expect(w.toasts.at(-1)).toBe('Bridge: decision #2 queued \u00b7 /bridge to answer')
+  for (const surface of SURFACES) {
+    const band = await mountBand($, surface, NARROW)
+    expect(await band.find({ key: 'bridge-band' })).toBeDefined()
+    await band.unmount()
+  }
+})
+
+// A placed pane can be a background tab behind another plugin's pane: neither it nor a hidden band
+// would then tell the user a decision arrived.
+test('a pane placed behind another pane: the next decision toasts and the band still draws', async ($, on) => {
+  const w = world(on)
+  await start($)
+  await mountBand($, 'terminal', WIDE)
+  await decide($)
+  expect(w.opens).toEqual([{ id: 'bridge' }])
+  expect(w.toasts).toEqual([])
+  w.isShown = false
+  await decide($, { ...SAMPLE, question: 'Two?' })
+  expect(w.opens).toHaveLength(1)
+  expect(w.toasts).toHaveLength(1)
+  expect(w.toasts[0]).toContain('decision #2 queued')
   for (const surface of SURFACES) {
     const band = await mountBand($, surface, NARROW)
     expect(await band.find({ key: 'bridge-band' })).toBeDefined()

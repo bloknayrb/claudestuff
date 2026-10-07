@@ -1,7 +1,8 @@
 // Origins the engine stamps as the user's own gesture. ORIGIN_REMOTE_CONTROL is the engine's name for
 // Remote Control (phone or web), which happens to be spelt like this plugin. This plugin's own prompts
 // arrive as { kind: 'plugin', name: 'bridge' }, so always compare kind, never name. Channels are
-// refused: a relayed channel can carry text from people other than the user (see the plan's Task 6).
+// refused: a relayed channel can carry text from people other than the user, and a match here takes an
+// action while the origin names only the channel's server, not the author.
 export const ORIGIN_COMPOSER = 'composer'
 export const ORIGIN_REMOTE_CONTROL = 'bridge'
 

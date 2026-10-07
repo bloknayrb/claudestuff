@@ -44,7 +44,7 @@ export type Decision = DecideInput & {
 export type Book = { decisions: Decision[]; nextId: number }
 
 // How the last main turn ended, and its whole visible text (every main step's text, not only the
-// final block that turn.complete's `answer` holds; 00-shared Q7).
+// final block that turn.complete's `answer` holds).
 export type LastTurn = { reason: EndReason; text: string }
 
 // isPaneUp: Bridge's own record of whether its pane is open; re-synced from $.ui.panes() before it is
@@ -53,6 +53,10 @@ export type LastTurn = { reason: EndReason; text: string }
 // card is a no-op that pushes the end out again (a debounce), so a held key never answers the next card
 // until it has been let go for the whole delay. Each pause's timer clears only its own deadline.
 export type ViewState = { isPaneUp: boolean; otherFor: number | null; keysPausedUntil: number | null }
+
+// A row the prompt hook decided on, held until turn.start appends it: the engine may have built the
+// turn's first request by the time the hook's next() resolves, so the row goes in just before it.
+export type PendingRow = { tag: 'decision' | 'note'; text: string; id: number; nonce: string }
 
 export type BridgeSession = {
   book: Book
@@ -63,6 +67,7 @@ export type BridgeSession = {
   // The running main turn's visible text so far (capped); copied into `last` when it ends.
   turnText: string
   last: LastTurn | null
+  pendingRow: PendingRow | null
   view: ViewState
 }
 
@@ -72,7 +77,7 @@ declare module 'claude-code' {
   }
   // The plugin's own tool. When MCP servers are connected the engine-written claude-code-mcp types fill
   // McpToolInputs, the loose fallback goes away, and a tool.call matcher naming a tool missing from the
-  // table no longer type-checks (review finding; T:5936, T:5965-5977). If a later engine writes this tool
+  // table no longer type-checks. If a later engine writes this tool
   // into claude-code-mcp itself with another type, the merge conflicts: then delete this entry.
   interface McpToolInputs {
     mcp__bridge__decide: Record<string, unknown>
