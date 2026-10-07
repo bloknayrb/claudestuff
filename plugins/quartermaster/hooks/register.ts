@@ -187,13 +187,34 @@ function addReading($: EngineInterface, resetsAt: number, reading: Reading): Pro
   })
 }
 
+export const THRESHOLDS = [50, 75, 90] as const
+
+/**
+ * The highest threshold this reading crossed that no session has toasted in this window, or null.
+ * Marks every threshold crossed as sent, so a jump toasts once (D8). Global: $.store is shared.
+ */
+function claimThreshold($: EngineInterface, key: string, pct: number): Promise<number | null> {
+  return serial(async () => {
+    const all = ((await $.store.get('toasts')) ?? {}) as Record<string, number[]>
+    const sent = all[key] ?? []
+    const crossed: number[] = THRESHOLDS.filter(t => pct >= t)
+    const top = crossed[crossed.length - 1]
+    if (top === undefined || sent.includes(top)) return null
+    const marked = [...new Set([...sent, ...crossed])].sort((a, b) => a - b)
+    await $.store.set('toasts', keepTwoWindows({ ...all, [key]: marked }))
+    return top
+  })
+}
+
 // ==== pacing ====
 
-/** Stores a five-hour reading under its window; readings reset with the window (keyed by resetsAt). */
+/** Stores a five-hour reading under its window, and toasts a threshold the first time any session crosses it. */
 async function recordReading($: EngineInterface, limits: readonly SessionRateLimit[]): Promise<void> {
   const window = fiveHour(limits)
   if (window === null || window.resetsAt === null) return
-  await addReading($, window.resetsAt, [await $.clock.now(), window.pct])
+  const { key, readings } = await addReading($, window.resetsAt, [await $.clock.now(), window.pct])
+  const crossed = await claimThreshold($, key, window.pct)
+  if (crossed !== null) $.ui.toast(`Quartermaster: ${windowText(window.pct, window.resetsAt, fitCap(readings))}.`)
 }
 
 /** The one status line; hidden with no five-hour reading (D9). */
