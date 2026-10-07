@@ -1,0 +1,36 @@
+{
+  "name": "quartermaster",
+  "version": "0.1.0",
+  "description": "Soft-denies subagent spawns with no model set and heavy-model spawns late in the five-hour window, and shows when the window will cap at the current pace",
+  "author": { "name": "bloknayrb" },
+  "repository": "https://github.com/bloknayrb/claudestuff",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "warnAt": {
+      "type": "number",
+      "title": "Heavy-model warning point (%)",
+      "description": "Five-hour window usage at or past which a spawn on a heavy model is soft-denied once.",
+      "default": 75
+    },
+    "heavyModels": {
+      "type": "string",
+      "multiple": true,
+      "title": "Heavy models",
+      "description": "Model names, or parts of model ids, that the heavy-model guard watches.",
+      "default": ["opus", "fable"]
+    },
+    "guardTypes": {
+      "type": "string",
+      "multiple": true,
+      "title": "Guarded agent types",
+      "description": "Agent types with no model of their own; a spawn of one that sets no model is soft-denied once.",
+      "default": ["general-purpose", "claude"]
+    },
+    "requireModel": {
+      "type": "boolean",
+      "title": "Require a model",
+      "description": "Soft-deny a spawn of a guarded agent type that sets no model.",
+      "default": true
+    }
+  }
+}
