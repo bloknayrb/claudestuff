@@ -4,7 +4,7 @@ import type { AsOf, Basis, Claim, Entry, Family, Kind, Ledger, Pending, ShipOp, 
 
 // Equal to the manifest's userConfig defaults: change both together.
 export const DEFAULT_TEST_COMMANDS: readonly string[] = ['pytest', 'uv run pytest', 'npm test', 'npm run test', 'npm run test:e2e', 'pnpm test', 'yarn test', 'vitest', 'jest', 'npx playwright test', 'cargo test', 'go test', 'claude plugin test']
-export const DEFAULT_BUILD_COMMANDS: readonly string[] = ['tsc', 'cargo build', 'npm run build', 'npm run typecheck', 'npm run typecheck:tests']
+export const DEFAULT_BUILD_COMMANDS: readonly string[] = ['tsc', 'cargo build', 'npm run build', 'npm run typecheck', 'npm run typecheck:tests', 'idf.py build']
 
 export type Config = { tests: readonly RegExp[]; build: readonly RegExp[] }
 /** What a tool call answered (the ToolCallResult arms, read loosely). `text` is the result as the model read it. */
@@ -23,6 +23,13 @@ export type Facts = {
   git: Partial<Record<ShipOp, true>>
   /** Files a Bash command changed, when its result lists them (bashEditDiff, @internal: may be absent). */
   changed: string[]
+  /** A background command's task id (`backgroundTaskId`, or the id its notice names), when it has one. */
+  taskId?: string | null
+  /**
+   * False when `isError` is not this command's exit status: a background run re-judged from a read-back that shows no
+   * `[exited with code N]` line (round 3). Absent means known.
+   */
+  exitKnown?: boolean
 }
 export type Run = { kind: Kind; ok: boolean; masked: boolean; basis: Basis }
 /**
@@ -225,8 +232,9 @@ const SUMMARY: Readonly<Record<'tests' | 'build', { fail: RegExp; pass: RegExp }
   },
   build: {
     // The last three: the compiler never started (npx found no tsc, or it is not on PATH), so its silence proves nothing.
-    fail: /\berror TS\d+|\bFound [1-9]\d* errors?\b|^error(?:\[E\d+\])?:|\bBuild failed\b|\bFailed to compile\b|\bCOMPLETED\b.*\b[1-9]\d* ERRORS\b|This is not the tsc command|command not found|is not recognized as/im,
-    pass: /^\s*Finished\b|\bCompiled successfully\b|\bbuilt in \d|\bFound 0 errors\b|\bCOMPLETED\b.*\b0 ERRORS\b|\bBuild success\b/im,
+    // ESP-IDF's `idf.py build` (round 3): "Project build complete" on success; ninja's "build stopped" or a FAILED step on failure.
+    fail: /\berror TS\d+|\bFound [1-9]\d* errors?\b|^error(?:\[E\d+\])?:|\bBuild failed\b|\bFailed to compile\b|\bCOMPLETED\b.*\b[1-9]\d* ERRORS\b|This is not the tsc command|command not found|is not recognized as|\bninja: build stopped\b|^FAILED: /im,
+    pass: /^\s*Finished\b|\bCompiled successfully\b|\bbuilt in \d|\bFound 0 errors\b|\bCOMPLETED\b.*\b0 ERRORS\b|\bBuild success\b|\bProject build complete\b/im,
   },
 }
 const SHIP_FAIL = /^(?:error|fatal):|\[rejected\]|\bnothing to commit\b|\bfailed to push\b|\bAutomatic merge failed\b|^CONFLICT \(/im
@@ -236,7 +244,7 @@ const SHIP_PASS: Readonly<Record<ShipOp, RegExp>> = {
   push: /^\s*\+?\s*[0-9a-f]{7,}\.\.\.?[0-9a-f]{7,}\s+\S+\s+->\s+\S+|^\s*\*\s+\[new (?:branch|tag)\]|\bset up to track\b/im,
   // `gh pr view --json state` prints MERGED bare, first in a --jq line, or as JSON. `git merge` prints "Merge made by",
   // and a `git log` after it shows the merge commit's own subject (Task 7: `git merge x | tail -5 && git log --oneline -3`).
-  merge: /\bMerged pull request\b|^\s*MERGED\b|"state"\s*:\s*"MERGED"|^Merge made by\b|^[0-9a-f]{7,40} +(?:\([^)]*\) +)?Merge (?:remote-tracking branch|branch|pull request #\d+)\b/im,
+  merge: /\bMerged pull request\b|^\s*MERGED\b|"state"\s*:\s*"MERGED"|\bstate\s*[=:]\s*"?MERGED\b|^Merge made by\b|^[0-9a-f]{7,40} +(?:\([^)]*\) +)?Merge (?:remote-tracking branch|branch|pull request #\d+)\b/im,
   'pr-create': /github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/i,
 }
 // `git commit -q` prints nothing; a later `git log --oneline` in the same command prints a sha line: the commit's own
@@ -249,7 +257,8 @@ const GIT_LOG = /^git(?:\s+-[cC]\s+\S+)*\s+(?:log|show)(?![\w-])/i
 // `gh pr view` in a call of its own: its MERGED is merge evidence (Task 7), read only from gh's own forms, never from a
 // `git log` line another segment printed.
 const PR_VIEW = /^gh\s+pr\s+view(?![\w-])/i
-const VIEW_MERGED = /^\s*MERGED\b|"state"\s*:\s*"MERGED"|^state:\s+MERGED\b/im
+// `--jq .state` prints MERGED bare; `--json state` prints `"state": "MERGED"`; a jq template can print `state=MERGED`.
+const VIEW_MERGED = /^\s*MERGED\b|"state"\s*:\s*"MERGED"|\bstate\s*[=:]\s*"?MERGED\b/im
 const GIT_ELSEWHERE = /^git(?:\s+-[cC]\s+\S+)*\s+(?:checkout|switch|pull|merge|reset)(?![\w-])/
 const CD = new Set(['cd', 'pushd', 'popd', 'chdir', 'set-location', 'sl'])
 const TSC = /(?:^|\s)tsc(?=$|\s)/i
@@ -299,13 +308,21 @@ type Place = {
   ran: boolean
 }
 
-const echoText = (segment: Segment): string =>
-  segment.words
-    .slice(headOf(segment) + 1)
-    .filter(w => w.quoted || !/^-[neE]+$/.test(w.text))
-    .map(w => w.text)
-    .join(' ')
-    .trim()
+/** What an echo prints: its arguments, without `-n`/`-e` and without a redirection (`>> log`), which prints nothing (round 3). */
+function echoText(segment: Segment): string {
+  const out: string[] = []
+  const words = segment.words.slice(headOf(segment) + 1)
+  for (let i = 0; i < words.length; i += 1) {
+    const w = words[i]
+    if (w === undefined) continue
+    if (!w.quoted && /^[0-9&]?>/.test(w.text)) {
+      if (/^[0-9&]?>>?$/.test(w.text)) i += 1 // the target is the next word
+      continue
+    }
+    if (w.quoted || !/^-[neE]+$/.test(w.text)) out.push(w.text)
+  }
+  return out.join(' ').trim()
+}
 
 /**
  * The line an echo of a run's status prints, as a pattern. `$?` is the status of the command just before the echo, so
@@ -462,6 +479,9 @@ function placeOf(line: Line, i: number): Place {
 
 /** A sha line in the output: one carrying the subject when it is known, else any. */
 function shaShows(output: string, subject: string | null): boolean {
+  // `git show --stat HEAD` and `git log -1` without `--oneline` print the subject indented by four spaces (round 3).
+  const head = subject === null ? '' : subject.slice(0, 40)
+  if (head !== '' && output.split(/\r?\n/).some(text => /^ {4}\S/.test(text) && text.trim().startsWith(head))) return true
   return output.split(/\r?\n/).some(text => {
     const match = SHA_LINE.exec(text.trim())
     return match !== null && (subject === null || (match[1] ?? '').startsWith(subject.slice(0, 40)))
@@ -482,7 +502,7 @@ function shownBy(kind: Kind, output: string, echoes: readonly string[], logged: 
 function strengthOf(kind: Kind, facts: Facts, place: Place, plain: string): Omit<Run, 'kind'> {
   if (facts.denied || facts.interrupted) return { ok: false, masked: false, basis: 'exit' }
   // The exit status speaks for this run only when nothing after it can replace it; isError speaks for the last segment.
-  if (!place.masked && (place.last || !facts.isError)) return { ok: !facts.isError, masked: false, basis: 'exit' }
+  if (facts.exitKnown !== false && !place.masked && (place.last || !facts.isError)) return { ok: !facts.isError, masked: false, basis: 'exit' }
   // An echo of this run's own status is its exit code; echoed lines that do not pair off with their echoes are unsure.
   const status = place.status === null ? null : statusIn(facts.output, place.status)
   if (status === 'unsure') return { ok: true, masked: true, basis: 'none' }
@@ -496,7 +516,7 @@ function strengthOf(kind: Kind, facts: Facts, place: Place, plain: string): Omit
   // tsc prints nothing on success, and its first line on failure is an `error TS` line. So no such line is a pass when
   // tsc surely started (the call did not error, every earlier `&&` member is a `cd` or proven) and every later pipe
   // member keeps all its lines (no last-N `tail`, no count). Third round.
-  if (kind === 'build' && place.filtered && place.ran && !facts.isError && TSC.test(plain)) return { ok: true, masked: false, basis: 'output' }
+  if (kind === 'build' && facts.exitKnown !== false && place.filtered && place.ran && !facts.isError && TSC.test(plain)) return { ok: true, masked: false, basis: 'output' }
   return { ok: true, masked: true, basis: 'none' }
 }
 
@@ -511,9 +531,15 @@ function escapeRe(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-/** A runner as whole tokens within a segment: `uv run pytest` matches `uv run pytest -q`, never `pytest-cov`. */
+// Options between a runner's words, each with at most one value: `idf.py -C firmware build` (round 3).
+const OPTIONS_BETWEEN = String.raw`(?:\s+--?[\w-]+(?:[= ][^\s-]\S*)?)*\s+`
+
+/**
+ * A runner as whole tokens within a segment: `uv run pytest` matches `uv run pytest -q`, never `pytest-cov`. Options may
+ * sit between its words (`idf.py -C firmware build`, round 3).
+ */
 export function runnerRe(command: string): RegExp {
-  const body = command.trim().split(/\s+/).map(escapeRe).join('\\s+')
+  const body = command.trim().split(/\s+/).map(escapeRe).join(OPTIONS_BETWEEN)
   return new RegExp(`(?:^|\\s)${body}(?=$|\\s)`, 'i')
 }
 
@@ -566,6 +592,7 @@ export function factsOf(input: Readonly<Record<string, unknown>>, ran: Ran): Fac
     output,
     git,
     changed: listed.filter((p): p is string => typeof p === 'string'),
+    taskId: typeof result.backgroundTaskId === 'string' ? result.backgroundTaskId : (BG_ID.exec(output)?.[1] ?? null),
   }
 }
 
@@ -757,7 +784,11 @@ export function record(ledger: Ledger, facts: Facts, classified: Classified, seq
   const newest = ledger.edits[ledger.edits.length - 1]
   ledger.lastMutation = newest === undefined ? null : { ...newest }
   const added: Entry[] = []
+  const keys = facts.background && facts.command !== null ? outputKeys(facts.command, facts.taskId ?? null) : []
+  const nth: Partial<Record<Kind, number>> = {}
   for (const run of classified.runs) {
+    const n = nth[run.kind] ?? 0
+    nth[run.kind] = n + 1
     const entry: Entry = {
       seq,
       done: ledger.done,
@@ -772,12 +803,119 @@ export function record(ledger: Ledger, facts: Facts, classified: Classified, seq
       masked: run.masked,
       basis: run.basis,
     }
+    if (keys.length > 0 && facts.command !== null) entry.watch = { tool: facts.tool, command: facts.command.slice(0, WATCH_CAP), keys, n }
     ledger.entries.push(entry)
     added.push(entry)
     if (isShipKind(run.kind) && entry.ok && !entry.masked && !entry.background) ledger.ships[run.kind] = entry
   }
   if (ledger.entries.length > ENTRY_CAP) ledger.entries.splice(0, ledger.entries.length - ENTRY_CAP)
   return added
+}
+
+// ---- Background runs read back (round 3: the orchestrator reversed the C13 deferral) ----
+
+const WATCH_CAP = 4000
+const BG_ID = /running in background with ID: ([\w-]+)/
+const EXITED = /^\[exited with code (\d+)\]\s*$/m
+const REDIRECT = /^(?:[0-9&]?>>?)(?!&)(.*)$/
+// The Read tool numbers each line ("    12→text"); runner summaries are matched at line starts.
+const READ_PREFIX = /^ *\d+(?:→|\t)/gm
+
+/** The basenames of the files a command writes (`> f`, `>> f`, `2> f`, `tee f`), with `NAME=value` assignments expanded. */
+function writtenFiles(command: string): string[] {
+  const segments = segmentsOf(command)
+  const vars = new Map<string, string>()
+  for (const s of segments) {
+    for (const w of s.words) {
+      const m = /^([A-Za-z_]\w*)=(\S+)$/.exec(w.text)
+      if (m !== null && m[1] !== undefined && m[2] !== undefined) vars.set(m[1], m[2])
+    }
+  }
+  const expand = (text: string): string => text.replace(/\$\{?([A-Za-z_]\w*)\}?/g, (all, name: string) => vars.get(name) ?? all)
+  const targets: string[] = []
+  for (const s of segments) {
+    const tee = commandWord(s) === 'tee'
+    s.words.forEach((w, i) => {
+      if (tee && i > headOf(s) && !w.text.startsWith('-')) targets.push(w.text)
+      if (w.quoted) return
+      const m = REDIRECT.exec(w.text)
+      if (m === null) return
+      const inline = m[1] ?? ''
+      const target = inline !== '' ? inline : s.words[i + 1]?.text
+      if (target !== undefined) targets.push(target)
+    })
+  }
+  const out = new Set<string>()
+  for (const t of targets) {
+    const base = (expand(t).split(/[\\/]/).pop() ?? '').toLowerCase()
+    if (/^[\w.-]+\.[a-z0-9]+$/.test(base) && !base.includes('$')) out.add(base)
+  }
+  return [...out]
+}
+
+/** The names a later call would use to read a background command's result: its task id and the files it wrote. */
+export function outputKeys(command: string, taskId: string | null): string[] {
+  return [...(taskId === null ? [] : [taskId.toLowerCase()]), ...writtenFiles(command)]
+}
+
+const keyIn = (text: string, key: string): boolean => new RegExp(`(?<![\\w.-])${escapeRe(key)}(?![\\w-])`).test(text)
+
+/**
+ * A call that reads a background run's result back (its task output, or a file the run wrote) re-judges that run on what
+ * it shows, by the same rules as a foreground run's own output. The read-back's `[exited with code N]` line, when it
+ * shows one, is the command's exit status; otherwise only a status echo or a pass or fail summary counts. A run judged
+ * so leaves the background with its own `seq` (its place against edits) and the read-back's `done` (when it became
+ * known). A run that shows nothing stays weak until a later read. Each name belongs to the latest run that wrote it.
+ * Returns the entries it changed.
+ */
+export function readBack(ledger: Ledger, facts: Facts, config: Config, places: Places): Entry[] {
+  if (facts.denied || facts.interrupted || facts.background) return []
+  const text = `${facts.command ?? ''}\n${facts.path ?? ''}`.toLowerCase()
+  if (text.trim() === '') return []
+  const own = new Set(facts.command === null ? [] : writtenFiles(facts.command))
+  const latest = new Map<string, number>()
+  for (const e of ledger.entries) for (const k of e.watch?.keys ?? []) latest.set(k, Math.max(latest.get(k) ?? 0, e.seq))
+  const calls = new Set<number>()
+  for (const [key, seq] of latest) if (!own.has(key) && keyIn(text, key)) calls.add(seq)
+  if (calls.size === 0) return []
+  // `grep -n` prefixes each line with its number ("31024:exit=0"); the status lines are matched without it.
+  const numbered = /\b(?:grep|egrep|rg)\b[^|;&\n]*\s-[A-Za-z]*n/.test(facts.command ?? '')
+  const output = facts.tool === 'Read' ? facts.output.replace(READ_PREFIX, '') : numbered ? facts.output.replace(/^\d+[:-]/gm, '') : facts.output
+  const exit = EXITED.exec(output)
+  const changed: Entry[] = []
+  for (const seq of calls) {
+    const waiting = ledger.entries.filter(e => e.seq === seq && e.background && e.watch !== undefined)
+    const watch = waiting[0]?.watch
+    if (watch === undefined) continue
+    // The exit line is the task's own only when the read names the task (its id has no dot; a file name has one).
+    const status = watch.keys.some(k => !k.includes('.') && keyIn(text, k)) ? exit : null
+    const again = classify(
+      {
+        tool: watch.tool,
+        command: watch.command,
+        path: null,
+        toolUseId: null,
+        denied: false,
+        isError: status !== null && status[1] !== '0',
+        interrupted: false,
+        background: false,
+        output,
+        git: {},
+        changed: [],
+        exitKnown: status !== null,
+      },
+      config,
+      places,
+    ).runs
+    for (const entry of waiting) {
+      const run = again.filter(r => r.kind === entry.kind)[entry.watch?.n ?? 0]
+      if (run === undefined || run.masked) continue
+      Object.assign(entry, { background: false, ok: run.ok, masked: false, basis: run.basis, done: ledger.done })
+      if (isShipKind(entry.kind) && entry.ok) ledger.ships[entry.kind] = entry
+      changed.push(entry)
+    }
+  }
+  return changed
 }
 
 export function kindOf(c: { family: Family; op: ShipOp | null }): Kind {

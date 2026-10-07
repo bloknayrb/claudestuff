@@ -35,7 +35,14 @@ export type Entry = {
   background: boolean
   masked: boolean
   basis: Basis
+  /**
+   * A background run's recipe for re-judging it when a later call reads its result back (round 3): the command, the
+   * names a reader would use (task id, basenames of files it wrote), and which run of its kind in the command it is.
+   */
+  watch?: Watch
 }
+
+export type Watch = { tool: string; command: string; keys: string[]; n: number }
 
 /** A successful code edit. `path` is normalized (pathKey). A Bash command's own edits sit half a step before its runs. */
 export type Mutation = { seq: number; ts: number; path: string }

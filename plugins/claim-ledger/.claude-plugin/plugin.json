@@ -24,7 +24,7 @@
       "multiple": true,
       "title": "Build commands",
       "description": "Commands whose successful foreground run backs a 'builds cleanly' or 'type-checks' claim.",
-      "default": ["tsc", "cargo build", "npm run build", "npm run typecheck", "npm run typecheck:tests"]
+      "default": ["tsc", "cargo build", "npm run build", "npm run typecheck", "npm run typecheck:tests", "idf.py build"]
     }
   }
 }

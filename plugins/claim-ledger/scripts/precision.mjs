@@ -15,7 +15,7 @@ import { basename, dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 
 import { findClaims, fnv1a } from '../hooks/claims.ts'
-import { DEFAULT_BUILD_COMMANDS, DEFAULT_TEST_COMMANDS, asOfNow, classify, closeTurn, configOf, emptyLedger, factsOf, hhmm, noteClaims, record } from '../hooks/evidence.ts'
+import { DEFAULT_BUILD_COMMANDS, DEFAULT_TEST_COMMANDS, asOfNow, classify, closeTurn, configOf, emptyLedger, factsOf, hhmm, noteClaims, readBack, record } from '../hooks/evidence.ts'
 
 const [outDir, listFile] = process.argv.slice(2)
 if (outDir === undefined || listFile === undefined) {
@@ -33,7 +33,7 @@ const CALL_CAP = 60 // calls per pack
 const CALL_KEEP = 400 // calls remembered per transcript
 
 const zero = () => ({ tests: 0, build: 0, shipped: 0 })
-const totals = { files: 0, turns: 0, steps: 0, stepsWithClaim: 0, hits: { tune: zero(), holdout: zero() }, flags: { tune: zero(), holdout: zero() }, status: {} }
+const totals = { files: 0, turns: 0, steps: 0, stepsWithClaim: 0, readBacks: 0, hits: { tune: zero(), holdout: zero() }, flags: { tune: zero(), holdout: zero() }, status: {} }
 const hits = []
 const hitIds = new Set()
 const flags = []
@@ -187,6 +187,8 @@ async function replay(file) {
       const facts = factsOf(call.input, { isError: b.is_error === true, result: row.toolUseResult, text: output })
       const classified = classify(facts, CONFIG, { home: HOME, root, temp: TEMP })
       record(ledger, facts, classified, call.seq, call.ts, call.agentId)
+      // A background run whose result this call read back is judged now (round 3), as register.ts does.
+      totals.readBacks += readBack(ledger, facts, CONFIG, { home: HOME, root, temp: TEMP }).length
       if (['Bash', 'PowerShell', 'Agent', 'Task'].includes(call.input.tool)) {
         const what = call.input.command ?? `${call.input.description ?? ''} :: ${String(call.input.prompt ?? '').slice(0, 300)}`
         const ship = classified.runs.some(r => ['commit', 'push', 'merge', 'pr-create'].includes(r.kind))
@@ -217,6 +219,7 @@ const summary = [
   `flagged share of claims, tune: ${shareLine('tune')}`,
   `flagged share of claims, holdout: ${shareLine('holdout')}`,
   `flag status: ${JSON.stringify(totals.status)}`,
+  `background runs judged from a read-back: ${totals.readBacks}`,
 ].join('\n')
 writeFileSync(join(outDir, 'summary.txt'), `${summary}\n`)
 writeFileSync(join(outDir, 'hits.txt'), `${hits.map(h => `hit-${h.id} {${h.set}} [${h.family}${h.op ? `:${h.op}` : ''}] ${h.where}#${h.turn} | ${h.phrase} || ${h.sentence}`).join('\n')}\n`)

@@ -20,6 +20,7 @@ import {
   markBacked,
   noteClaims,
   noteText,
+  readBack,
   record,
   restoreLedger,
 } from '../hooks/evidence'
@@ -666,5 +667,90 @@ describe('note and restore', () => {
     held.calls = 2
     expect(restoreLedger(held, { seq: 9, calls: 9 })).toBe(held)
     expect(restoreLedger(emptyLedger(), undefined).calls).toBe(0)
+  })
+})
+
+describe('round 3: background runs read back, idf.py, state=MERGED, quiet commits', () => {
+  /** Records one call, then lets it read back any background run; returns what the read-back changed. */
+  const call = (ledger: Ledger, seq: number, input: Record<string, unknown>, ran: object = OK) => {
+    const facts = factsOf(input, ran)
+    ledger.seq = Math.max(ledger.seq, seq)
+    record(ledger, facts, classify(facts, CONFIG, PLACES), seq, seq * MIN, null)
+    return readBack(ledger, facts, CONFIG, PLACES)
+  }
+  const bg = (id: string) => ({ result: { backgroundTaskId: id, stdout: `Command running in background with ID: ${id}.`, stderr: '', interrupted: false }, text: `Command running in background with ID: ${id}. Output is being written to: C:\\t\\tasks\\${id}.output.` })
+  const PUSH = 'git push -u origin feat/x > "$TEMP/push.log" 2>&1; echo "exit=$?" >> "$TEMP/push.log"'
+
+  test('a read-back that shows a status or summary makes the run strong', () => {
+    const ledger = emptyLedger()
+    call(ledger, 1, sh(PUSH), bg('b1'))
+    expect(judge('push', ledger).status).toBe('background')
+    const changed = call(ledger, 2, sh('tail -3 "$TEMP/push.log"'), said(' * [new branch]      feat/x -> feat/x\nexit=0'))
+    expect(changed.map(e => [e.seq, e.kind, e.basis])).toEqual([[1, 'push', 'echo']])
+    expect(judge('push', ledger)).toMatchObject({ status: 'backed', entry: { seq: 1 } })
+  })
+
+  test('a read-back that shows no status leaves the run weak; a later one can still judge it', () => {
+    const ledger = emptyLedger()
+    call(ledger, 1, sh(PUSH), bg('b1'))
+    expect(call(ledger, 2, sh('tail -c 300 "$TEMP/push.log"'), said('··········'))).toEqual([])
+    expect(judge('push', ledger).status).toBe('background')
+    call(ledger, 3, sh('tail -3 "$TEMP/push.log"'), said('error: failed to push some refs\nexit=1'))
+    expect(judge('push', ledger).status).toBe('failed')
+  })
+
+  test('a grep -n read-back is read without its line numbers, with the log named through a variable', () => {
+    const ledger = emptyLedger()
+    call(ledger, 1, sh('L=/c/t/push3.log && git push > $L 2>&1; echo "exit=$?" >> $L'), bg('b3'))
+    call(ledger, 2, sh('L=/c/t/push3.log; grep -naE "FAIL |exit=" $L | tail -3'), said('31007:test result: ok. 3 passed\n31024:exit=0'))
+    expect(judge('push', ledger)).toMatchObject({ status: 'backed', entry: { seq: 1, basis: 'echo' } })
+  })
+
+  test('the run keeps its own place: an edit between the run and the read-back still voids it', () => {
+    const ledger = emptyLedger()
+    call(ledger, 1, sh('npx vitest run > /tmp/v.log 2>&1'), bg('b2'))
+    editAt(ledger, 2)
+    const changed = call(ledger, 3, sh('tail -3 /tmp/v.log'), said('      Tests  12 passed (12)'))
+    expect(changed.map(e => [e.seq, e.ok, e.background])).toEqual([[1, true, false]])
+    expect(judge('tests', ledger).status).toBe('none')
+  })
+
+  test("the task's output file carries the command's exit status", () => {
+    const ledger = emptyLedger()
+    call(ledger, 1, sh('npm run typecheck'), bg('bx9'))
+    call(ledger, 2, sh('cat "C:/t/tasks/bx9.output"'), said('\n[exited with code 0]'))
+    expect(judge('build', ledger).status).toBe('backed')
+    const failed = emptyLedger()
+    call(failed, 1, sh('npm run typecheck'), bg('bx9'))
+    call(failed, 2, { tool: 'Read', file_path: 'C:/t/tasks/bx9.output' }, said('     1→src/a.ts(1,1): error TS2322: no\n     2→[exited with code 2]'))
+    expect(judge('build', failed).status).toBe('failed')
+  })
+
+  test('a file name belongs to the latest run that wrote it, and a writer is not a reader', () => {
+    const ledger = emptyLedger()
+    call(ledger, 1, sh(PUSH), bg('b1'))
+    expect(call(ledger, 2, sh(PUSH), bg('b2'))).toEqual([])
+    call(ledger, 3, sh('tail -3 "$TEMP/push.log"'), said('exit=0'))
+    expect(ledger.entries.map(e => [e.seq, e.background])).toEqual([[1, true], [2, false]])
+  })
+
+  test('idf.py build is a build runner, options between its words included', () => {
+    expect(kinds(ps('idf.py -C firmware build 2>&1 | Select-String "error|build complete"'), said('Project build complete. To flash, run:'))).toEqual(['build'])
+    expect(kinds(ps('idf.py -C firmware build 2>&1 | Select-String "error"'), said('ninja: build stopped: subcommand failed.'))).toEqual(['build~failed'])
+    expect(kinds(ps('idf.py -p COM3 flash'))).toEqual([])
+    expect(kinds(sh('npm --silent test'))).toEqual(['tests'])
+    expect(kinds(sh('npm install test'))).toEqual([])
+  })
+
+  test('gh pr view prints state=MERGED from a jq template', () => {
+    expect(kinds(sh('gh pr view 1 --json state,mergedAt -q x'), said('state=MERGED mergedAt=2026-01-02T03:04:05Z'))).toEqual(['merge'])
+    expect(kinds(sh('gh pr merge 1 --merge 2>&1 | tail -5; echo "---"; gh pr view 1 --json state -q x'), said('---\nstate=MERGED'))).toEqual(['merge'])
+    expect(kinds(sh('gh pr view 1 --json state -q x'), said('state=OPEN'))).toEqual([])
+  })
+
+  test('a quiet commit is confirmed by git show --stat printing its subject', () => {
+    const quiet = `git add a && git commit -q -F - <<'EOF'\nfix: x\nEOF\ngit show --stat HEAD | tail -9`
+    expect(kinds(sh(quiet), said('commit 925b391aaaa\nAuthor: A <a@b>\nDate:   today\n\n    fix: x\n\n a.ts | 2 +-'))).toEqual(['commit'])
+    expect(kinds(sh(quiet), said('commit 925b391aaaa\n\n    docs: an older subject\n\n a.ts | 2 +-'))).toEqual(['commit~masked'])
   })
 })
