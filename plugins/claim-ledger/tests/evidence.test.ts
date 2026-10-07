@@ -225,7 +225,8 @@ describe('git and gh', () => {
   })
 
   test('ops inside a loop or conditional, or behind a quoted assignment', () => {
-    expect(kinds(sh('for n in 4 8; do gh pr merge $n --merge; done'), said('✓ Merged pull request #4 (x)\n✓ Merged pull request #8 (y)'))).toEqual(['merge'])
+    // An op inside a loop is found, but a loop is never strong evidence.
+    expect(kinds(sh('for n in 4 8; do gh pr merge $n --merge; done'), said('✓ Merged pull request #4 (x)\n✓ Merged pull request #8 (y)'))).toEqual(['merge~masked'])
     expect(kinds(sh('GH_TOKEN="$(cat t)" gh pr merge 3 --squash'))).toEqual(['merge'])
     expect(kinds(sh('if git diff --quiet; then git push; fi'))).toEqual(['push~masked'])
   })
@@ -885,11 +886,14 @@ describe('time stays bounded on adversarial inputs', () => {
     }
   })
 
-  test('a status echo whose variables are joined by a literal separator', () => {
-    for (const [sep, k, unit] of [[',', 8, ',a'], [',', 10, ',a'], [':', 8, ':x'], [':', 10, ':x'], [', ', 10, ', b'], ['/', 10, '/p']] as const) {
+  test('a status echo whose variables are joined by a literal separator, against digit-dense lines', () => {
+    kinds(sh('npm test; echo "rc=$?"'), said('rc=0')) // warm the code path, so the budgets time matching, not compiling
+    for (const [sep, k, unit] of [[',', 8, ',1'], [',', 10, ',1'], [':', 8, ':1'], [':', 10, ':1'], [', ', 10, ', 1'], ['/', 10, '/1'], [':', 10, '1 ']] as const) {
       const vars = Array.from({ length: k }, (_, i) => `$V${i}`).join(sep)
-      const line = unit.repeat(Math.floor(298 / unit.length)) // just under the status-line cap
-      expect(ms(() => kinds(sh(`npm test; echo "${vars} rc=$?"`), said(line))), `${JSON.stringify(sep)} x${k}`).toBeLessThan(50)
+      // Every position is a digit or next to one, so the candidate scan runs; just under the status-line cap.
+      const line = unit.repeat(Math.floor(298 / unit.length))
+      expect(ms(() => kinds(sh(`npm test; echo "${vars} rc=$?"`), said(line))), `${JSON.stringify(sep)} x${k} on ${JSON.stringify(unit)}`).toBeLessThan(50)
+      expect(ms(() => kinds(sh(`npm test; echo "${vars} $? ${vars}"`), said(line))), `${JSON.stringify(sep)} x${k} both sides`).toBeLessThan(50)
     }
     // Mixed separators still read the status.
     expect(kinds(sh('npm test; echo "$A,$B:$C/$D rc=$?"'), said('a,b:c/d rc=1'))).toEqual(['tests~failed'])
@@ -899,6 +903,30 @@ describe('time stays bounded on adversarial inputs', () => {
     const re = configOf(['npm test'], []).tests[0]
     const plain = `npm ${Array.from({ length: 24 }, (_, i) => `--opt${i}`).join(' ')} install`
     expect(ms(() => re?.test(plain))).toBeLessThan(50)
+  })
+
+  test('launchers and options repeated, with no runner after them', () => {
+    const re = configOf(['vitest'], []).tests[0]
+    kinds(sh('pnpm -a install')) // warm
+    for (const n of [24, 30]) {
+      for (const unit of ['pnpm -a ', 'yarn -a ', 'bun -a ', 'npx -a ', 'pnpm --x ', 'bun run -a ', 'uv run -a ']) {
+        const command = `${unit.repeat(n)}install`
+        expect(ms(() => re?.test(command)), `${JSON.stringify(unit)} x${n}`).toBeLessThan(50)
+        expect(ms(() => kinds(sh(command))), `classify ${JSON.stringify(unit)} x${n}`).toBeLessThan(50)
+      }
+    }
+  })
+
+  test('status lines whose literal ends in a dash or a digit, or whose leading variable printed nothing', () => {
+    expect(kinds(sh('npm test; echo "a-$?"'), said('a-1'))).toEqual(['tests~failed'])
+    expect(kinds(sh('npm test; echo "a1$?"'), said('a10'))).toEqual(['tests'])
+    expect(kinds(sh('npm test; echo "$X rc=$?"'), said('rc=2'))).toEqual(['tests~failed'])
+    expect(kinds(sh('npm test; echo "rc=$? $X"'), said('rc=0'))).toEqual(['tests'])
+  })
+
+  test('a segment over 1,000 characters is not matched: no run', () => {
+    expect(kinds(sh(`pytest ${'tests/t.py '.repeat(100)}`))).toEqual([])
+    expect(kinds(sh(`pytest ${'tests/t.py '.repeat(80)}`))).toEqual(['tests'])
   })
 
   test('a command of 1,500 runs, each with a status echo, stays linear', () => {
@@ -948,31 +976,34 @@ describe('read-backs judge a run only from its own output', () => {
     expect(call(both, 2, sh('cat "C:/t/tasks/b1.output"; tail -2 "$TEMP/p.log"'), said('exit=0\n[exited with code 0]')).length).toBe(1)
   })
 
-  test("a looping command is judged only once the task's exit line is in view, never by a status echo", () => {
-    const LOOP = 'for s in a b c; do npx vitest run $s; done > "$TEMP/loop.log" 2>&1'
-    const ledger = emptyLedger()
-    call(ledger, 1, sh(LOOP), bg('b9'))
-    expect(call(ledger, 2, sh('tail -2 "$TEMP/loop.log"'), said(' Tests  4 passed (4)'))).toEqual([])
-    expect(judge('tests', ledger).status).toBe('background')
-    call(ledger, 3, sh('cat "C:/t/tasks/b9.output"'), said('[exited with code 1]'))
-    expect(judge('tests', ledger)).toMatchObject({ status: 'failed', entry: { basis: 'exit' } })
-    // The loop's status echo prints once per pass: with an echo after the runner, the body's status is masked.
-    const echoed = emptyLedger()
-    call(echoed, 1, sh('for s in a b; do npx vitest run $s; echo "rc=$?"; done'), bg('b8'))
-    expect(call(echoed, 2, sh('cat "C:/t/tasks/b8.output"'), said('rc=0\nrc=0\n[exited with code 0]'))).toEqual([])
+  test('a looping background command stays weak through every read-back', () => {
+    const shapes = [
+      'for s in a b c; do npx vitest run $s; echo "rc=$?"; done > "$TEMP/loop.log" 2>&1',
+      'if true; then for s in a b c; do npx vitest run $s; echo "rc=$?"; done; fi > "$TEMP/loop.log" 2>&1',
+      'time for s in a b c; do npx vitest run $s; echo "rc=$?"; done > "$TEMP/loop.log" 2>&1',
+      'for s in a b; do pytest $s; done > "$TEMP/loop.log" 2>&1',
+      'for s in a b; do npx vitest run $s | tail -3; done > "$TEMP/loop.log" 2>&1',
+      'until pytest; do sleep 1; done > "$TEMP/loop.log" 2>&1',
+    ]
+    for (const command of shapes) {
+      const ledger = emptyLedger()
+      call(ledger, 1, sh(command), bg('b9'))
+      expect(call(ledger, 2, sh('tail -2 "$TEMP/loop.log"'), said(' Tests  4 passed (4)\n4 passed in 0.1s\nrc=0')), command).toEqual([])
+      expect(call(ledger, 3, sh('cat "C:/t/tasks/b9.output"'), said(' Tests  4 passed (4)\nrc=0\n[exited with code 0]')), command).toEqual([])
+      expect(judge('tests', ledger).status, command).toBe('background')
+    }
   })
 
-  test('a masked loop body is credited only as classify would: a failure in view fails it', () => {
-    for (const body of ['npx vitest run $s | tail -3', 'pytest $s || true']) {
-      const ledger = emptyLedger()
-      call(ledger, 1, sh(`for s in a b; do ${body}; done`), bg('b7'))
-      call(ledger, 2, sh('cat "C:/t/tasks/b7.output"'), said(' Tests  1 failed (4)\n1 failed, 3 passed\n Tests  4 passed (4)\n[exited with code 0]'))
-      expect(judge('tests', ledger), body).toMatchObject({ status: 'failed', entry: { basis: 'output' } })
-    }
-    const plain = emptyLedger()
-    call(plain, 1, sh('for s in a b; do pytest $s; done'), bg('b6'))
-    call(plain, 2, sh('cat "C:/t/tasks/b6.output"'), said('[exited with code 0]'))
-    expect(judge('tests', plain)).toMatchObject({ status: 'backed', entry: { basis: 'exit' } })
+  test('a loop in the foreground is weak too, a plain body and a visible pass included', () => {
+    expect(kinds(sh('for s in a b; do pytest $s; done'))).toEqual(['tests~masked'])
+    expect(kinds(sh('if true; then for s in a b; do pytest $s; done; fi'), said('4 passed'))).toEqual(['tests~masked'])
+    expect(kinds(sh('time for s in a b; do pytest $s; done'), said('4 passed'))).toEqual(['tests~masked'])
+    expect(kinds(sh('while read f; do pytest "$f"; done < list.txt'))).toEqual(['tests~masked'])
+    // A run after the loop's `done` is outside it, and keeps its own strength.
+    expect(kinds(sh('for s in a b; do pytest $s; done; npm test'))).toEqual(['tests~masked', 'tests'])
+    expect(kinds(sh('for n in 1 2; do gh issue view $n; done; gh pr view 5 --json state -q .state'), said('CLOSED\nCLOSED\nMERGED'))).toEqual(['merge'])
+    // A PowerShell block keeps its body in the loop's own segment, so no run is found at all: no credit either way.
+    expect(kinds(ps('foreach ($p in $ps) { npm test }'))).toEqual([])
   })
 
   test('the word "for" inside an echo or a commit message does not make a loop', () => {
