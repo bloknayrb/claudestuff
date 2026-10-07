@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { clockText, fitCap, matchWindow, windowKey } from '../hooks/pace'
+import { clockText, fitCap, matchWindow, paceClause, windowKey, windowText } from '../hooks/pace'
 import { MIN, START, T0, fiveHourAt, measure, world } from './harness'
 
 const RESET = T0 + 180 * MIN
@@ -117,5 +117,16 @@ describe('capped window', () => {
       await w.clock.advance(30 * MIN)
     }
     expect(last(w.status)).toBe(`QM pace: capped (resets ${clockText(RESET)}) · agents 0`)
+  })
+})
+
+describe('pace text edges', () => {
+  test('a fit that puts the cap before now reads capped soon', () => {
+    expect(paceClause(T0 - MIN, RESET, 98, T0)).toBe(`capped soon (resets ${clockText(RESET)})`)
+    expect(paceClause(T0 + MIN, RESET, 98, T0)).toBe(`cap ~${clockText(T0 + MIN)} (resets ${clockText(RESET)})`)
+  })
+
+  test('the reading at 100% says already capped', () => {
+    expect(windowText(100, RESET, T0 - MIN)).toBe(`five-hour window at 100%, resets ${clockText(RESET)}; already capped`)
   })
 })

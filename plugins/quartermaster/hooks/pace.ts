@@ -59,11 +59,13 @@ export function clockText(ms: number): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-/** `capped (resets 17:00)`, `cap ~15:40 (resets 17:00)`, `no cap before reset (resets 17:00)`, or `— (resets 17:00)`. */
-export function paceClause(cap: number | null, resetsAt: number | null, pct = 0): string {
+/** `capped (resets 17:00)`, `capped soon (resets 17:00)` for a stale fit, `cap ~15:40 (resets 17:00)`, `no cap before reset (resets 17:00)`, or `— (resets 17:00)`. */
+export function paceClause(cap: number | null, resetsAt: number | null, pct = 0, now = 0): string {
   const resets = resetsAt === null ? '' : ` (resets ${clockText(resetsAt)})`
   // At 100% the fitted cap time is in the past: say so instead of projecting it.
   if (pct >= 100) return `capped${resets}`
+  // A fit that puts the cap before now (a steep rise that then flattened) is stale too.
+  if (cap !== null && now > 0 && cap <= now) return `capped soon${resets}`
   if (cap === null) return `—${resets}`
   if (resetsAt !== null && cap >= resetsAt) return `no cap before reset${resets}`
   return `cap ~${clockText(cap)}${resets}`

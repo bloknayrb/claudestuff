@@ -92,9 +92,16 @@ export function isLive(d: QmDenial, loop: string, now: number): boolean {
   return d.loop === loop && now - d.ts <= DENIAL_TTL_MS
 }
 
-/** Removes the first entry `match` picks, and only that one: three identical denials answer three re-issues. */
-export function takeOne(list: readonly QmDenial[], match: (d: QmDenial) => boolean): { rest: QmDenial[]; taken: QmDenial | undefined } {
-  const i = list.findIndex(match)
+/**
+ * Removes one entry `match` picks, and only that one: three identical denials answer three re-issues. By default
+ * the first match; `newest` takes the last, so a task match settles against the denial the model was just shown.
+ */
+export function takeOne(
+  list: readonly QmDenial[],
+  match: (d: QmDenial) => boolean,
+  newest = false,
+): { rest: QmDenial[]; taken: QmDenial | undefined } {
+  const i = newest ? list.findLastIndex(match) : list.findIndex(match)
   if (i < 0) return { rest: [...list], taken: undefined }
   return { rest: [...list.slice(0, i), ...list.slice(i + 1)], taken: list[i] }
 }

@@ -238,7 +238,7 @@ async function refreshStatus($: EngineInterface, limits?: readonly SessionRateLi
   }
   const cap = window.resetsAt === null ? null : fitCap((await windowReadings($, window.resetsAt)).readings)
   const tally = agentsClause(await read($, agents), current.cfg.heavyModels)
-  $.ui.status(statusText(paceClause(cap, window.resetsAt, window.pct), tally))
+  $.ui.status(statusText(paceClause(cap, window.resetsAt, window.pct, await $.clock.now()), tally))
 }
 
 // ==== guards ====
@@ -344,10 +344,10 @@ async function toastOnly(
 }
 
 /** Removes and returns one live pending denial that `match` picks; decided inside update, so parallel calls can't share one. */
-async function takeDenial($: EngineInterface, match: (d: QmDenial) => boolean): Promise<QmDenial | undefined> {
+async function takeDenial($: EngineInterface, match: (d: QmDenial) => boolean, newest = false): Promise<QmDenial | undefined> {
   let taken: QmDenial | undefined
   await update($, denied, list => {
-    const result = takeOne(list, match)
+    const result = takeOne(list, match, newest)
     taken = result.taken
     return result.rest
   })
@@ -370,7 +370,7 @@ const onSpawn: Hook<'agent.spawn'> = async ($, e, next) => {
   }
 
   const task = taskHash(view)
-  const earlier = await takeDenial($, d => d.task === task && isLive(d, view.loop, now))
+  const earlier = await takeDenial($, d => d.task === task && isLive(d, view.loop, now), true)
   const { changed, deny } =
     earlier === undefined ? { changed: [] as QmGuard[], deny: fired.guards } : settle(earlier.guards, fired.guards, view)
   if (earlier !== undefined) await safeRecord($, changed, earlier.hash, 'changed')

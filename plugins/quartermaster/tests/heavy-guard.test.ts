@@ -122,3 +122,28 @@ describe('heavy-model guard', () => {
     expect(w.store.get('counters')).toBeUndefined()
   })
 })
+
+describe('a third variant of one task', () => {
+  test('naming another heavy model after a heavy deny is still an informed override', async ($, on) => {
+    const w = world(on, { limits: [fiveHourAt(50)] })
+    expect((await $.agent.spawn(spawn())).deny).toBe(MODEL_TEXT)
+    w.setLimits([fiveHourAt(90)])
+    expect((await $.agent.spawn(spawn({ model: 'opus' }))).deny).toBe(heavyText(90))
+    expect((await $.agent.spawn(spawn({ model: 'claude-opus-5-5' }))).deny).toBeUndefined()
+    expect(w.store.get('counters')).toEqual({
+      model: { fires: 1, reissued: 0, changed: 1 },
+      heavy: { fires: 1, reissued: 0, changed: 1 },
+    })
+  })
+
+  test('a lighter model after two denials credits both guards as changed', async ($, on) => {
+    const w = world(on, { limits: [fiveHourAt(90)] })
+    expect((await $.agent.spawn(spawn({ model: 'opus' }))).deny).toBe(heavyText(90))
+    expect((await $.agent.spawn(spawn())).deny).toBe(`${MODEL_TEXT}\n${heavyText(90)}`)
+    expect((await $.agent.spawn(spawn({ model: 'sonnet' }))).deny).toBeUndefined()
+    expect(w.store.get('counters')).toEqual({
+      model: { fires: 1, reissued: 0, changed: 1 },
+      heavy: { fires: 2, reissued: 0, changed: 1 },
+    })
+  })
+})

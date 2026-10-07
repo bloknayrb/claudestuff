@@ -14,7 +14,7 @@ export function cyrb53(text: string, seed = 0): string {
 
 export type SpawnFields = { prompt: string; description: string; subagentType: string; model: string | undefined }
 
-/** Re-issue identity: the four fields the spec names, never tool_use_id (a re-issue gets a new one). */
+/** Re-issue identity: prompt, description, agent type and model, never tool_use_id (a re-issue gets a new one). */
 export function spawnHash(f: SpawnFields): string {
   return cyrb53(JSON.stringify([f.prompt, f.description, f.subagentType, f.model ?? null]))
 }
