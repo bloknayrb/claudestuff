@@ -7,7 +7,7 @@ import { mainTurnEnded, mainTurnStarted, rowAppended, stepBegan } from './delive
 import { asksQuestion, isFromUser, isGoAhead, stillPendingLine } from './prompt'
 import { APPEND_MARK, formatRow, isBlankText } from './row'
 import { denialFor, INPUT_SCHEMA, isSubagentCall, receipt, SUBAGENT_DENIAL, TOOL_DESCRIPTION, TOOL_NAME, validateDecide } from './decide'
-import { freshSession, lastTurn, normalize, withTurnText } from './session'
+import { freshSession, lastTurn, normalize, resetSession, withTurnText } from './session'
 import { ARM_DELAY_MS, bandTree, PANE_ID, paneTree, PANE_TITLE } from './ui'
 import type { CardActions } from './ui'
 
@@ -82,6 +82,12 @@ async function fail($: EngineInterface, where: string, err: unknown): Promise<vo
     // A .catch handler's own $ calls can reject (2.1.292 re-entry); the health write below is best effort too.
   }
   await writeHealth($, message)
+}
+
+async function refreshHeartbeat($: EngineInterface): Promise<void> {
+  // After /clear or /resume the session id changes and no session.start fires; write the new id's
+  // heartbeat once (00-shared, Health file).
+  if (heartbeatFor !== (await $.session.id())) await writeHealth($)
 }
 
 // Runs work that nothing awaits, or that must not fail its caller, so a failure is logged and recorded.
@@ -304,6 +310,18 @@ function cardActions($: EngineInterface): CardActions {
 }
 
 export const register: Register = on => {
+  on('session.end', async ($, e, next) => {
+    if (e.reason === 'clear' || e.reason === 'resume') {
+      try {
+        const wasUp = await transact($, s => ({ session: resetSession(), out: s.view.isPaneUp }))
+        if (wasUp || (await isPaneOpen($))) await $.ui.close({ id: PANE_ID })
+      } catch (err) {
+        await fail($, 'session.end', err)
+      }
+    }
+    return next(e)
+  })
+
   // Spec item 4. Only the user's own prompt (composer or Remote Control; see prompt.ts), only the
   // whole text "make it so"/"engage", only with exactly one decision pending. The prompt passes on
   // exactly as received, with no context from Bridge (brief item 2); what Bridge has to say goes in
@@ -339,6 +357,7 @@ export const register: Register = on => {
         session: { ...s, delivery: mainTurnStarted(s.delivery), isWakeQueued: false, turnText: '' },
         out: null,
       }))
+      void guard($, 'heartbeat', refreshHeartbeat($))
     } catch (err) {
       await fail($, 'turn.start', err)
     }
