@@ -754,3 +754,48 @@ describe('round 3: background runs read back, idf.py, state=MERGED, quiet commit
     expect(kinds(sh(quiet), said('commit 925b391aaaa\n\n    docs: an older subject\n\n a.ts | 2 +-'))).toEqual(['commit~masked'])
   })
 })
+
+describe('round 4: full-path read-back keys, repeated status lines, pre-push tests', () => {
+  const call = (ledger: Ledger, seq: number, input: Record<string, unknown>, ran: object = OK) => {
+    const facts = factsOf(input, ran)
+    ledger.seq = Math.max(ledger.seq, seq)
+    record(ledger, facts, classify(facts, CONFIG, PLACES), seq, seq * MIN, null)
+    return readBack(ledger, facts, CONFIG, PLACES)
+  }
+  const bg = (id: string) => ({ result: { backgroundTaskId: id, stdout: '', stderr: '', interrupted: false }, text: `Command running in background with ID: ${id}.` })
+  const pushIn = (dir: string) => `cd ${dir} && git push > push.log 2>&1; echo "exit=$?" >> push.log`
+
+  test("one worktree's push.log does not judge another worktree's run", () => {
+    const ledger = emptyLedger()
+    call(ledger, 1, sh(pushIn('/c/w/one')), bg('b1'))
+    call(ledger, 2, sh(pushIn('/c/w/two')), bg('b2'))
+    call(ledger, 3, sh('tail -2 /c/w/one/push.log'), said('exit=0'))
+    expect(ledger.entries.map(e => [e.seq, e.background, e.ok])).toEqual([[1, false, true], [2, true, true]])
+    call(ledger, 4, sh('cd /c/w/two && tail -2 push.log'), said('error: failed to push some refs\nexit=1'))
+    expect(ledger.entries.map(e => [e.seq, e.background, e.ok])).toEqual([[1, false, true], [2, false, false]])
+  })
+
+  test('a reader that prints the same status line twice is read once; disagreeing lines still let a failure show', () => {
+    const PUSH = 'git push > "$TEMP/p.log" 2>&1; echo "exit=$?" >> "$TEMP/p.log"'
+    const twice = emptyLedger()
+    call(twice, 1, sh(PUSH), bg('b1'))
+    call(twice, 2, sh('grep -E "exit=" "$TEMP/p.log"; tail -2 "$TEMP/p.log"'), said('exit=1\nerror: failed to push some refs\nexit=1'))
+    expect(judge('push', twice)).toMatchObject({ status: 'failed', entry: { basis: 'echo' } })
+    const mixed = emptyLedger()
+    call(mixed, 1, sh(PUSH), bg('b1'))
+    call(mixed, 2, sh('cat "$TEMP/p.log"'), said('exit=0\nerror: failed to push some refs\nexit=1'))
+    expect(judge('push', mixed)).toMatchObject({ status: 'failed', entry: { basis: 'output' } })
+  })
+
+  test("a push's read-back that shows the pre-push suite's summary is test evidence at the push's place", () => {
+    const ledger = emptyLedger()
+    editAt(ledger, 1)
+    call(ledger, 2, sh('git push > "$TEMP/p.log" 2>&1'), bg('b1'))
+    call(ledger, 3, sh('tail -4 "$TEMP/p.log"'), said(' Test Files  12 passed (12)\n * [new branch]      feat/x -> feat/x'))
+    expect(judge('tests', ledger)).toMatchObject({ status: 'backed', entry: { seq: 2, kind: 'tests' } })
+    const failed = emptyLedger()
+    call(failed, 1, sh('git push > "$TEMP/p.log" 2>&1'), bg('b1'))
+    call(failed, 2, sh('tail -4 "$TEMP/p.log"'), said(' Tests  1 failed | 30 passed (31)\nerror: failed to push some refs'))
+    expect(judge('tests', failed).status).toBe('failed')
+  })
+})

@@ -165,3 +165,14 @@ describe('real examples, redacted (Task 7)', () => {
     expect(families('The tests pass against each mutation.')).toEqual([])
   })
 })
+
+describe('figurative "merged" (round 4)', () => {
+  test('merged into something that is not a branch is not a git claim', () => {
+    // The shape of a real progress heading: a bold "Merged into <a process>:" leading a list of other work.
+    expect(families('**Merged into the pipeline:** two queued commits went out with the suite green.')).toEqual([])
+    expect(families('Merged into the tracker.')).toEqual([])
+    expect(families('Merged into main.')).toEqual(['shipped:merge'])
+    expect(families('I merged it into `main`.')).toEqual(['shipped:merge'])
+    expect(families('Merged into feat/x.')).toEqual(['shipped:merge'])
+  })
+})

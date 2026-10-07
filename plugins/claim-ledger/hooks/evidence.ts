@@ -36,7 +36,7 @@ export type Run = { kind: Kind; ok: boolean; masked: boolean; basis: Basis }
  * `mutations`: code edits, as pathKey()s. `messageFiles`: files a git or gh command read a message or body from
  * (`-F`, `--file`, `--body-file`), normalized; relative ones as written.
  */
-export type Classified = { mutations: string[]; runs: Run[]; messageFiles: string[] }
+export type Classified = { mutations: string[]; runs: Run[]; messageFiles: string[]; keys?: string[] }
 /** Where things live: the home folder (memory roots), the session's project root (relative paths) and %TEMP%. Each may be unknown. */
 export type Places = { home: string | null; root: string | null; temp: string | null }
 export type Word = { text: string; quoted: boolean }
@@ -346,13 +346,14 @@ const filled = (text: string): string => text.replace(/\$\{[^}]*\}|\$[A-Za-z_?][
  * echoes (a loop, or a program printing the same shape), the status is unsure (third round).
  */
 function statusIn(output: string, status: Echoed): number | 'unsure' | null {
-  const found = output
-    .split(/\r?\n/)
-    .map(line => status.pattern.exec(line.trim())?.[1])
-    .filter((v): v is string => v !== undefined)
+  const lines = output.split(/\r?\n/).map(line => line.trim())
+  const values = (from: readonly string[]) => from.map(line => status.pattern.exec(line)?.[1]).filter((v): v is string => v !== undefined)
+  const found = values(lines)
   if (found.length === 0) return null
-  if (found.length !== status.of) return 'unsure'
-  return Number(found[status.n])
+  if (found.length === status.of) return Number(found[status.n])
+  // A reader that prints the same log twice (grep, then tail) repeats each status line: identical lines are one (round 4).
+  const once = values([...new Set(lines.filter(line => status.pattern.test(line)))])
+  return once.length === status.of ? Number(once[status.n]) : 'unsure'
 }
 
 /** A pipe member that keeps every line tsc prints (FILTERS). */
@@ -505,7 +506,11 @@ function strengthOf(kind: Kind, facts: Facts, place: Place, plain: string): Omit
   if (facts.exitKnown !== false && !place.masked && (place.last || !facts.isError)) return { ok: !facts.isError, masked: false, basis: 'exit' }
   // An echo of this run's own status is its exit code; echoed lines that do not pair off with their echoes are unsure.
   const status = place.status === null ? null : statusIn(facts.output, place.status)
-  if (status === 'unsure') return { ok: true, masked: true, basis: 'none' }
+  // Unsure status lines still let a visible failure speak (round 4); a visible pass does not outvote them.
+  if (status === 'unsure') {
+    const seen = shownBy(kind, facts.output, [], false, null)
+    return seen === 'fail' ? { ok: false, masked: false, basis: 'output' } : { ok: true, masked: true, basis: 'none' }
+  }
   if (status !== null) return { ok: status === 0, masked: false, basis: 'echo' }
   const shown = shownBy(kind, facts.output, place.echoes, place.logged, place.subject)
   if (shown === 'fail') return { ok: false, masked: false, basis: 'output' }
@@ -714,6 +719,8 @@ export function classify(facts: Facts, config: Config, places: Places): Classifi
     mutations: facts.changed.filter(p => isCodeMutation(p, places)).map(p => pathKey(p, places)),
     runs,
     messageFiles: messageFilesOf(segments, plains, places.home),
+    // A background command's names for a later read-back (round 4: full paths, so worktrees do not collide).
+    keys: facts.background ? outputKeys(command, facts.taskId ?? null, places) : [],
   }
 }
 
@@ -784,7 +791,7 @@ export function record(ledger: Ledger, facts: Facts, classified: Classified, seq
   const newest = ledger.edits[ledger.edits.length - 1]
   ledger.lastMutation = newest === undefined ? null : { ...newest }
   const added: Entry[] = []
-  const keys = facts.background && facts.command !== null ? outputKeys(facts.command, facts.taskId ?? null) : []
+  const keys = facts.background && facts.command !== null ? (classified.keys ?? []) : []
   const nth: Partial<Record<Kind, number>> = {}
   for (const run of classified.runs) {
     const n = nth[run.kind] ?? 0
@@ -821,43 +828,69 @@ const REDIRECT = /^(?:[0-9&]?>>?)(?!&)(.*)$/
 // The Read tool numbers each line ("    12→text"); runner summaries are matched at line starts.
 const READ_PREFIX = /^ *\d+(?:→|\t)/gm
 
-/** The basenames of the files a command writes (`> f`, `>> f`, `2> f`, `tee f`), with `NAME=value` assignments expanded. */
-function writtenFiles(command: string): string[] {
-  const segments = segmentsOf(command)
+/**
+ * The files a command writes (`> f`, `>> f`, `2> f`, `tee f`) and the other file-like words it names, each resolved to a
+ * full, normalized path (round 4: a basename alone let one worktree's `push.log` judge another's run). Resolution follows
+ * the command's own `cd`s from the session root, expands `NAME=value` assignments made on the line, `$TEMP`, `$HOME` and
+ * `~`; a path still holding a variable is kept as written (normalized), so a reader that names it the same way matches.
+ */
+function filesOf(command: string, places: Places): { written: string[]; named: string[] } {
   const vars = new Map<string, string>()
-  for (const s of segments) {
-    for (const w of s.words) {
-      const m = /^([A-Za-z_]\w*)=(\S+)$/.exec(w.text)
-      if (m !== null && m[1] !== undefined && m[2] !== undefined) vars.set(m[1], m[2])
-    }
+  if (places.temp !== null) {
+    vars.set('TEMP', places.temp)
+    vars.set('TMP', places.temp)
+  }
+  if (places.home !== null) {
+    vars.set('HOME', places.home)
+    vars.set('USERPROFILE', places.home)
   }
   const expand = (text: string): string => text.replace(/\$\{?([A-Za-z_]\w*)\}?/g, (all, name: string) => vars.get(name) ?? all)
-  const targets: string[] = []
-  for (const s of segments) {
-    const tee = commandWord(s) === 'tee'
-    s.words.forEach((w, i) => {
-      if (tee && i > headOf(s) && !w.text.startsWith('-')) targets.push(w.text)
-      if (w.quoted) return
-      const m = REDIRECT.exec(w.text)
-      if (m === null) return
-      const inline = m[1] ?? ''
-      const target = inline !== '' ? inline : s.words[i + 1]?.text
-      if (target !== undefined) targets.push(target)
-    })
+  let cwd = places.root
+  const resolve = (word: string): string => pathKey(expand(word), { ...places, root: cwd })
+  const written = new Set<string>()
+  const named = new Set<string>()
+  for (const s of segmentsOf(command)) {
+    for (const w of s.words) {
+      const m = /^([A-Za-z_]\w*)=(\S+)$/.exec(w.text)
+      if (m !== null && m[1] !== undefined && m[2] !== undefined) vars.set(m[1], expand(m[2]))
+    }
+    const word = commandWord(s)
+    const head = headOf(s)
+    if (CD.has(word)) {
+      const to = s.words[head + 1]?.text
+      if (to !== undefined && !to.startsWith('-')) cwd = resolve(to)
+      continue
+    }
+    const tee = word === 'tee'
+    for (let i = head + 1; i < s.words.length; i += 1) {
+      const w = s.words[i]
+      if (w === undefined) continue
+      const m = w.quoted ? null : REDIRECT.exec(w.text)
+      if (m !== null) {
+        const inline = m[1] ?? ''
+        const target = inline !== '' ? inline : s.words[i + 1]?.text
+        if (inline === '') i += 1
+        if (target !== undefined && FILE_LIKE.test(expand(target))) written.add(resolve(target))
+        continue
+      }
+      if (!FILE_LIKE.test(expand(w.text)) || w.text.startsWith('-')) continue
+      if (tee) written.add(resolve(w.text))
+      else named.add(resolve(w.text))
+    }
   }
-  const out = new Set<string>()
-  for (const t of targets) {
-    const base = (expand(t).split(/[\\/]/).pop() ?? '').toLowerCase()
-    if (/^[\w.-]+\.[a-z0-9]+$/.test(base) && !base.includes('$')) out.add(base)
-  }
-  return [...out]
+  return { written: [...written], named: [...named] }
 }
+
+// A word that names a file: it ends in a name with an extension.
+const FILE_LIKE = /(?:^|[\\/])[\w.$-]*\.[A-Za-z0-9]+["']?$/
 
 /** The names a later call would use to read a background command's result: its task id and the files it wrote. */
-export function outputKeys(command: string, taskId: string | null): string[] {
-  return [...(taskId === null ? [] : [taskId.toLowerCase()]), ...writtenFiles(command)]
+export function outputKeys(command: string, taskId: string | null, places: Places): string[] {
+  return [...(taskId === null ? [] : [taskId.toLowerCase()]), ...filesOf(command, places).written]
 }
 
+// A task id is a bare word; a file key is a path.
+const isTaskKey = (key: string): boolean => !key.includes('/')
 const keyIn = (text: string, key: string): boolean => new RegExp(`(?<![\\w.-])${escapeRe(key)}(?![\\w-])`).test(text)
 
 /**
@@ -872,11 +905,14 @@ export function readBack(ledger: Ledger, facts: Facts, config: Config, places: P
   if (facts.denied || facts.interrupted || facts.background) return []
   const text = `${facts.command ?? ''}\n${facts.path ?? ''}`.toLowerCase()
   if (text.trim() === '') return []
-  const own = new Set(facts.command === null ? [] : writtenFiles(facts.command))
+  const files = facts.command === null ? { written: [], named: [] } : filesOf(facts.command, places)
+  const named = new Set<string>(files.named)
+  if (facts.path !== null) named.add(pathKey(facts.path, places))
+  const own = new Set<string>(files.written)
   const latest = new Map<string, number>()
   for (const e of ledger.entries) for (const k of e.watch?.keys ?? []) latest.set(k, Math.max(latest.get(k) ?? 0, e.seq))
   const calls = new Set<number>()
-  for (const [key, seq] of latest) if (!own.has(key) && keyIn(text, key)) calls.add(seq)
+  for (const [key, seq] of latest) if (isTaskKey(key) ? keyIn(text, key) : named.has(key) && !own.has(key)) calls.add(seq)
   if (calls.size === 0) return []
   // `grep -n` prefixes each line with its number ("31024:exit=0"); the status lines are matched without it.
   const numbered = /\b(?:grep|egrep|rg)\b[^|;&\n]*\s-[A-Za-z]*n/.test(facts.command ?? '')
@@ -888,7 +924,7 @@ export function readBack(ledger: Ledger, facts: Facts, config: Config, places: P
     const watch = waiting[0]?.watch
     if (watch === undefined) continue
     // The exit line is the task's own only when the read names the task (its id has no dot; a file name has one).
-    const status = watch.keys.some(k => !k.includes('.') && keyIn(text, k)) ? exit : null
+    const status = watch.keys.some(k => isTaskKey(k) && keyIn(text, k)) ? exit : null
     const again = classify(
       {
         tool: watch.tool,
@@ -913,6 +949,15 @@ export function readBack(ledger: Ledger, facts: Facts, config: Config, places: P
       Object.assign(entry, { background: false, ok: run.ok, masked: false, basis: run.basis, done: ledger.done })
       if (isShipKind(entry.kind) && entry.ok) ledger.ships[entry.kind] = entry
       changed.push(entry)
+      // A push's read-back that shows a test runner's summary shows the suite its pre-push hook ran, at the push's place
+      // (round 4). Only when the push command runs no tests itself, so the summary is the hook's.
+      if (entry.kind !== 'push' || ledger.entries.some(e => e.seq === seq && e.kind === 'tests')) continue
+      const fail = SUMMARY.tests.fail.test(output)
+      if (!fail && !SUMMARY.tests.pass.test(output)) continue
+      const tests: Entry = { ...entry, kind: 'tests', ok: !fail, masked: false, basis: 'output', background: false, done: ledger.done }
+      delete tests.watch
+      ledger.entries.push(tests)
+      changed.push(tests)
     }
   }
   return changed

@@ -44,6 +44,9 @@ const PATTERNS: readonly Pattern[] = [
 const HEDGE = /\b(?:not|never|no|nothing|none|neither|nor|nobody|don't|doesn't|didn't|won't|isn't|aren't|wasn't|weren't|haven't|hasn't|if|once|until|unless|when|whether|should|would|could|might|may|must|will|make|makes|making|ensure|ensures|verify|check|confirm|expect|expects|expected|need|needs|want|wait|before|get|getting|keep|so\s+that|to\s+see|what|how)\b/i
 // A word here, in the same clause after the match, negates it: "I've pushed nothing yet".
 const NEG_AFTER = /\b(?:yet|nothing|not)\b/i
+// After "merged": "into" a thing that is no branch. A branch is main, master, develop, trunk, a base, release or upstream
+// branch, an inline-code name (`CODE`) or a slashed name (feat/x).
+const FIGURATIVE_INTO = /^\W*into\s+(?!(?:the\s+|its\s+|their\s+)?(?:main|master|develop|dev|trunk|base|branch|release|origin|upstream|CODE)\b)(?![\w.-]+\/)[a-z]/i
 // Anywhere in the sentence: a description of how a test behaves under a mutation, not a claim that the suite passes (review C9).
 // "against that mutation" too (Task 7: a real sentence saying a negative test passes against a mutation).
 const UNCLAIM = /\b(?:even\s+without|identically|(?:against|under)\s+(?:(?:the|a|each|every|that|this|these|those)\s+)?mutations?|with\s+(?:\S+\s+){0,3}removed)\b/i
@@ -110,6 +113,8 @@ export function findClaims(text: string): Claim[] {
       // too, so "branch review runs before anything is pushed" is not a claim (Task 7).
       if (pattern.gap === true && HEDGE.test(match[0])) continue
       if (NEG_AFTER.test(clauseAfter(sentence, match.index + match[0].length))) continue
+      // "Merged into the pipeline", "merged into the tracker": merged into something that is not a branch is not git (round 4).
+      if (pattern.op === 'merge' && FIGURATIVE_INTO.test(clauseAfter(sentence, match.index + match[0].length))) continue
       const hash = fnv1a(`${pattern.family}|${pattern.op ?? ''}|${normalize(sentence)}`)
       if (found.has(hash)) continue
       const phrase = match[0].replace(/\s+/g, ' ').trim().slice(0, 60)
