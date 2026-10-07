@@ -50,7 +50,7 @@ for (const [name, viewport] of [['narrow', NARROW], ['main screen', MAIN_SCREEN]
     await decide($)
     await decide($, { ...SAMPLE, question: 'Again?' })
     expect(w.opens).toEqual([])
-    expect(w.toasts).toEqual(['Bridge: decision #1 queued · /bridge to answer', 'Bridge: decision #2 queued · /bridge to answer'])
+    expect(w.toasts).toEqual(['Bridge: decision #1 queued \u00b7 /bridge to answer', 'Bridge: decision #2 queued \u00b7 /bridge to answer'])
   })
 }
 

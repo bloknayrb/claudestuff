@@ -5,7 +5,8 @@ import type { BridgeSession, DecideInput } from '../types'
 import { addDecision, idForUse, pending } from './book'
 import { denialFor, INPUT_SCHEMA, isSubagentCall, receipt, SUBAGENT_DENIAL, TOOL_DESCRIPTION, TOOL_NAME, validateDecide } from './decide'
 import { freshSession, normalize } from './session'
-import { bandTree, PANE_ID, PANE_TITLE } from './ui'
+import { ARM_DELAY_MS, bandTree, PANE_ID, paneTree, PANE_TITLE } from './ui'
+import type { CardActions } from './ui'
 
 // A new decision opens the pane unasked only from this width, as the spec says; the engine's own
 // floor is 110 for a pane id the person has opened before, so the mod checks 144 itself too.
@@ -108,10 +109,116 @@ async function surfaceDecision($: EngineInterface, id: number): Promise<void> {
     }
     await $.ui.close({ id: PANE_ID })
   }
-  $.ui.toast(`Bridge: decision #${id} queued · /bridge to answer`)
+  $.ui.toast(`Bridge: decision #${id} queued \u00b7 /bridge to answer`)
+}
+
+// The key pause after an answer is a debounce. A press that lands while it runs is taken for a held
+// key's repeat: it does nothing but push the end of the pause out, so a held key never answers the next
+// card until it has been let go for ARM_DELAY_MS. Each pause has its own deadline and its timer clears
+// only that one, so an earlier answer's timer cannot lift a later pause early.
+function startKeysPause($: EngineInterface, until: number): void {
+  $.clock.after(ARM_DELAY_MS, () => void guard($, 'keys', resumeKeys($, until)))
+}
+
+async function resumeKeys($: EngineInterface, until: number): Promise<void> {
+  await transact($, s => (s.view.keysPausedUntil === until ? { session: { ...s, view: { ...s.view, keysPausedUntil: null } }, out: null } : { session: s, out: null }))
+}
+
+// True when the press was swallowed (and the pause restarted).
+async function isDebounced($: EngineInterface): Promise<boolean> {
+  const until = (await $.clock.now()) + ARM_DELAY_MS
+  const isPaused = await transact($, s => (s.view.keysPausedUntil === null ? { session: s, out: false } : { session: { ...s, view: { ...s.view, keysPausedUntil: until } }, out: true }))
+  if (isPaused) startKeysPause($, until)
+  return isPaused
+}
+
+// Takes the session a transact just wrote (never a re-read in the same dispatch). The plugin's own close
+// runs none of its own ui.close hook, so the flag is cleared here, before the close.
+async function closePaneIfDone($: EngineInterface, s: BridgeSession): Promise<void> {
+  if (pending(s.book).length > 0 || !s.view.isPaneUp) return
+  await transact($, cur => ({ session: { ...cur, view: { ...cur.view, isPaneUp: false, otherFor: null } }, out: null }))
+  await $.ui.close({ id: PANE_ID })
+}
+
+async function toggleOther($: EngineInterface, id: number): Promise<void> {
+  const isOpening = await transact($, s => {
+    const otherFor = s.view.otherFor === id ? null : id
+    return { session: { ...s, view: { ...s.view, otherFor } }, out: otherFor === id }
+  })
+  if (!isOpening) return
+  // autoFocus only applies when the site takes the keyboard; a pane already holding it keeps its ring
+  // on the Other button, so move it. A deny (the pane does not hold the keys) is fine: then the user
+  // clicks or tabs into the field, and the hotkeys are off meanwhile anyway.
+  const moved = await $.ui.focus({ requestId: PANE_ID, key: `other-text-${id}` })
+  if (moved.deny !== undefined) $.ui.log(`bridge: focus not moved: ${moved.deny}`, { to: 'debug' })
+}
+
+// Task 9 replaces these three with the delivering versions.
+async function pickOption(_$: EngineInterface, _id: number, _index: number): Promise<void> {}
+async function makeItSo(_$: EngineInterface, _id: number): Promise<void> {}
+async function sendOther(_$: EngineInterface, _id: number, _text: string): Promise<void> {}
+
+// Runs a card press unless the key pause swallows it. sendOther is not gated: it comes from the field's
+// Enter, which is not a hotkey, and only one card has a field.
+async function pressed($: EngineInterface, work: () => Promise<void>): Promise<void> {
+  if (await isDebounced($)) return
+  await work()
+}
+
+function cardActions($: EngineInterface): CardActions {
+  return {
+    pick: (id, index) => void guard($, 'pick', pressed($, () => pickOption($, id, index))),
+    makeItSo: id => void guard($, 'make it so', pressed($, () => makeItSo($, id))),
+    toggleOther: id => void guard($, 'other', pressed($, () => toggleOther($, id))),
+    sendOther: (id, text) => void guard($, 'other', sendOther($, id, text)),
+  }
 }
 
 export const register: Register = on => {
+  on('ui.render', { component: 'Pane', requestId: 'bridge' }, async ($, e, next) => {
+    try {
+      const s = await readSession($)
+      return paneTree($.ui.resolve(e), pending(s.book), s.view, e.surface !== 'mobile', cardActions($))
+    } catch (err) {
+      void fail($, 'pane', err)
+      return next(e)
+    }
+  })
+
+  on('command.run', { command: 'bridge' }, async ($, e, next) => {
+    try {
+      const count = pending((await readSession($)).book).length
+      if (count === 0) return { text: 'Bridge: no decisions pending.' }
+      const opened = await $.ui.open({ id: PANE_ID, title: PANE_TITLE, focus: true })
+      if (!opened.isPlaced) {
+        await $.ui.close({ id: PANE_ID })
+        return { text: `Bridge: the pane could not be placed (${opened.reason}).` }
+      }
+      // An explicit open: the keys are live at once.
+      await transact($, s => ({ session: { ...s, view: { ...s.view, isPaneUp: true, keysPausedUntil: null } }, out: null }))
+      return { text: `Bridge: ${count} pending. Keys answer the first card; ctrl+x tab gives the pane the keys if it lacks them.` }
+    } catch (err) {
+      await fail($, 'command', err)
+      return next(e)
+    }
+  }).catch(async ($, e, next) => {
+    if (next.error.kind !== 're-entry') await fail($, 'command', next.error.message ?? next.error.kind)
+    return { text: 'Bridge: the command failed; the debug log has the reason.' }
+  })
+
+  // A close by the person (the plugin's own closes set the flag themselves; see closePaneIfDone).
+  on('ui.close', { id: 'bridge' }, async ($, e, next) => {
+    try {
+      await transact($, s => ({ session: { ...s, view: { ...s.view, isPaneUp: false, otherFor: null } }, out: null }))
+    } catch (err) {
+      await fail($, 'ui.close', err)
+    }
+    return next(e)
+  }).catch(async ($, e, next) => {
+    if (next.error.kind !== 're-entry') await fail($, 'ui.close', next.error.message ?? next.error.kind)
+    return next(e)
+  })
+
   on('session.start', async ($, e, next) => {
     try {
       await $.tool.register({ name: TOOL_NAME, description: TOOL_DESCRIPTION, inputSchema: INPUT_SCHEMA })
