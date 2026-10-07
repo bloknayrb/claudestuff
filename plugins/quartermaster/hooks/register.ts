@@ -1,7 +1,23 @@
-import type { EngineInterface, Hook, Register } from 'claude-code'
+import type { AgentSpawnResult, EngineInterface, Hook, Register } from 'claude-code'
 import { atom, read, update } from 'claude-code'
-import type { QmDenial, QmHealth } from '../types'
+import type { QmDenial, QmGuard, QmHealth } from '../types'
 import { current, parseConfig, shapeOf } from './config'
+import { spawnHash, taskHash } from './hash'
+import type { Fired, SpawnView } from './rules'
+import {
+  DENIAL_TTL_MS,
+  MODEL_TEXT,
+  effectiveModel,
+  isHeavy,
+  isLive,
+  modelGuardFires,
+  settle,
+  sourceLabel,
+  sourceOf,
+  takeOne,
+  toastKey,
+  viewOf,
+} from './rules'
 
 // Every function that takes `$` lives in this file: the validator refuses `$` passed across an import
 // (00-shared, "Validator rules"). So do the atoms: read/update accept only an atom the scan can see made
@@ -76,6 +92,189 @@ async function noteFailure($: EngineInterface, where: string, error: unknown): P
   }
 }
 
+// ==== ledger ====
+
+export type Counter = { fires: number; reissued: number; changed: number }
+export type Counters = Record<QmGuard, Counter>
+export type Outcome = 'denied' | 'reissued' | 'changed' | 'toast'
+export type Fire = { ts: number; guard: QmGuard; input_hash: string; outcome: Outcome }
+
+export const RING_MAX = 200
+
+let chain: Promise<unknown> = Promise.resolve()
+
+/**
+ * Runs $.store read-modify-writes one at a time. $.store has no append or compare-and-set, and
+ * parallel Agent calls run their spawn hooks concurrently, so unserialized writes lose increments.
+ * Never call serial() from inside work passed to serial(): it would wait on itself.
+ */
+function serial<T>(work: () => Promise<T>): Promise<T> {
+  const run = chain.then(work, work)
+  chain = run.catch(() => undefined)
+  return run
+}
+
+function counter(raw: Partial<Counter> | undefined): Counter {
+  return { fires: raw?.fires ?? 0, reissued: raw?.reissued ?? 0, changed: raw?.changed ?? 0 }
+}
+
+async function readCounters($: EngineInterface): Promise<Counters> {
+  const raw = (await $.store.get('counters')) as Partial<Record<QmGuard, Partial<Counter>>> | undefined
+  return { model: counter(raw?.model), heavy: counter(raw?.heavy) }
+}
+
+async function readRing($: EngineInterface): Promise<Fire[]> {
+  const raw = await $.store.get('ring')
+  return Array.isArray(raw) ? (raw as Fire[]) : []
+}
+
+/** Bumps each guard's counter for the outcome (a toast bumps none, D4) and appends to the 200-entry ring. */
+function recordFires($: EngineInterface, guards: readonly QmGuard[], hash: string, outcome: Outcome): Promise<void> {
+  return serial(async () => {
+    const ts = await $.clock.now()
+    const counters = await readCounters($)
+    const ring = await readRing($)
+    for (const guard of guards) {
+      if (outcome === 'denied') counters[guard].fires += 1
+      if (outcome === 'reissued') counters[guard].reissued += 1
+      if (outcome === 'changed') counters[guard].changed += 1
+      ring.push({ ts, guard, input_hash: hash, outcome })
+    }
+    if (outcome !== 'toast') await $.store.set('counters', counters)
+    await $.store.set('ring', ring.slice(-RING_MAX))
+  })
+}
+
+// ==== guards ====
+
+type SpawnEvent = Parameters<Hook<'agent.spawn'>>[1]
+type SpawnNext = Parameters<Hook<'agent.spawn'>>[2]
+
+export const DENIALS_MAX = 50
+export const SPAWN_MODELS_MAX = 200
+export const SOURCE_TOASTS_MAX = 200
+
+async function judge(_$: EngineInterface, view: SpawnView, label: string): Promise<Fired> {
+  const cfg = current.cfg
+  const fired: Fired = { guards: [], denyTexts: [], toastTexts: [], windowKey: null }
+  if (modelGuardFires(view, cfg)) {
+    fired.guards.push('model')
+    fired.denyTexts.push(MODEL_TEXT)
+    fired.toastTexts.push(`Quartermaster: ${label} spawned ${view.subagentType} with no model set.`)
+  }
+  // Task 5 adds the heavy-model guard here.
+  return fired
+}
+
+async function safeRecord($: EngineInterface, guards: readonly QmGuard[], hash: string, outcome: Outcome): Promise<void> {
+  if (guards.length === 0) return
+  try {
+    await recordFires($, guards, hash, outcome)
+  } catch (error) {
+    // The verdict stands whatever the ledger does (Review Focus 2).
+    await noteFailure($, 'fire ledger', error)
+  }
+}
+
+function trimRecord(map: Record<string, string>, max: number): Record<string, string> {
+  const entries = Object.entries(map)
+  return entries.length <= max ? map : Object.fromEntries(entries.slice(-max))
+}
+
+/** Lets the spawn start and remembers which model it got, for the tally (D11). */
+async function admit($: EngineInterface, e: SpawnEvent, next: SpawnNext): Promise<AgentSpawnResult> {
+  const started = await next(e)
+  const { agentId, model } = started
+  if (agentId !== undefined && model !== undefined) {
+    await update($, spawnModels, map => trimRecord({ ...map, [agentId]: model }, SPAWN_MODELS_MAX))
+  }
+  return started
+}
+
+/**
+ * Toast keys this module instance has claimed. A key is checked and added with no await between, so
+ * parallel spawns can't both claim it (Review Focus 6). Module memory is lost on a hot reload, so the
+ * claim is then persisted to $.state, which a reloaded module checks.
+ */
+const claimed = new Set<string>()
+
+async function claimToast($: EngineInterface, key: string): Promise<boolean> {
+  if (claimed.has(key)) return false
+  claimed.add(key)
+  let fresh = false
+  await update($, sourceToasts, list => {
+    fresh = !list.includes(key)
+    return fresh ? [...list, key].slice(-SOURCE_TOASTS_MAX) : list
+  })
+  return fresh
+}
+
+/** A workflow's or another plugin's spawn can't re-issue: it always starts, and its guards toast instead (D4). */
+async function toastOnly(
+  $: EngineInterface,
+  e: SpawnEvent,
+  next: SpawnNext,
+  view: SpawnView,
+  source: string,
+  fired: Fired,
+  hash: string,
+): Promise<AgentSpawnResult> {
+  await update($, sourceSpawns, map => ({ ...map, [source]: (map[source] ?? 0) + 1 }))
+  const shown: QmGuard[] = []
+  const texts: string[] = []
+  for (const [i, guard] of fired.guards.entries()) {
+    if (await claimToast($, toastKey(guard, source, view.subagentType, fired.windowKey))) {
+      shown.push(guard)
+      texts.push(fired.toastTexts[i] ?? '')
+    }
+  }
+  if (texts.length > 0) {
+    $.ui.toast(texts.join(' '))
+    // Only a toast actually shown takes a ring row, so suppressed repeats can't push real denials out.
+    await safeRecord($, shown, hash, 'toast')
+  }
+  return admit($, e, next)
+}
+
+/** Removes and returns one live pending denial that `match` picks; decided inside update, so parallel calls can't share one. */
+async function takeDenial($: EngineInterface, match: (d: QmDenial) => boolean): Promise<QmDenial | undefined> {
+  let taken: QmDenial | undefined
+  await update($, denied, list => {
+    const result = takeOne(list, match)
+    taken = result.taken
+    return result.rest
+  })
+  return taken
+}
+
+export const onSpawn: Hook<'agent.spawn'> = async ($, e, next) => {
+  const view = viewOf(e)
+  const hash = spawnHash(view)
+  const source = sourceOf(e.workflow !== undefined, next.origin.plugin)
+  const fired = await judge($, view, source === null ? 'the model' : sourceLabel(source))
+  if (source !== null) return toastOnly($, e, next, view, source, fired, hash)
+
+  const now = await $.clock.now()
+  // The soft-deny contract: an unchanged re-issue runs, whatever the guards say now. One denial, one re-issue.
+  const same = await takeDenial($, d => d.hash === hash && isLive(d, view.loop, now))
+  if (same !== undefined) {
+    await safeRecord($, same.guards, hash, 'reissued')
+    return admit($, e, next)
+  }
+
+  const task = taskHash(view)
+  const earlier = await takeDenial($, d => d.task === task && isLive(d, view.loop, now))
+  const { changed, deny } =
+    earlier === undefined ? { changed: [] as QmGuard[], deny: fired.guards } : settle(earlier.guards, fired.guards, view)
+  if (earlier !== undefined) await safeRecord($, changed, earlier.hash, 'changed')
+  if (deny.length === 0) return admit($, e, next)
+
+  const entry: QmDenial = { hash, task, loop: view.loop, guards: deny, ts: now }
+  await update($, denied, list => [...list.filter(d => now - d.ts <= DENIAL_TTL_MS), entry].slice(-DENIALS_MAX))
+  await safeRecord($, deny, hash, 'denied')
+  return { deny: deny.map(g => fired.denyTexts[fired.guards.indexOf(g)] ?? '').join('\n') }
+}
+
 // ==== lifecycle ====
 
 export const onSessionStart: Hook<'session.start'> = async ($, e, next) => {
@@ -93,6 +292,11 @@ export const register: Register = (on, options) => {
 
   on('session.start', onSessionStart).catch(async ($, e, next) => {
     await noteFailure($, 'session.start', next.error)
+    return next(e)
+  })
+  // Fail open: a broken guard lets the spawn through (next.called replays, never re-runs).
+  on('agent.spawn', onSpawn).catch(async ($, e, next) => {
+    await noteFailure($, 'agent.spawn', next.error)
     return next(e)
   })
 }
