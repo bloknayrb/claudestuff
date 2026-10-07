@@ -1,7 +1,30 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { classify, commandsOf, configOf, DEFAULT_BUILD_COMMANDS, DEFAULT_TEST_COMMANDS, factsOf, isCodeMutation, listOption } from '../hooks/evidence'
+import { findClaims } from '../hooks/claims'
+import {
+  asOfNow,
+  assess,
+  classify,
+  closeTurn,
+  commandsOf,
+  configOf,
+  DEFAULT_BUILD_COMMANDS,
+  DEFAULT_TEST_COMMANDS,
+  emptyLedger,
+  factsOf,
+  hhmm,
+  isCodeMutation,
+  judge,
+  LINE_CAP,
+  listOption,
+  markBacked,
+  noteClaims,
+  noteText,
+  record,
+  restoreLedger,
+} from '../hooks/evidence'
 import type { Segment } from '../hooks/evidence'
+import type { Ledger } from '../types'
 
 const CONFIG = configOf(DEFAULT_TEST_COMMANDS, DEFAULT_BUILD_COMMANDS)
 const HOME = 'C:\\Users\\tester'
@@ -331,5 +354,284 @@ describe('options', () => {
     expect(listOption('', ['z'])).toEqual(['z'])
     expect(listOption(undefined, ['z'])).toEqual(['z'])
     expect(listOption([1, 'a'], ['z'])).toEqual(['a'])
+  })
+})
+
+const MIN = 60_000
+const claimOf = (text: string) => findClaims(text)[0]!
+
+/** Records one finished call at time seq * MIN. */
+function at(ledger: Ledger, seq: number, input: Record<string, unknown>, ran: object = OK, agentId: string | null = null): void {
+  const facts = factsOf(input, ran)
+  ledger.seq = Math.max(ledger.seq, seq)
+  record(ledger, facts, classify(facts, CONFIG, PLACES), seq, seq * MIN, agentId)
+}
+
+const editAt = (ledger: Ledger, seq: number, path = 'C:/work/a.ts') => at(ledger, seq, { tool: 'Edit', file_path: path })
+const lineFor = (text: string, ledger: Ledger) => assess([claimOf(text)], ledger, 99 * MIN, hhmm).lines
+
+describe('judging tests and build claims', () => {
+  test('no run and no edit', () => {
+    expect(lineFor('All tests pass.', emptyLedger())).toEqual(['Claim Ledger: "All tests pass" has no test run this session.'])
+  })
+
+  test('no run after the last edit names the edit time', () => {
+    const ledger = emptyLedger()
+    editAt(ledger, 3)
+    expect(lineFor('All tests pass.', ledger)).toEqual([`Claim Ledger: "All tests pass" has no test run after the last edit (${hhmm(3 * MIN)}).`])
+  })
+
+  test('a run after the edit backs it; a run before it does not', () => {
+    const before = emptyLedger()
+    at(before, 1, sh('pytest'))
+    editAt(before, 2)
+    expect(judge('tests', before).status).toBe('none')
+
+    const after = emptyLedger()
+    editAt(after, 1)
+    at(after, 2, sh('pytest'))
+    expect(judge('tests', after).status).toBe('backed')
+  })
+
+  test('a .md, memory or scratch write after the run does not void it', () => {
+    const ledger = emptyLedger()
+    editAt(ledger, 1)
+    at(ledger, 2, sh('pytest'))
+    editAt(ledger, 3, 'C:/work/README.md')
+    editAt(ledger, 4, 'C:\\Users\\tester\\.claude\\rules\\x.txt')
+    editAt(ledger, 5, 'C:/Users/tester/AppData/Local/Temp/claude/s/scratchpad/msg.txt')
+    expect(judge('tests', ledger).status).toBe('backed')
+  })
+
+  test('a commit-message or PR-body file is taken back out when git or gh reads it (brief, second round)', () => {
+    const ledger = emptyLedger()
+    editAt(ledger, 1)
+    at(ledger, 2, sh('pytest'))
+    editAt(ledger, 3, 'C:/work/commit-msg.txt')
+    expect(judge('tests', ledger).status).toBe('none')
+    at(ledger, 4, sh('git commit -F commit-msg.txt'))
+    expect(ledger.lastMutation?.path).toBe('c:/work/a.ts')
+    expect(judge('tests', ledger).status).toBe('backed')
+    editAt(ledger, 5, 'C:/work/pr-body.txt')
+    at(ledger, 6, sh('gh pr create --title x --body-file C:/work/pr-body.txt'))
+    expect(judge('tests', ledger).status).toBe('backed')
+  })
+
+  test('an edit in a sibling worktree voids the run (brief, second round)', () => {
+    const ledger = emptyLedger()
+    editAt(ledger, 1)
+    at(ledger, 2, sh('pytest'))
+    editAt(ledger, 3, 'C:/work-2144/src/a.ts')
+    expect(judge('tests', ledger).status).toBe('none')
+  })
+
+  test("a PowerShell run and a subagent's run both count", () => {
+    const ps1 = emptyLedger()
+    editAt(ps1, 1)
+    at(ps1, 2, ps('claude plugin test .'))
+    expect(judge('tests', ps1).status).toBe('backed')
+
+    const sub = emptyLedger()
+    editAt(sub, 1)
+    at(sub, 2, sh('uv run pytest'), OK, 'agent-1')
+    expect(judge('tests', sub).status).toBe('backed')
+  })
+
+  test('a Bash command that edits then runs: its own run counts after its edit', () => {
+    const ledger = emptyLedger()
+    at(ledger, 1, sh("sed -i 's/a/b/' src/a.ts && pytest"), { result: { stdout: '3 passed', interrupted: false, bashEditDiff: { files: [], moreFiles: 0, changedFiles: ['C:/work/src/a.ts'] } } })
+    expect(ledger.lastMutation?.seq).toBe(0.5)
+    expect(judge('tests', ledger).status).toBe('backed')
+  })
+
+  test('background is no evidence; a later foreground pass is', () => {
+    const ledger = emptyLedger()
+    editAt(ledger, 1)
+    at(ledger, 2, { ...sh('pytest'), run_in_background: true })
+    expect(judge('tests', ledger).status).toBe('background')
+    expect(lineFor('Tests pass.', ledger)).toEqual(['Claim Ledger: "Tests pass" rests on a background run, which shows only that it started.'])
+    at(ledger, 3, sh('pytest'))
+    expect(judge('tests', ledger).status).toBe('backed')
+  })
+
+  test('weak is named with the command', () => {
+    const ledger = emptyLedger()
+    editAt(ledger, 1)
+    at(ledger, 2, sh('pytest -q 2>&1 | tail -5'))
+    expect(lineFor('Tests pass.', ledger)).toEqual(['Claim Ledger: "Tests pass" rests on `pytest -q 2>&1 | tail -5`, whose exit code is masked and whose output shows no result.'])
+  })
+
+  test('the latest foreground run decides: pass then fail is failed', () => {
+    const ledger = emptyLedger()
+    editAt(ledger, 1)
+    at(ledger, 2, sh('pytest'))
+    at(ledger, 3, sh('pytest -k slow'), { ...OK, isError: true })
+    expect(judge('tests', ledger).status).toBe('failed')
+    expect(lineFor('Tests pass.', ledger)).toEqual([`Claim Ledger: "Tests pass": the last test run after the last edit failed (${hhmm(3 * MIN)}).`])
+  })
+
+  test('build claims read build runs', () => {
+    const ledger = emptyLedger()
+    editAt(ledger, 1)
+    at(ledger, 2, sh('npx tsc -p .'))
+    expect(judge('build', ledger).status).toBe('backed')
+    expect(judge('tests', ledger).status).toBe('none')
+  })
+})
+
+describe('judging shipped claims (decision 6: this turn only)', () => {
+  test('a strong op this turn backs it, edits notwithstanding; a later failed op does not unship it', () => {
+    const ledger = emptyLedger()
+    at(ledger, 1, sh('git commit -m x'))
+    editAt(ledger, 2)
+    at(ledger, 3, sh('git commit -m y'), { ...OK, isError: true })
+    expect(judge('commit', ledger).status).toBe('backed')
+  })
+
+  test('an op before the turn began does not back it', () => {
+    const ledger = emptyLedger()
+    at(ledger, 1, sh('git push origin main'))
+    closeTurn(ledger, 't1', 1, hhmm)
+    expect(judge('push', ledger).status).toBe('none')
+    expect(lineFor("I've pushed the branch.", ledger)).toEqual([`Claim Ledger: "I've pushed" has no git push this turn.`])
+  })
+
+  test('only a failed op is failed; none is none', () => {
+    const ledger = emptyLedger()
+    at(ledger, 1, sh('git push'), { ...OK, isError: true })
+    expect(lineFor("I've pushed the branch.", ledger)).toEqual([`Claim Ledger: "I've pushed": the git push this turn failed.`])
+    expect(lineFor('I merged it.', emptyLedger())).toEqual(['Claim Ledger: "I merged" has no merge this turn.'])
+  })
+
+  test('the latest strong op is kept past the entry cap (review C11)', () => {
+    const ledger = emptyLedger()
+    at(ledger, 1, sh('git commit -m x'))
+    for (let i = 2; i <= 130; i += 1) at(ledger, i, sh('pytest'))
+    expect(ledger.entries.some(e => e.kind === 'commit')).toBe(false)
+    expect(judge('commit', ledger).status).toBe('backed')
+  })
+})
+
+describe('turns, flag once, caps', () => {
+  test('a claim backed when its step began is not flagged at turn end, even after a later edit', () => {
+    const ledger = emptyLedger()
+    editAt(ledger, 1)
+    at(ledger, 2, sh('pytest'))
+    noteClaims(ledger, 't1', findClaims('All tests pass. Now the parser.'), asOfNow(ledger))
+    editAt(ledger, 3)
+    expect(closeTurn(ledger, 't1', 99 * MIN, hhmm).lines).toEqual([])
+  })
+
+  test('step-time judgement uses the evidence as it stood when the step began (decision 5)', () => {
+    const ledger = emptyLedger()
+    editAt(ledger, 1)
+    at(ledger, 2, sh('pytest'))
+    const asOf = asOfNow(ledger)
+    editAt(ledger, 3) // the step's own Edit, landing while the response streams
+    noteClaims(ledger, 't1', findClaims('All tests pass.'), asOf)
+    expect(closeTurn(ledger, 't1', 99 * MIN, hhmm).lines).toEqual([])
+
+    const late = emptyLedger()
+    editAt(late, 1)
+    at(late, 2, sh('pytest'))
+    editAt(late, 3)
+    noteClaims(late, 't1', findClaims('All tests pass.'), asOfNow(late))
+    expect(closeTurn(late, 't1', 99 * MIN, hhmm).lines).toHaveLength(1)
+  })
+
+  test('a run that completes after the step began is not in its snapshot', () => {
+    const ledger = emptyLedger()
+    editAt(ledger, 1)
+    ledger.seq = 2 // the run entered before the step began...
+    const asOf = asOfNow(ledger)
+    at(ledger, 2, sh('pytest')) // ...and completed after
+    expect(judge('tests', ledger, asOf).status).toBe('none')
+    expect(judge('tests', ledger).status).toBe('backed')
+  })
+
+  test('a claim unbacked at its step but backed by turn end is not flagged', () => {
+    const ledger = emptyLedger()
+    editAt(ledger, 1)
+    noteClaims(ledger, 't1', findClaims('Tests pass.'), asOfNow(ledger))
+    at(ledger, 2, sh('pytest'))
+    const out = closeTurn(ledger, 't1', 99 * MIN, hhmm)
+    expect(out.lines).toEqual([])
+    expect(out.backed.map(c => c.phrase)).toEqual(['Tests pass'])
+  })
+
+  test('candidates from another turn are dropped', () => {
+    const ledger = emptyLedger()
+    noteClaims(ledger, 't1', findClaims('Tests pass.'), asOfNow(ledger))
+    expect(closeTurn(ledger, 't2', 99 * MIN, hhmm).lines).toEqual([])
+  })
+
+  test('each claim is flagged once per session; a repeat is counted, not shown', () => {
+    const ledger = emptyLedger()
+    const first = assess([claimOf('Tests pass.')], ledger, 1, hhmm)
+    const second = assess([claimOf('Tests pass.')], ledger, 2, hhmm)
+    expect(first.lines).toHaveLength(1)
+    expect(second.lines).toEqual([])
+    expect(second.repeated).toHaveLength(1)
+  })
+
+  test('a restated claim over the same evidence is counted, not shown (decision 11)', () => {
+    const out = assess([claimOf('Tests pass.'), claimOf('The test suite passes.')], emptyLedger(), 1, hhmm)
+    expect(out.lines).toHaveLength(1)
+    expect(out.repeated.map(c => c.phrase)).toEqual(['test suite passes'])
+  })
+
+  test('at most five lines, then a count (Review Focus 6)', () => {
+    const texts = ['Tests pass.', 'It builds cleanly.', 'I committed it.', "I've pushed it.", 'I merged it.', 'Opened PR #4.']
+    const out = assess(texts.map(claimOf), emptyLedger(), 1, hhmm)
+    expect(out.lines).toHaveLength(LINE_CAP + 1)
+    expect(out.lines.at(-1)).toBe('Claim Ledger: 1 more unbacked claim this turn.')
+    expect(out.fired).toHaveLength(6)
+  })
+
+  test('markBacked moves a flag once a strong run lands with no edit between', () => {
+    const ledger = emptyLedger()
+    editAt(ledger, 1)
+    assess([claimOf('Tests pass.')], ledger, 1, hhmm)
+    expect(ledger.pending).toHaveLength(1)
+    at(ledger, 2, sh('pytest'))
+    markBacked(ledger)
+    expect(ledger.pending).toEqual([])
+    expect(ledger.backed.map(p => p.family)).toEqual(['tests'])
+  })
+
+  test('a run after a further edit is not later backing (review C7); shipped flags never wait', () => {
+    const ledger = emptyLedger()
+    editAt(ledger, 1)
+    assess([claimOf('Tests pass.'), claimOf("I've pushed it.")], ledger, 1, hhmm)
+    expect(ledger.pending.map(p => p.family)).toEqual(['tests'])
+    editAt(ledger, 2)
+    at(ledger, 3, sh('pytest'))
+    markBacked(ledger)
+    expect(ledger.pending).toEqual([])
+    expect(ledger.backed).toEqual([])
+  })
+
+  test('entries are capped', () => {
+    const ledger = emptyLedger()
+    for (let i = 1; i <= 130; i += 1) at(ledger, i, sh('pytest'))
+    expect(ledger.entries).toHaveLength(100)
+    expect(ledger.calls).toBe(130)
+  })
+})
+
+describe('note and restore', () => {
+  test('the note is framed as a plugin note', () => {
+    expect(noteText(['a', 'b'])).toBe("[claim-ledger plugin note, not the user's words. No reply needed.]\na\nb")
+  })
+
+  test('a reload restores the saved ledger and fills fields an older build lacked', () => {
+    const restored = restoreLedger(emptyLedger(), { seq: 4, calls: 4, entries: [] })
+    expect(restored.seq).toBe(4)
+    expect(restored.ships).toEqual({})
+    expect(restored.turnFrom).toBe(0)
+    const held = emptyLedger()
+    held.calls = 2
+    expect(restoreLedger(held, { seq: 9, calls: 9 })).toBe(held)
+    expect(restoreLedger(emptyLedger(), undefined).calls).toBe(0)
   })
 })

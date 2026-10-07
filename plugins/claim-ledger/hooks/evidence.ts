@@ -1,4 +1,4 @@
-import type { Basis, Kind, ShipOp } from '../types'
+import type { AsOf, Basis, Claim, Entry, Family, Kind, Ledger, Pending, ShipOp, Status } from '../types'
 
 // Pure: no `$`, no runtime imports. scripts/precision.mjs imports this file under Node.
 
@@ -676,4 +676,233 @@ export function classify(facts: Facts, config: Config, places: Places): Classifi
     runs,
     messageFiles: messageFilesOf(segments, plains, places.home),
   }
+}
+
+// ---- Recording and judging ----
+
+export const ENTRY_CAP = 100
+export const EDIT_CAP = 20
+export const FLAGGED_CAP = 500
+export const PENDING_CAP = 50
+export const STEP_CAP = 50
+export const LINE_CAP = 5
+export const NOTE_HEAD = "[claim-ledger plugin note, not the user's words. No reply needed.]"
+
+export type Verdict = { status: Status; entry: Entry | null }
+export type Fired = { claim: Claim; status: Status }
+export type Assessment = { lines: string[]; fired: Fired[]; repeated: Claim[]; backed: Claim[] }
+
+const NOUN: Record<Kind, string> = {
+  tests: 'test run',
+  build: 'build or type-check',
+  commit: 'git commit',
+  push: 'git push',
+  merge: 'merge',
+  'pr-create': 'gh pr create',
+}
+
+const isShipKind = (kind: Kind): kind is ShipOp => kind !== 'tests' && kind !== 'build'
+
+export function emptyLedger(): Ledger {
+  return { seq: 0, done: 0, calls: 0, turnFrom: 0, lastMutation: null, edits: [], entries: [], ships: {}, flagged: [], flaggedEvidence: [], pending: [], backed: [], steps: null }
+}
+
+/** A hot reload: the saved ledger, unless this module already holds one. Fields an older build lacked are filled. */
+export function restoreLedger(current: Ledger, saved: unknown): Ledger {
+  if (current.calls > 0 || typeof saved !== 'object' || saved === null || Array.isArray(saved)) return current
+  // A copy, because values read from the host may be frozen.
+  const restored: Ledger = { ...emptyLedger(), ...(JSON.parse(JSON.stringify(saved)) as Partial<Ledger>) }
+  // A ledger saved before `edits` existed keeps its last edit.
+  if (restored.edits.length === 0 && restored.lastMutation !== null) restored.edits = [restored.lastMutation]
+  return restored
+}
+
+/** Whether a message file named to git or gh (normalized; relative as written) is this edit's file. */
+function sameFile(edited: string, named: string): boolean {
+  return edited === named || (!/^(?:[a-z]:\/|\/)/.test(named) && edited.endsWith(`/${named}`))
+}
+
+export function shortOf(command: string): string {
+  const one = command.replace(/\s+/g, ' ').trim()
+  return one.length > 80 ? `${one.slice(0, 77)}...` : one
+}
+
+/** Records one finished call; returns the entries it added. `seq` and `ts` are from hook entry, so order is call order. */
+export function record(ledger: Ledger, facts: Facts, classified: Classified, seq: number, ts: number, agentId: string | null): Entry[] {
+  ledger.calls += 1
+  ledger.done += 1
+  // A command's own edits are taken to come before its own runs (`sed -i ... && pytest`).
+  const editSeq = classified.runs.length > 0 ? seq - 0.5 : seq
+  for (const path of classified.mutations) {
+    ledger.edits = ledger.edits.filter(m => m.path !== path)
+    ledger.edits.push({ seq: editSeq, ts, path })
+  }
+  // Calls complete out of order: keep the edits in call order, one per path, newest last.
+  ledger.edits.sort((a, b) => a.seq - b.seq)
+  if (ledger.edits.length > EDIT_CAP) ledger.edits.splice(0, ledger.edits.length - EDIT_CAP)
+  // A file git or gh read a commit message or PR body from was a message, not code: its write no longer counts.
+  if (classified.messageFiles.length > 0) ledger.edits = ledger.edits.filter(m => !classified.messageFiles.some(f => sameFile(m.path, f)))
+  const newest = ledger.edits[ledger.edits.length - 1]
+  ledger.lastMutation = newest === undefined ? null : { ...newest }
+  const added: Entry[] = []
+  for (const run of classified.runs) {
+    const entry: Entry = {
+      seq,
+      done: ledger.done,
+      ts,
+      agentId,
+      toolUseId: facts.toolUseId,
+      tool: facts.tool,
+      short: shortOf(facts.command ?? ''),
+      kind: run.kind,
+      ok: run.ok,
+      background: facts.background,
+      masked: run.masked,
+      basis: run.basis,
+    }
+    ledger.entries.push(entry)
+    added.push(entry)
+    if (isShipKind(run.kind) && entry.ok && !entry.masked && !entry.background) ledger.ships[run.kind] = entry
+  }
+  if (ledger.entries.length > ENTRY_CAP) ledger.entries.splice(0, ledger.entries.length - ENTRY_CAP)
+  return added
+}
+
+export function kindOf(c: { family: Family; op: ShipOp | null }): Kind {
+  return c.family === 'shipped' ? (c.op ?? 'commit') : c.family
+}
+
+/** What the ledger knows now, for judging a step's claims later (decision 5). */
+export function asOfNow(ledger: Ledger): AsOf {
+  return { done: ledger.done, lastMutation: ledger.lastMutation === null ? null : { ...ledger.lastMutation } }
+}
+
+/** How a claim of this kind stands: now, or as of a snapshot. Shipped reads this turn's ops; tests and build read runs after the last edit. */
+export function judge(kind: Kind, ledger: Ledger, asOf: AsOf | null = null): Verdict {
+  const isShip = isShipKind(kind)
+  const edit = asOf === null ? ledger.lastMutation : asOf.lastMutation
+  const since = isShip ? ledger.turnFrom : (edit?.seq ?? 0)
+  const kept = isShip ? ledger.ships[kind] : undefined
+  const pool = kept !== undefined && !ledger.entries.some(e => e.seq === kept.seq && e.kind === kept.kind) ? [...ledger.entries, kept] : ledger.entries
+  const runs = pool.filter(e => e.kind === kind && e.seq > since && (asOf === null || e.done <= asOf.done)).sort((a, b) => a.seq - b.seq)
+  if (runs.length === 0) return { status: 'none', entry: null }
+  const foreground = runs.filter(e => !e.background)
+  if (foreground.length === 0) return { status: 'background', entry: runs[runs.length - 1] ?? null }
+  if (isShip) {
+    const strong = foreground.find(e => e.ok && !e.masked)
+    if (strong !== undefined) return { status: 'backed', entry: strong }
+    const weak = foreground.find(e => e.ok)
+    return weak !== undefined ? { status: 'masked', entry: weak } : { status: 'failed', entry: foreground[foreground.length - 1] ?? null }
+  }
+  const last = foreground[foreground.length - 1] ?? null
+  if (last === null || !last.ok) return { status: 'failed', entry: last }
+  return { status: last.masked ? 'masked' : 'backed', entry: last }
+}
+
+/** The evidence a verdict rests on: a restated claim over the same evidence is not flagged again (decision 11). */
+function evidenceKey(kind: Kind, verdict: Verdict, ledger: Ledger): string {
+  const scope = isShipKind(kind) ? ledger.turnFrom : (ledger.lastMutation?.seq ?? 0)
+  return `${kind}|${verdict.status}|${verdict.entry?.seq ?? 0}|${scope}`
+}
+
+/** Local HH:MM. The kit's sandbox uses the local zone (U5); D2 checks the live session. */
+export function hhmm(ms: number): string {
+  const d = new Date(ms)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+export function lineOf(claim: Claim, verdict: Verdict, ledger: Ledger, clock: (ms: number) => string): string {
+  const said = `Claim Ledger: "${claim.phrase.replace(/"/g, "'")}"`
+  const noun = NOUN[kindOf(claim)]
+  const isShip = claim.family === 'shipped'
+  const edit = ledger.lastMutation
+  switch (verdict.status) {
+    case 'none':
+      if (isShip) return `${said} has no ${noun} this turn.`
+      return edit === null ? `${said} has no ${noun} this session.` : `${said} has no ${noun} after the last edit (${clock(edit.ts)}).`
+    case 'failed':
+      if (isShip) return `${said}: the ${noun} this turn failed.`
+      return `${said}: the last ${noun}${edit === null ? ' this session' : ' after the last edit'} failed (${clock(verdict.entry?.ts ?? 0)}).`
+    case 'masked':
+      return `${said} rests on \`${verdict.entry?.short ?? ''}\`, whose exit code is masked and whose output shows no result.`
+    case 'background':
+      return `${said} rests on a background run, which shows only that it started.`
+    default:
+      return ''
+  }
+}
+
+/** The text appended for the model: a frame, then the lines. */
+export function noteText(lines: readonly string[]): string {
+  return `${NOTE_HEAD}\n${lines.join('\n')}`
+}
+
+/** Step-time judgement against the snapshot taken when the step began: a claim backed then is settled for this turn. */
+export function noteClaims(ledger: Ledger, turnId: string, claims: readonly Claim[], asOf: AsOf): void {
+  const steps: NonNullable<Ledger['steps']> = ledger.steps !== null && ledger.steps.turnId === turnId ? ledger.steps : { turnId, candidates: [], backed: [] }
+  for (const claim of claims) {
+    if (steps.backed.some(c => c.hash === claim.hash) || steps.candidates.some(c => c.hash === claim.hash)) continue
+    if (judge(kindOf(claim), ledger, asOf).status === 'backed') {
+      if (steps.backed.length < STEP_CAP) steps.backed.push(claim)
+    } else if (steps.candidates.length < STEP_CAP) {
+      steps.candidates.push(claim)
+    }
+  }
+  ledger.steps = steps
+}
+
+/** Turn-end judgement: flags each candidate still unbacked, once per sentence and per evidence state. Mutates the ledger's flag lists. */
+export function assess(candidates: readonly Claim[], ledger: Ledger, now: number, clock: (ms: number) => string): Assessment {
+  const out: Assessment = { lines: [], fired: [], repeated: [], backed: [] }
+  for (const claim of candidates) {
+    const kind = kindOf(claim)
+    const verdict = judge(kind, ledger)
+    if (verdict.status === 'backed') {
+      out.backed.push(claim)
+      continue
+    }
+    const key = evidenceKey(kind, verdict, ledger)
+    if (ledger.flagged.includes(claim.hash) || ledger.flaggedEvidence.includes(key)) {
+      out.repeated.push(claim)
+      continue
+    }
+    ledger.flagged.push(claim.hash)
+    ledger.flaggedEvidence.push(key)
+    // Only a tests or build flag can be later backed (decision 12).
+    if (claim.family !== 'shipped') ledger.pending.push({ hash: claim.hash, family: claim.family, op: claim.op, ts: now, edit: ledger.lastMutation?.seq ?? 0 })
+    out.fired.push({ claim, status: verdict.status })
+    out.lines.push(lineOf(claim, verdict, ledger, clock))
+  }
+  if (ledger.flagged.length > FLAGGED_CAP) ledger.flagged.splice(0, ledger.flagged.length - FLAGGED_CAP)
+  if (ledger.flaggedEvidence.length > FLAGGED_CAP) ledger.flaggedEvidence.splice(0, ledger.flaggedEvidence.length - FLAGGED_CAP)
+  if (ledger.pending.length > PENDING_CAP) ledger.pending.splice(0, ledger.pending.length - PENDING_CAP)
+  if (out.lines.length > LINE_CAP) {
+    const extra = out.lines.length - LINE_CAP
+    out.lines = [...out.lines.slice(0, LINE_CAP), `Claim Ledger: ${extra} more unbacked claim${extra === 1 ? '' : 's'} this turn.`]
+  }
+  return out
+}
+
+/** Ends an answered main turn: judges its candidates, then opens the next turn's shipped window (decision 6). */
+export function closeTurn(ledger: Ledger, turnId: string, now: number, clock: (ms: number) => string): Assessment {
+  const steps = ledger.steps !== null && ledger.steps.turnId === turnId ? ledger.steps : null
+  ledger.steps = null
+  const out = assess(steps?.candidates ?? [], ledger, now, clock)
+  out.backed.unshift(...(steps?.backed ?? []))
+  ledger.turnFrom = ledger.seq
+  return out
+}
+
+/** Moves each pending flag that a strong run now backs, with no code edit since the flag, into `backed` (decision 12). */
+export function markBacked(ledger: Ledger): void {
+  const edit = ledger.lastMutation?.seq ?? 0
+  const still: Pending[] = []
+  for (const pending of ledger.pending) {
+    // An edit since the flag: a later run can no longer show the claim was true when made. Drop it. (A message file
+    // taken back out can move the last edit earlier; that is no new edit.)
+    if (edit > pending.edit) continue
+    if (judge(kindOf(pending), ledger).status === 'backed') ledger.backed.push(pending)
+    else still.push(pending)
+  }
+  ledger.pending = still
 }
