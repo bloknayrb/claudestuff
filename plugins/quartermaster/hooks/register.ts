@@ -370,6 +370,24 @@ export const onSpawn: Hook<'agent.spawn'> = async ($, e, next) => {
   return { deny: deny.map(g => fired.denyTexts[fired.guards.indexOf(g)] ?? '').join('\n') }
 }
 
+// ==== tally ====
+
+/** Counts distinct subagents by agentId: a resumed subagent's later turns carry the same id. */
+export const onTurnComplete: Hook<'turn.complete'> = async ($, e, next) => {
+  const ended = await next(e)
+  const agentId = e.agentId
+  if (agentId === undefined) {
+    // A main-loop turn: re-arms the heartbeat under a new session id after /clear (D5).
+    await ensureHeartbeat($)
+    return ended
+  }
+  if ((await read($, agents))[agentId] !== undefined) return ended
+  const model = (await read($, spawnModels))[agentId] ?? e.usage?.model ?? 'unknown'
+  await update($, agents, map => (map[agentId] === undefined ? { ...map, [agentId]: model } : map))
+  await refreshStatus($)
+  return ended
+}
+
 // ==== lifecycle ====
 
 export const onSessionStart: Hook<'session.start'> = async ($, e, next) => {
@@ -407,6 +425,10 @@ export const register: Register = (on, options) => {
   })
   on('session.measure', onMeasure).catch(async ($, e, next) => {
     await noteFailure($, 'session.measure', next.error)
+    return next(e)
+  })
+  on('turn.complete', onTurnComplete).catch(async ($, e, next) => {
+    await noteFailure($, 'turn.complete', next.error)
     return next(e)
   })
 }
