@@ -5,7 +5,7 @@ export type ToolResult = { result: unknown; text: string; isError?: true }
 
 /** The world beneath the plugin: what it wrote, logged and submitted, and how tools and steps answer. */
 export type World = {
-  /** Every fs.write, its path normalized to forward slashes (the host hands fs hooks native paths, 00-shared). */
+  /** Every fs.write, its path normalized to forward slashes (the host hands fs hooks native paths). */
   writes: { path: string; text: string }[]
   logs: string[]
   submitted: string[]
@@ -21,15 +21,15 @@ export type World = {
   sleep: ((ms: number) => Promise<void>) | null
   /** The responses the next turn.step calls return, in order. */
   steps: { answer: string; tools: number }[]
-  /** Runs inside the next turn.step, after the step began and before its response resolves (decision 5). */
+  /** Runs inside the next turn.step, after the step began and before its response resolves. */
   midStep: (() => Promise<unknown>) | null
 }
 
 export const SESSION = { cwd: 'C:/work', surface: 'terminal' as const, isInteractive: true }
-export const HOME_ENV = { USERPROFILE: 'C:\\Users\\tester' }
-export const healthOf = (id: string) => `C:/Users/tester/.claude/state/mods/claim-ledger/${id}.json`
+export const HOME_ENV = { USERPROFILE: 'C:\\Home\\tester' }
+export const healthOf = (id: string) => `C:/Home/tester/.claude/state/mods/claim-ledger/${id}.json`
 export const HEALTH = healthOf('sess-1')
-export const TRAIL = 'C:/Users/tester/.claude/state/mods/claim-ledger/trail/sess-1.jsonl'
+export const TRAIL = 'C:/Home/tester/.claude/state/mods/claim-ledger/trail/sess-1.jsonl'
 
 export const OK: ToolResult = { result: { stdout: '', stderr: '', interrupted: false }, text: 'ok' }
 export const FAILED: ToolResult = { result: 'Exit code 1', text: 'Exit code 1', isError: true }
@@ -126,7 +126,7 @@ export const bash = (command: string, extra: Record<string, unknown> = {}) => ({
 export const pwsh = (command: string, extra: Record<string, unknown> = {}) => ({ tool: 'PowerShell', command, ...extra }) as never
 export const edit = (path: string) => ({ tool: 'Edit', file_path: path, old_string: 'a', new_string: 'b' }) as never
 
-/** Runs /claim-ledger as Bryan typing it. */
+/** Runs /claim-ledger as the user typing it. */
 export function runCommand($: Engine): Promise<{ text?: string }> {
   return $.command.run({ command: 'claim-ledger', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 120 } } as never) as Promise<{ text?: string }>
 }

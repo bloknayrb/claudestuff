@@ -29,7 +29,7 @@ import type { Ledger } from '../types'
 import { REAL_GIT_RESULT } from './fixtures/real'
 
 const CONFIG = configOf(DEFAULT_TEST_COMMANDS, DEFAULT_BUILD_COMMANDS)
-const HOME = 'C:\\Users\\tester'
+const HOME = 'C:\\Home\\tester'
 const PLACES = { home: HOME, root: 'C:\\work', temp: 'D:\\tmp' }
 const OK = { result: { stdout: '', stderr: '', interrupted: false }, text: 'ok' }
 const said = (text: string) => ({ result: { stdout: text, stderr: '', interrupted: false }, text })
@@ -43,7 +43,7 @@ const mutations = (tool: string, path: string, ran: object = OK) =>
   classify(factsOf({ tool, file_path: path, notebook_path: path }, ran), CONFIG, PLACES).mutations
 const show = (segments: Segment[]) => segments.map(s => [s.words.map(w => w.text).join(' '), s.op])
 
-describe('parsing a command line (decision 8)', () => {
+describe('parsing a command line', () => {
   test('segments and operators', () => {
     expect(show(commandsOf('cd x && pytest -q | tail -5; echo done'))).toEqual([
       ['cd x', '&&'],
@@ -89,7 +89,7 @@ describe('runners', () => {
     expect(kinds(sh('cat jest.config.js'))).toEqual([])
   })
 
-  test('runner words inside quotes, heredocs and payloads are not runs (review C4)', () => {
+  test('runner words inside quotes, heredocs and payloads are not runs', () => {
     expect(kinds(sh(`gh pr create --title x --body "$(cat <<'EOF'\nRan vitest and pytest\nEOF\n)"`))).toEqual(['pr-create'])
     expect(kinds(sh("grep -n 'Run: uv run pytest' plan.md"))).toEqual([])
     expect(kinds(sh(`printf '%s' "npm test passed"`))).toEqual([])
@@ -105,7 +105,7 @@ describe('runners', () => {
     }
   })
 
-  test('masking is judged by output (decision 7)', () => {
+  test('masking is judged by output', () => {
     // A later pipe member, `||`, `;`, a later line or `&& echo` hides the runner's own exit status...
     expect(kinds(sh('pytest 2>&1 | tail -20'))).toEqual(['tests~masked'])
     expect(kinds(sh('npm test || true'))).toEqual(['tests~masked'])
@@ -123,11 +123,11 @@ describe('runners', () => {
     expect(kinds(sh('pytest'), { ...OK, isError: true, text: 'Exit code 1' })).toEqual(['tests~failed'])
     expect(kinds(sh('pytest && git status'), { isError: true, result: 'Exit code 128', text: 'Exit code 128\nfatal: not a git repository' })).toEqual(['tests~masked'])
     expect(kinds(sh('pytest && git status'))).toEqual(['tests'])
-    // A pipe inside a later `&&` command leaves the earlier run's failure visible (review C8).
+    // A pipe inside a later `&&` command leaves the earlier run's failure visible.
     expect(kinds(sh('npx tsc -p . && npm run typecheck:tests 2>&1 | tail -3'))).toEqual(['build', 'build~masked'])
   })
 
-  test('an echo of the run\'s own exit status is its status (brief, second round)', () => {
+  test('an echo of the run\'s own exit status is its status', () => {
     // `$?` straight after an unpiped run; `${PIPESTATUS[n]}` or `$LASTEXITCODE` after a pipe.
     const tct = 'npm run typecheck:tests > "$TEMP/tct.log" 2>&1; echo "tct=$?"'
     expect(kinds(sh(tct), said('tct=0'))).toEqual(['build'])
@@ -148,7 +148,7 @@ describe('runners', () => {
     expect(kinds(sh('pytest && git status; echo "rc=$?"'), said('rc=0'))).toEqual(['tests~masked'])
   })
 
-  test('echoes that print lines of one shape are read in order (third round)', () => {
+  test('echoes that print lines of one shape are read in order', () => {
     expect(kinds(sh('npx tsc -p a.json > a.log 2>&1; echo "exit=$?"; npx tsc -p b.json > b.log 2>&1; echo "exit=$?"'), said('exit=0\nexit=2'))).toEqual(['build', 'build~failed'])
     const two = 'pytest tests/a -q > a.log 2>&1; echo "rc=$?"; pytest tests/b -q > b.log 2>&1; echo "rc=$?"'
     expect(kinds(sh(two), said('rc=0\nrc=1'))).toEqual(['tests', 'tests~failed'])
@@ -157,20 +157,20 @@ describe('runners', () => {
     expect(kinds(sh('for f in a b; do pytest $f > $f.log 2>&1; echo "rc=$?"; done'), said('rc=0\nrc=1'))).toEqual(['tests~masked'])
   })
 
-  test('svelte-check and tsup summaries (brief, second round)', () => {
+  test('svelte-check and tsup summaries', () => {
     expect(kinds(sh('npm run typecheck 2>&1 | tail -1'), said('1790964360196 COMPLETED 1945 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS'))).toEqual(['build'])
     expect(kinds(sh('npm run typecheck 2>&1 | tail -1'), said('1790964360196 COMPLETED 1945 FILES 3 ERRORS 0 WARNINGS 2 FILES_WITH_PROBLEMS'))).toEqual(['build~failed'])
     expect(kinds(sh('npm run build 2>&1 | tail -2'), said('ESM Build success in 5178ms'))).toEqual(['build'])
     expect(kinds(sh('npm run build > build.log 2>&1; echo "exit=$?"; tail -2 build.log'), said('exit=0\nESM Build success in 5178ms'))).toEqual(['build'])
   })
 
-  test('a later `&&` member that showed its own pass summary proves the run before it (brief, second round)', () => {
+  test('a later `&&` member that showed its own pass summary proves the run before it', () => {
     const chain = 'npx biome check src 2>&1 | tail -1 && npx tsc -p t.json --noEmit && npx vitest run tests/docs 2>&1 | grep -E "Test Files|Tests "; git log --oneline -1'
     expect(kinds(sh(chain), said(' Test Files  50 passed (50)\n      Tests  359 passed (359)\nabc1234 x'))).toEqual(['build', 'tests'])
     expect(kinds(sh(chain), said('      Tests  2 failed | 357 passed (359)\nabc1234 x'))).toEqual(['build~masked', 'tests~failed'])
   })
 
-  test('a later `&&` member proves only a run that ends its pipeline (third round)', () => {
+  test('a later `&&` member proves only a run that ends its pipeline', () => {
     // `(exit 2) | tail -1 && echo ran` prints `ran`: the chain went on because tail exited 0, whatever the build did.
     expect(kinds(sh('npm run build 2>&1 | tail -1 && npx vitest run 2>&1 | tail -3'), said('    at async build (file:///x/node_modules/vite/dist/node/chunks/dep.js:1:1)\n      Tests  3 passed (3)'))).toEqual(['build~masked', 'tests'])
     expect(kinds(sh('npm run typecheck:tests 2>&1 | tail -2 && npx vitest run tests/x 2>&1 | grep -E "Tests "'), said("    Type 'string' is not assignable to type 'number'.\n      Tests  12 passed (12)"))).toEqual(['build~masked', 'tests'])
@@ -181,7 +181,7 @@ describe('runners', () => {
     expect(kinds(sh('pytest; git pull -q && echo same'), said('same'))).toEqual(['tests~masked'])
   })
 
-  test('a piped tsc with no `error TS` line passed: tsc prints nothing on success (brief, second round)', () => {
+  test('a piped tsc with no `error TS` line passed: tsc prints nothing on success', () => {
     expect(kinds(sh('npx tsc --noEmit 2>&1 | head -5'), said(''))).toEqual(['build'])
     expect(kinds(sh('npx tsc --noEmit -p x 2>&1 | head -30; echo done'), said('done'))).toEqual(['build'])
     expect(kinds(sh('npx tsc --noEmit 2>&1 | tail -5'), said('src/a.ts(3,1): error TS2304: x'))).toEqual(['build~failed'])
@@ -191,7 +191,7 @@ describe('runners', () => {
     expect(kinds(sh('npm run build 2>&1 | tail -5'), said(''))).toEqual(['build~masked'])
   })
 
-  test('tsc passes by silence only if it ran and every line it printed was kept (third round)', () => {
+  test('tsc passes by silence only if it ran and every line it printed was kept', () => {
     // A last-N tail can hold only a diagnostic's indented elaboration lines.
     expect(kinds(sh('npx tsc --noEmit -p tsconfig.json 2>&1 | tail -1'), said("    Type 'string' is not assignable to type 'number'."))).toEqual(['build~masked'])
     expect(kinds(sh('npx tsc --noEmit 2>&1 | tail -3'), said("  Types of property 'a' are incompatible.\n    Type 'string' is not assignable to type 'number'.\n      Type 'q' is not assignable to type 'r'."))).toEqual(['build~masked'])
@@ -224,26 +224,26 @@ describe('git and gh', () => {
     expect(kinds(sh('git log --grep commit'))).toEqual([])
   })
 
-  test('ops inside a loop or conditional, or behind a quoted assignment (re-review)', () => {
+  test('ops inside a loop or conditional, or behind a quoted assignment', () => {
     expect(kinds(sh('for n in 4 8; do gh pr merge $n --merge; done'), said('✓ Merged pull request #4 (x)\n✓ Merged pull request #8 (y)'))).toEqual(['merge'])
     expect(kinds(sh('GH_TOKEN="$(cat t)" gh pr merge 3 --squash'))).toEqual(['merge'])
     expect(kinds(sh('if git diff --quiet; then git push; fi'))).toEqual(['push~masked'])
   })
 
-  test('each op is confirmed by its own output only (brief, second round)', () => {
+  test('each op is confirmed by its own output only', () => {
     // A quiet commit's sha line from a later `git log` in the same command, heredoc message included.
     expect(kinds(sh(`git add a && git commit -q -F - <<'EOF'\nfix: x\nEOF\ngit log --oneline -1`), said('925b391 fix: x'))).toEqual(['commit'])
     expect(kinds(sh('git commit -q -m "fix: x" 2>&1 | tail -1; git log --oneline -1'), said('925b391 fix: x'))).toEqual(['commit'])
     expect(kinds(sh('git commit -q -m "fix: x" 2>&1 | tail -1'), said('925b391 fix: x'))).toEqual(['commit~masked'])
     expect(kinds(sh('gh pr merge 6 --merge 2>&1 | tail -2; gh pr view 6 --json state -q .state'), said('MERGED'))).toEqual(['merge'])
     expect(kinds(sh('gh pr merge 6 --squash 2>&1 | tail -3; gh pr view 6 --json state,mergeCommit'), said('{"mergeCommit":{"oid":"e021d03"},"state":"MERGED"}'))).toEqual(['merge'])
-    // MERGED never confirms the commit; since Task 7 the view is merge evidence of its own.
+    // MERGED never confirms the commit; the view is merge evidence of its own.
     expect(kinds(sh('git commit -m x 2>&1 | tail -1; gh pr view 6 --json state -q .state'), said('MERGED'))).toEqual(['commit~masked', 'merge'])
     expect(kinds(sh('git push -u origin feat/x 2>&1 | tail -1'), said("branch 'feat/x' set up to track 'origin/feat/x'."))).toEqual(['push'])
     expect(kinds(sh('git push origin v1.2.0 2>&1 | tail -1'), said(' * [new tag]         v1.2.0 -> v1.2.0'))).toEqual(['push'])
   })
 
-  test('a quiet commit\'s sha line is its own only when it carries the subject, or nothing moved in between (third round)', () => {
+  test('a quiet commit\'s sha line is its own only when it carries the subject, or nothing moved in between', () => {
     // A sha line from a `git log` on another branch is that branch's commit.
     expect(kinds(sh('git commit -q -m "fix: y" 2>&1 | tail -1; git checkout -q main && git log --oneline -1'), said('abc1234 docs: an older commit on main'))).toEqual(['commit~masked'])
     expect(kinds(sh('git commit -q -m "fix: y" 2>&1 | tail -1; git log --oneline -1'), said('abc1234 (HEAD -> fix/y) fix: y'))).toEqual(['commit'])
@@ -254,17 +254,17 @@ describe('git and gh', () => {
     expect(kinds(sh('git commit -q -F msg.txt; git -C ../other log --oneline -1'), said('abc1234 other repo'))).toEqual(['commit~masked'])
   })
 
-  test('the files git or gh read a message or body from (brief, second round)', () => {
+  test('the files git or gh read a message or body from', () => {
     const files = (command: string) => classify(factsOf(sh(command), OK), CONFIG, PLACES).messageFiles
     expect(files('git commit -F "C:\\work\\msg.txt"')).toEqual(['c:/work/msg.txt'])
-    expect(files('git -C ../tandem-2 commit --file=./msg.txt')).toEqual(['msg.txt'])
+    expect(files('git -C ../repo-2 commit --file=./msg.txt')).toEqual(['msg.txt'])
     expect(files('gh pr create --title x --body-file body.txt')).toEqual(['body.txt'])
     expect(files(`git commit -F - <<'EOF'\nx\nEOF`)).toEqual([])
     expect(files('git grep -F needle.ts')).toEqual([])
     expect(files('gh api -F state=closed repos/x')).toEqual([])
   })
 
-  test('merge-base, merge-tree and an aborted merge are not merges (review C4)', () => {
+  test('merge-base, merge-tree and an aborted merge are not merges', () => {
     expect(kinds(sh('git merge-base origin/main HEAD'))).toEqual([])
     expect(kinds(sh('base=$(git merge-base origin/master HEAD)'))).toEqual([])
     expect(kinds(sh('git merge-tree a b'))).toEqual([])
@@ -282,7 +282,7 @@ describe('git and gh', () => {
   })
 })
 
-describe('merge and commit evidence found in real transcripts (Task 7)', () => {
+describe('merge and commit evidence found in real transcripts', () => {
   test('a gh pr view in a call of its own shows a merge only when it printed MERGED', () => {
     expect(kinds(sh('gh pr view 6 --json state -q .state'), said('MERGED'))).toEqual(['merge'])
     expect(kinds(sh('gh pr view 6 --json state,mergedAt -q \'.state + " " + .mergedAt\''), said('MERGED 2026-01-02T03:04:05Z'))).toEqual(['merge'])
@@ -306,7 +306,7 @@ describe('merge and commit evidence found in real transcripts (Task 7)', () => {
   })
 })
 
-describe('a real gitOperation record (Task 7)', () => {
+describe('a real gitOperation record', () => {
   test('a commit is seen through gitOperation, even piped', () => {
     const runs = classify(factsOf(sh('git commit -F C:/tmp/msg.txt 2>&1 | tail -1'), { result: REAL_GIT_RESULT }), CONFIG, PLACES).runs
     expect(runs.map(r => [r.kind, r.basis])).toEqual([['commit', 'gitOperation']])
@@ -326,7 +326,7 @@ describe('facts', () => {
   })
 })
 
-describe('mutations (decision 9)', () => {
+describe('mutations', () => {
   test('a successful code edit is a mutation, keyed by its normalized path; .md and failed edits are not', () => {
     expect(mutations('Edit', 'C:\\work\\src\\a.ts')).toEqual(['c:/work/src/a.ts'])
     expect(mutations('Write', 'C:/work/notes/plan.md')).toEqual([])
@@ -336,19 +336,19 @@ describe('mutations (decision 9)', () => {
     expect(mutations('Edit', 'C:/work/a.ts', { deny: 'no' })).toEqual([])
   })
 
-  test('writes anywhere count, sibling worktrees included; scratch and temp writes do not (brief, second round; Review Focus 3)', () => {
+  test('writes anywhere count, sibling worktrees included; scratch and temp writes do not', () => {
     for (const path of [
-      'C:/Users/tester/AppData/Local/Temp/claude/x/scratchpad/fix-pr-body.py',
-      'C:\\Users\\tester\\AppData\\Local\\Temp\\commit-msg.txt',
+      'C:/Home/tester/tmp/claude/x/scratchpad/fix-pr-body.py',
+      'D:\\tmp\\commit-msg.txt',
       '/tmp/x.py',
       'D:\\tmp\\claude\\helper.py', // %TEMP% from the environment
     ]) {
       expect(isCodeMutation(path, PLACES), path).toBe(false)
     }
     for (const path of [
-      'C:/work-2144/src/a.ts', // a sibling worktree of the session root
+      'C:/work-feature/src/a.ts', // a sibling worktree of the session root
       'D:/other/repo/a.ts',
-      'C:/Users/tester/.claude/dev-mods/s1/claim-ledger/hooks/register.ts',
+      'C:/Home/tester/.claude/dev-mods/s1/claim-ledger/hooks/register.ts',
       'src/rel.ts',
       'C:/work/notes/msg.txt',
     ]) {
@@ -358,22 +358,22 @@ describe('mutations (decision 9)', () => {
     expect(isCodeMutation('src/rel.ts', { home: HOME, root: null, temp: null })).toBe(true)
   })
 
-  test('memory roots in every spelling, even when the session runs in ~/.claude (Review Focus 2)', () => {
-    const inClaude = { home: HOME, root: 'C:/Users/tester/.claude', temp: null }
+  test('memory roots in every spelling, even when the session runs in ~/.claude', () => {
+    const inClaude = { home: HOME, root: 'C:/Home/tester/.claude', temp: null }
     for (const path of [
-      'C:\\Users\\tester\\.claude\\memory\\state.json',
-      'c:/users/TESTER/.claude/rules/x.txt',
+      'C:\\Home\\tester\\.claude\\memory\\state.json',
+      'c:/home/TESTER/.claude/rules/x.txt',
       '~/.claude/memory/state.json',
-      '/c/Users/tester/.claude/projects/C--work/memory/facts.json',
+      '/c/Home/tester/.claude/projects/C--work/memory/facts.json',
     ]) {
       expect(isCodeMutation(path, inClaude), path).toBe(false)
     }
-    expect(isCodeMutation('C:/Users/tester/.claude/settings.json', inClaude)).toBe(true)
-    expect(isCodeMutation('C:/Users/tester/.claude/projects/C--work/abc.jsonl', inClaude)).toBe(true)
-    expect(isCodeMutation('C:/Users/tester/.claude/settings.json', PLACES)).toBe(true)
+    expect(isCodeMutation('C:/Home/tester/.claude/settings.json', inClaude)).toBe(true)
+    expect(isCodeMutation('C:/Home/tester/.claude/projects/C--work/abc.jsonl', inClaude)).toBe(true)
+    expect(isCodeMutation('C:/Home/tester/.claude/settings.json', PLACES)).toBe(true)
   })
 
-  test('Bash edits count when the result lists them, and are unseen otherwise (Review Focus 1)', () => {
+  test('Bash edits count when the result lists them, and are unseen otherwise', () => {
     const sed = sh("sed -i 's/a/b/' src/a.ts")
     expect(classify(factsOf(sed, OK), CONFIG, PLACES).mutations).toEqual([])
     const listed = { result: { stdout: '', interrupted: false, bashEditDiff: { files: [], moreFiles: 0, changedFiles: ['C:\\work\\src\\a.ts'] } } }
@@ -432,12 +432,12 @@ describe('judging tests and build claims', () => {
     editAt(ledger, 1)
     at(ledger, 2, sh('pytest'))
     editAt(ledger, 3, 'C:/work/README.md')
-    editAt(ledger, 4, 'C:\\Users\\tester\\.claude\\rules\\x.txt')
-    editAt(ledger, 5, 'C:/Users/tester/AppData/Local/Temp/claude/s/scratchpad/msg.txt')
+    editAt(ledger, 4, 'C:\\Home\\tester\\.claude\\rules\\x.txt')
+    editAt(ledger, 5, 'C:/Home/tester/tmp/claude/s/scratchpad/msg.txt')
     expect(judge('tests', ledger).status).toBe('backed')
   })
 
-  test('a commit-message or PR-body file is taken back out when git or gh reads it (brief, second round)', () => {
+  test('a commit-message or PR-body file is taken back out when git or gh reads it', () => {
     const ledger = emptyLedger()
     editAt(ledger, 1)
     at(ledger, 2, sh('pytest'))
@@ -451,11 +451,11 @@ describe('judging tests and build claims', () => {
     expect(judge('tests', ledger).status).toBe('backed')
   })
 
-  test('an edit in a sibling worktree voids the run (brief, second round)', () => {
+  test('an edit in a sibling worktree voids the run', () => {
     const ledger = emptyLedger()
     editAt(ledger, 1)
     at(ledger, 2, sh('pytest'))
-    editAt(ledger, 3, 'C:/work-2144/src/a.ts')
+    editAt(ledger, 3, 'C:/work-feature/src/a.ts')
     expect(judge('tests', ledger).status).toBe('none')
   })
 
@@ -513,7 +513,7 @@ describe('judging tests and build claims', () => {
   })
 })
 
-describe('judging shipped claims (decision 6: this turn only)', () => {
+describe('judging shipped claims', () => {
   test('a strong op this turn backs it, edits notwithstanding; a later failed op does not unship it', () => {
     const ledger = emptyLedger()
     at(ledger, 1, sh('git commit -m x'))
@@ -537,7 +537,7 @@ describe('judging shipped claims (decision 6: this turn only)', () => {
     expect(lineFor('I merged it.', emptyLedger())).toEqual(['Claim Ledger: "I merged" has no merge this turn.'])
   })
 
-  test('the latest strong op is kept past the entry cap (review C11)', () => {
+  test('the latest strong op is kept past the entry cap', () => {
     const ledger = emptyLedger()
     at(ledger, 1, sh('git commit -m x'))
     for (let i = 2; i <= 130; i += 1) at(ledger, i, sh('pytest'))
@@ -556,7 +556,7 @@ describe('turns, flag once, caps', () => {
     expect(closeTurn(ledger, 't1', 99 * MIN, hhmm).lines).toEqual([])
   })
 
-  test('step-time judgement uses the evidence as it stood when the step began (decision 5)', () => {
+  test('step-time judgement uses the evidence as it stood when the step began', () => {
     const ledger = emptyLedger()
     editAt(ledger, 1)
     at(ledger, 2, sh('pytest'))
@@ -608,13 +608,13 @@ describe('turns, flag once, caps', () => {
     expect(second.repeated).toHaveLength(1)
   })
 
-  test('a restated claim over the same evidence is counted, not shown (decision 11)', () => {
+  test('a restated claim over the same evidence is counted, not shown', () => {
     const out = assess([claimOf('Tests pass.'), claimOf('The test suite passes.')], emptyLedger(), 1, hhmm)
     expect(out.lines).toHaveLength(1)
     expect(out.repeated.map(c => c.phrase)).toEqual(['test suite passes'])
   })
 
-  test('at most five lines, then a count (Review Focus 6)', () => {
+  test('at most five lines, then a count', () => {
     const texts = ['Tests pass.', 'It builds cleanly.', 'I committed it.', "I've pushed it.", 'I merged it.', 'Opened PR #4.']
     const out = assess(texts.map(claimOf), emptyLedger(), 1, hhmm)
     expect(out.lines).toHaveLength(LINE_CAP + 1)
@@ -633,7 +633,7 @@ describe('turns, flag once, caps', () => {
     expect(ledger.backed.map(p => p.family)).toEqual(['tests'])
   })
 
-  test('a run after a further edit is not later backing (review C7); shipped flags never wait', () => {
+  test('a run after a further edit is not later backing; shipped flags never wait', () => {
     const ledger = emptyLedger()
     editAt(ledger, 1)
     assess([claimOf('Tests pass.'), claimOf("I've pushed it.")], ledger, 1, hhmm)
@@ -670,7 +670,7 @@ describe('note and restore', () => {
   })
 })
 
-describe('round 3: background runs read back, idf.py, state=MERGED, quiet commits', () => {
+describe('background runs read back, idf.py, state=MERGED, quiet commits', () => {
   /** Records one call, then lets it read back any background run; returns what the read-back changed. */
   const call = (ledger: Ledger, seq: number, input: Record<string, unknown>, ran: object = OK) => {
     const facts = factsOf(input, ran)
@@ -755,7 +755,7 @@ describe('round 3: background runs read back, idf.py, state=MERGED, quiet commit
   })
 })
 
-describe('round 4: full-path read-back keys, repeated status lines, pre-push tests', () => {
+describe('full-path read-back keys, repeated status lines, pre-push tests', () => {
   const call = (ledger: Ledger, seq: number, input: Record<string, unknown>, ran: object = OK) => {
     const facts = factsOf(input, ran)
     ledger.seq = Math.max(ledger.seq, seq)
@@ -797,5 +797,139 @@ describe('round 4: full-path read-back keys, repeated status lines, pre-push tes
     call(failed, 1, sh('git push > "$TEMP/p.log" 2>&1'), bg('b1'))
     call(failed, 2, sh('tail -4 "$TEMP/p.log"'), said(' Tests  1 failed | 30 passed (31)\nerror: failed to push some refs'))
     expect(judge('tests', failed).status).toBe('failed')
+  })
+})
+
+describe('runners are commands, not arguments; ops that do nothing', () => {
+  test('a runner word as an argument of another command is no run', () => {
+    for (const command of [
+      'npm install -D vitest',
+      'uv add --dev pytest',
+      'pnpm add -D vitest',
+      'npm i jest',
+      'npm ls vitest',
+      'npm uninstall jest',
+      'uv pip install pytest',
+      'git log --grep pytest',
+      'find . -name jest',
+      'npx tsc --init',
+      'mkdir -p tsc',
+      'ls tsc',
+    ]) {
+      expect(kinds(sh(command)), command).toEqual([])
+    }
+  })
+
+  test('a runner as the command word, or after a launcher, is a run', () => {
+    for (const [command, want] of [
+      ['pytest -q', ['tests']],
+      ['npx vitest run', ['tests']],
+      ['uv run --with pytest pytest -q', ['tests']],
+      ['python -m pytest', ['tests']],
+      ['pnpm exec vitest run', ['tests']],
+      ['npx -y -p typescript@5 tsc -p .', ['build']],
+      ['$out = idf.py -C firmware build 2>&1', ['build']],
+      ['npx vitest --help', []],
+      ['pytest -h', []],
+    ] as const) {
+      expect(kinds(sh(command)), command).toEqual(want)
+    }
+  })
+
+  test('help, dry runs and auto-merge are not ship ops', () => {
+    for (const command of ['git push --help', 'git push -n origin main', 'git commit --help', 'gh pr merge 5 --auto --squash']) {
+      expect(kinds(sh(command)), command).toEqual([])
+    }
+    // `git commit -n` is --no-verify: it still commits.
+    expect(kinds(sh('git commit -n -m x'))).toEqual(['commit'])
+    const auto = { result: { stdout: '', stderr: '', interrupted: false, gitOperation: { pr: { number: 5, action: 'auto-merge-enabled' } } }, text: '' }
+    expect(kinds(sh('gh pr merge 5 --squash'), auto)).toEqual([])
+  })
+
+  test('a shift inside quoted code is not a heredoc that swallows the next line', () => {
+    expect(kinds(sh('python3 -c "print(1<<n)" || true\npytest -q'))).toEqual(['tests'])
+  })
+
+  test('TAP failures fail a piped run; a line that merely starts with OK is no pass', () => {
+    expect(kinds(sh('npm test 2>&1 | tail -30'), said('ok 1 - adds\nnot ok 2 - subtracts\n# tests 2\n# pass 1\n# fail 1'))).toEqual(['tests~failed'])
+    expect(kinds(sh('npm test 2>&1 | tail -3'), said('OK, server stopped\nsomething else'))).toEqual(['tests~masked'])
+    expect(kinds(sh('npm test 2>&1 | tail -3'), said('Ran 4 tests in 0.1s\n\nOK'))).toEqual(['tests'])
+  })
+})
+
+describe('time stays bounded on adversarial inputs', () => {
+  const ms = (fn: () => unknown) => {
+    const t = performance.now()
+    fn()
+    return performance.now() - t
+  }
+  test('a many-variable status echo against long output lines', () => {
+    for (const [k, len] of [[4, 700], [5, 300], [8, 40]] as const) {
+      const vars = Array.from({ length: k }, (_, i) => `$V${i}`).join(' ')
+      expect(ms(() => kinds(sh(`npm test; echo "${vars} rc=$?"`), said('ab '.repeat(len)))), `${k} variables`).toBeLessThan(50)
+    }
+  })
+
+  test('many options before a word that is not the runner', () => {
+    const re = configOf(['npm test'], []).tests[0]
+    const plain = `npm ${Array.from({ length: 24 }, (_, i) => `--opt${i}`).join(' ')} install`
+    expect(ms(() => re?.test(plain))).toBeLessThan(50)
+  })
+
+  test('a command of 1,500 runs, each with a status echo, stays linear', () => {
+    const command = Array.from({ length: 1500 }, (_, i) => `pytest tests/t${i}.py; echo "exit=$?"`).join('\n')
+    const output = Array.from({ length: 1500 }, () => 'exit=0').join('\n')
+    // A wider budget than the regex probes: this one does real work per run (was 2.7 s quadratic).
+    expect(ms(() => kinds(sh(command), said(output)))).toBeLessThan(250)
+  })
+})
+
+describe('read-backs judge a run only from its own output', () => {
+  const call = (ledger: Ledger, seq: number, input: Record<string, unknown>, ran: object = OK) => {
+    const facts = factsOf(input, ran)
+    ledger.seq = Math.max(ledger.seq, seq)
+    record(ledger, facts, classify(facts, CONFIG, PLACES), seq, seq * MIN, null)
+    return readBack(ledger, facts, CONFIG, PLACES)
+  }
+  const bg = (id: string) => ({ result: { backgroundTaskId: id, stdout: '', stderr: '', interrupted: false }, text: `Command running in background with ID: ${id}.` })
+  const PUSH = 'git push > "$TEMP/p.log" 2>&1; echo "exit=$?" >> "$TEMP/p.log"'
+
+  test("a failed push credits no pre-push tests, though one stage's pass line is in view", () => {
+    const ledger = emptyLedger()
+    call(ledger, 1, sh(PUSH), bg('b1'))
+    call(ledger, 2, sh('tail -6 "$TEMP/p.log"'), said(' Test Files  12 passed (12)\nerror: could not compile the crate\nhusky - pre-push script failed (code 101)\nerror: failed to push some refs\nexit=1'))
+    expect(judge('push', ledger).status).toBe('failed')
+    expect(judge('tests', ledger).status).toBe('none')
+  })
+
+  test('a bare FAILED inside test titles is no failure summary', () => {
+    const ledger = emptyLedger()
+    call(ledger, 1, sh(PUSH), bg('b1'))
+    call(ledger, 2, sh('tail -6 "$TEMP/p.log"'), said('stderr | tests/m.test.ts > reports CONNECT_FAILED after retries\n Test Files  3 passed (3)\n   abc1234..def5678  feat/x -> feat/x\nexit=0'))
+    expect(judge('tests', ledger).status).toBe('backed')
+  })
+
+  test('a read that also prints another file, or runs git, judges nothing', () => {
+    const other = emptyLedger()
+    call(other, 1, sh(PUSH), bg('b1'))
+    expect(call(other, 2, sh('cat "$TEMP/npm-debug.log"; tail -3 "$TEMP/p.log"'), said('12 errors\nexit=0'))).toEqual([])
+    expect(judge('push', other).status).toBe('background')
+    const git = emptyLedger()
+    call(git, 1, sh(PUSH), bg('b1'))
+    expect(call(git, 2, sh('tail -3 "$TEMP/p.log"; git ls-remote origin feat/x'), said('exit=0\nabc1234\trefs/heads/feat/x'))).toEqual([])
+    // The task's own output and its log together are one source.
+    const both = emptyLedger()
+    call(both, 1, sh(PUSH), bg('b1'))
+    expect(call(both, 2, sh('cat "C:/t/tasks/b1.output"; tail -2 "$TEMP/p.log"'), said('exit=0\n[exited with code 0]')).length).toBe(1)
+  })
+
+  test("a looping command is judged only by the task's exit line", () => {
+    const LOOP = 'for s in a b c; do npx vitest run $s; echo "rc=$?"; done > "$TEMP/loop.log" 2>&1'
+    const ledger = emptyLedger()
+    call(ledger, 1, sh(LOOP), bg('b9'))
+    expect(call(ledger, 2, sh('tail -2 "$TEMP/loop.log"'), said(' Tests  4 passed (4)\nrc=0'))).toEqual([])
+    expect(judge('tests', ledger).status).toBe('background')
+    call(ledger, 3, sh('cat "C:/t/tasks/b9.output"'), said('rc=0\n[exited with code 1]'))
+    expect(judge('tests', ledger)).toMatchObject({ status: 'failed', entry: { basis: 'exit' } })
   })
 })

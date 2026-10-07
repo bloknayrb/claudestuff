@@ -36,7 +36,7 @@ export type Entry = {
   masked: boolean
   basis: Basis
   /**
-   * A background run's recipe for re-judging it when a later call reads its result back (round 3): the command, the
+   * A background run's recipe for re-judging it when a later call reads its result back: the command, the
    * names a reader would use (task id, basenames of files it wrote), and which run of its kind in the command it is.
    */
   watch?: Watch
@@ -47,7 +47,7 @@ export type Watch = { tool: string; command: string; keys: string[]; n: number }
 /** A successful code edit. `path` is normalized (pathKey). A Bash command's own edits sit half a step before its runs. */
 export type Mutation = { seq: number; ts: number; path: string }
 
-/** What the ledger knew when a step began (decision 5). */
+/** What the ledger knew when a step began. */
 export type AsOf = { done: number; lastMutation: Mutation | null }
 
 /** A flagged tests or build claim not yet backed. `edit`: the last edit's seq when it was flagged. */
@@ -58,7 +58,7 @@ export type Ledger = {
   seq: number
   done: number
   calls: number
-  /** The shipped window opens after this seq: the seq when the previous answered main turn completed (decision 6). */
+  /** The shipped window opens after this seq: the seq when the previous answered main turn completed. */
   turnFrom: number
   /** The newest of `edits`; null when there are none. */
   lastMutation: Mutation | null

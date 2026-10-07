@@ -38,7 +38,7 @@ const hits = []
 const hitIds = new Set()
 const flags = []
 const misses = []
-// The recall gaps the re-review named: a present-state ship verb with a subject the detector does not take, "N test files pass".
+// Known recall gaps: a present-state ship verb with a subject the detector does not take, "N test files pass".
 const FORMS = /\b(?:is|are)\s+(?:now\s+|all\s+)?(?:committed|pushed|merged)\b|\btest\s+files?\s+pass/i
 const forms = []
 
@@ -47,7 +47,7 @@ const sentenceWith = (text, phrase) => (text.split(SPLIT).find(s => s.includes(p
 const resultText = b => (typeof b.content === 'string' ? b.content : Array.isArray(b.content) ? b.content.map(x => (x && typeof x.text === 'string' ? x.text : '')).join('\n') : '')
 const setOf = file => (parseInt(fnv1a(file).slice(-1), 16) % 2 === 0 ? 'tune' : 'holdout')
 
-// A turn starts at a prompt row: not isMeta, not a tool result, and not a background task's notification (review C6).
+// A turn starts at a prompt row: not isMeta, not a tool result, and not a background task's notification.
 function isPrompt(row) {
   if (row.type !== 'user' || row.isMeta === true) return false
   if (row.origin?.kind === 'task-notification') return false
@@ -122,7 +122,7 @@ async function replay(file) {
       if (misses.length < 400) misses.push({ set, where, turn, sentence: s.slice(0, 240) })
       if (FORMS.test(s) && forms.length < 100) forms.push({ set, where, turn, sentence: s.slice(0, 240) })
     }
-    // Step-time judgement against the ledger as it stood when the step began (decision 5).
+    // Step-time judgement against the ledger as it stood when the step began.
     noteClaims(ledger, turnId, claims, asOf)
   }
 
@@ -139,7 +139,7 @@ async function replay(file) {
       const shipped = f.claim.family === 'shipped'
       const from = shipped ? turnFrom : (edit?.seq ?? 0)
       // The last CALL_CAP calls of the window; a shipped flag also keeps every call that ran a ship op, however early,
-      // since the flag rests on the turn's ops (third round).
+      // since the flag rests on the turn's ops.
       const window = calls.filter(c => c.seq > from)
       const recent = new Set(window.slice(-CALL_CAP))
       const shown = window.filter(c => recent.has(c) || (shipped && c.ship))
@@ -187,7 +187,7 @@ async function replay(file) {
       const facts = factsOf(call.input, { isError: b.is_error === true, result: row.toolUseResult, text: output })
       const classified = classify(facts, CONFIG, { home: HOME, root, temp: TEMP })
       record(ledger, facts, classified, call.seq, call.ts, call.agentId)
-      // A background run whose result this call read back is judged now (round 3), as register.ts does.
+      // A background run whose result this call read back is judged now, as register.ts does.
       totals.readBacks += readBack(ledger, facts, CONFIG, { home: HOME, root, temp: TEMP }).length
       if (['Bash', 'PowerShell', 'Agent', 'Task'].includes(call.input.tool)) {
         const what = call.input.command ?? `${call.input.description ?? ''} :: ${String(call.input.prompt ?? '').slice(0, 300)}`

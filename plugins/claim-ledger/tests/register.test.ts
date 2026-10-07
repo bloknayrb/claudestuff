@@ -20,7 +20,7 @@ async function boot($: Engine, on: On, now = 10 * MIN) {
 
 type TrailEvent = Record<string, unknown> & { ev: string }
 
-/** The trail as last written: the seam for what the kit cannot observe (decision 10). */
+/** The trail as last written: the seam for what the kit cannot observe. */
 function trailOf(world: World): TrailEvent[] {
   const last = [...world.writes].reverse().find(w => w.path === TRAIL)
   return (last?.text ?? '').split('\n').filter(l => l.trim() !== '').map(l => JSON.parse(l) as TrailEvent)
@@ -87,7 +87,7 @@ describe('evidence', () => {
     expect((await complete($, 'All tests passing.', { turnId: 't3' })).text).toContain('whose exit code is masked')
   })
 
-  test('a piped run whose output shows a pass summary backs the claim; one showing failures is failed (decision 7)', async ($, on) => {
+  test('a piped run whose output shows a pass summary backs the claim; one showing failures is failed', async ($, on) => {
     const { world } = await boot($, on)
     world.toolResult = () => ({ result: { stdout: '12 passed in 0.4s', stderr: '', interrupted: false }, text: '12 passed in 0.4s' })
     await $.tool.call(edit(CODE))
@@ -120,7 +120,7 @@ describe('evidence', () => {
     expect((await complete($, 'Opened PR #3.', { turnId: 't3' })).text).toBe('Opened PR #3.')
   })
 
-  test('an op in an earlier turn does not back a claim in a later one (decision 6)', async ($, on) => {
+  test('an op in an earlier turn does not back a claim in a later one', async ($, on) => {
     await boot($, on)
     await $.tool.call(bash('git push origin main'))
     await complete($, 'Done.', { turnId: 't1' })
@@ -138,16 +138,16 @@ describe('evidence', () => {
     expect((await complete($, 'All tests pass.', { turnId: 't2' })).text).toBe('All tests pass.')
   })
 
-  test('a scratch write or a commit-message file does not void a run; an edit in a sibling worktree does (Review Focus 3)', async ($, on) => {
+  test('a scratch write or a commit-message file does not void a run; an edit in a sibling worktree does', async ($, on) => {
     await boot($, on)
     await $.tool.call(edit(CODE))
     await $.tool.call(bash('pytest'))
-    await $.tool.call(edit('C:/Users/tester/AppData/Local/Temp/claude/s/scratchpad/fix-pr-body.py'))
+    await $.tool.call(edit('C:/Home/tester/tmp/claude/s/scratchpad/fix-pr-body.py'))
     await $.tool.call(edit('C:/work/commit-msg.txt'))
     await $.tool.call(bash('git commit -F commit-msg.txt'))
     expect((await complete($, 'Tests pass.', { turnId: 't1' })).text).toBe('Tests pass.')
 
-    await $.tool.call(edit('C:/work-2144/src/app.ts'))
+    await $.tool.call(edit('C:/work-feature/src/app.ts'))
     expect((await complete($, 'All tests pass.', { turnId: 't2' })).text).toContain('has no test run after the last edit')
   })
 })
@@ -159,7 +159,7 @@ describe('what is not checked', () => {
     expect((await complete($, answer)).text).toBe(answer)
   })
 
-  test("quoting the ledger's own line is not a claim (Review Focus 7)", async ($, on) => {
+  test("quoting the ledger's own line is not a claim", async ($, on) => {
     await boot($, on)
     const answer = 'You flagged this: Claim Ledger: "tests pass" has no test run after the last edit (12:41).'
     expect((await complete($, answer)).text).toBe(answer)
@@ -179,7 +179,7 @@ describe('what is not checked', () => {
     expect(trail.filter(e => e.ev === 'claim' || e.ev === 'append')).toEqual([])
   })
 
-  test("a subagent's step does not drop the main turn's claims (review B11)", async ($, on) => {
+  test("a subagent's step does not drop the main turn's claims", async ($, on) => {
     const { world } = await boot($, on)
     await $.tool.call(edit(CODE))
     world.steps.push({ answer: 'All tests pass.', tools: 1 }, { answer: 'Sub reply.', tools: 0 }, { answer: 'Done.', tools: 0 })
@@ -198,7 +198,7 @@ describe('what is not checked', () => {
   })
 })
 
-describe('steps (00-shared Q7: answer is only the last text block)', () => {
+describe('steps (turn.complete answer holds only the last text block)', () => {
   test('a claim in an earlier step of the turn is still checked', async ($, on) => {
     const { world } = await boot($, on)
     await $.tool.call(edit(CODE))
@@ -222,7 +222,7 @@ describe('steps (00-shared Q7: answer is only the last text block)', () => {
     expect((await complete($, 'Parser done.')).text).toBe('Parser done.')
   })
 
-  test('an edit that lands while the step streams does not void its claim (decision 5)', async ($, on) => {
+  test('an edit that lands while the step streams does not void its claim', async ($, on) => {
     const { world } = await boot($, on)
     await $.tool.call(edit(CODE))
     await $.tool.call(bash('pytest'))
@@ -234,7 +234,7 @@ describe('steps (00-shared Q7: answer is only the last text block)', () => {
     expect((await complete($, 'Parser done.')).text).toBe('Parser done.')
   })
 
-  test('order is taken at hook entry: a run that started before an edit does not back a claim after it (decision 3)', async ($, on) => {
+  test('order is taken at hook entry: a run that started before an edit does not back a claim after it', async ($, on) => {
     const { world, clock } = await boot($, on)
     world.delay = input => (input.command === 'pytest' ? 5_000 : 0)
     const run = $.tool.call(bash('pytest'))
@@ -276,7 +276,7 @@ describe('delivery, flag once, reset', () => {
     expect((await complete($, 'All tests pass.', { turnId: 't2' })).text).toBe('All tests pass.')
   })
 
-  test('a restated claim over the same evidence is not flagged again (decision 11)', async ($, on) => {
+  test('a restated claim over the same evidence is not flagged again', async ($, on) => {
     const { world } = await boot($, on)
     await $.tool.call(edit(CODE))
     expect((await complete($, 'All tests pass.', { turnId: 't1' })).text).toContain('Claim Ledger:')
@@ -293,7 +293,14 @@ describe('delivery, flag once, reset', () => {
     expect((await complete($, 'All tests pass.')).text).toBe('Claim Ledger: "All tests pass" has no test run this session.')
   })
 
-  test('/resume resets too (review C12)', async ($, on) => {
+  test("/clear writes the ending session's trail before it resets", async ($, on) => {
+    const { world } = await boot($, on)
+    await $.tool.call(bash('pytest'))
+    await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: { id: 'sess-1' } } as never)
+    expect(trailOf(world).some(e => e.ev === 'run' && e.kind === 'tests')).toBe(true)
+  })
+
+  test('/resume resets too', async ($, on) => {
     await boot($, on)
     await $.tool.call(edit(CODE))
     await $.tool.call(bash('pytest'))
@@ -313,7 +320,7 @@ describe('delivery, flag once, reset', () => {
     expect(text).toContain('tests: backed')
   })
 
-  test('a run after a further edit is not counted as later backing (review C7)', async ($, on) => {
+  test('a run after a further edit is not counted as later backing', async ($, on) => {
     await boot($, on)
     await $.tool.call(edit(CODE))
     await complete($, 'All tests pass.')
@@ -329,14 +336,14 @@ describe('failure and health', () => {
     const { world } = await boot($, on, 5 * MIN)
     expect(world.writes.map(w => w.path)).toEqual([HEALTH])
 
-    // The kit serves no plugin append (00-shared), so this append is refused by the host.
+    // The kit serves no plugin append, so this append is refused by the host.
     await $.tool.call(edit(CODE))
     expect((await complete($, 'All tests pass.')).text).toContain('Claim Ledger:')
     expect(lastHealth(world).lastError?.message).toContain('session.append')
     expect(trailOf(world).some(e => e.ev === 'append-failed')).toBe(true)
   })
 
-  test('a failing $.state write is recorded and the line still shows (U8)', { options: { tellModel: false } }, async ($, on) => {
+  test('a failing $.state write is recorded and the line still shows', { options: { tellModel: false } }, async ($, on) => {
     // Hooks beneath the plugins are registered before the test's first call on `$`. A throwing hook is skipped, so refuse.
     on('state.set', () => ({ deny: 'state refused' }) as never)
     const { world } = await boot($, on)
@@ -346,7 +353,7 @@ describe('failure and health', () => {
     expect(lastHealth(world).lastError?.message).toContain('state.set')
   })
 
-  test('the heartbeat follows the new session id after /clear (00-shared)', async ($, on) => {
+  test('the heartbeat follows the new session id after /clear', async ($, on) => {
     const { world } = await boot($, on)
     await $.session.end({ reason: 'clear', sessionId: 'sess-1' } as never)
     world.sessionId = 'sess-2'

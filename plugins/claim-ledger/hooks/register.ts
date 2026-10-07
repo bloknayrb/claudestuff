@@ -27,16 +27,16 @@ const LEDGER = { plugin: 'claim-ledger', key: 'ledger' } as const
 const REPORT_FAILED = 'Claim Ledger: the report failed; see the health file.'
 const TRAIL_CAP = 200
 
-// The module holds the authoritative ledger; $.state mirrors it so a hot reload can restore it (decision 4).
+// The module holds the authoritative ledger; $.state mirrors it so a hot reload can restore it.
 let ledger: Ledger = emptyLedger()
 let home: string | null = null
-// %TEMP%: writes under it are not code edits (decision 9).
+// %TEMP%: writes under it are not code edits.
 let temp: string | null = null
 let loadedAt = 0
 let lastError: { ts: number; message: string } | null = null
-// The session id the health file was last written under: /clear changes it with no session.start (00-shared).
+// The session id the health file was last written under: /clear changes it with no session.start.
 let healthId: string | null = null
-// This session's runs, edits, verdicts and append attempts, one JSON object per line (decision 10). Starts over at a reload.
+// This session's runs, edits, verdicts and append attempts, one JSON object per line. Starts over at a reload.
 let trail: string[] = []
 let trailDirty = false
 
@@ -64,7 +64,7 @@ async function writeHealth($: EngineInterface): Promise<void> {
     healthId = id
     await $.fs.write(`${dir}/${id}.json`, `${JSON.stringify({ loadedAt, lastError })}\n`)
   } catch {
-    // Best effort (00-shared): a missing heartbeat reads as unknown, never as ok.
+    // Best effort: a missing heartbeat reads as unknown, never as ok.
   }
 }
 
@@ -140,7 +140,7 @@ async function track($: EngineInterface, input: Readonly<Record<string, unknown>
   const added = record(ledger, facts, classified, seq, ts, agentId)
   for (const path of classified.mutations) trace({ ts, ev: 'edit', seq, path })
   for (const e of added) trace({ ts, ev: 'run', seq, kind: e.kind, ok: e.ok, masked: e.masked, background: e.background, basis: e.basis, agentId, short: e.short })
-  // A background run whose result this call read back is judged now (round 3).
+  // A background run whose result this call read back is judged now.
   for (const e of readBack(ledger, facts, config, places)) trace({ ts, ev: 'read-back', seq: e.seq, by: seq, kind: e.kind, ok: e.ok, basis: e.basis, short: e.short })
   markBacked(ledger)
   await mirror($)
@@ -178,6 +178,8 @@ async function clear($: EngineInterface): Promise<void> {
   ledger = emptyLedger()
   trail = []
   trailDirty = false
+  // The next session's health file starts clean: an error belongs to the session it happened in.
+  lastError = null
   await mirror($)
 }
 
@@ -202,17 +204,18 @@ export const register: Register = (on, options) => {
 
   on('session.end', async ($, e, next) => {
     try {
-      // /clear and /resume both carry on under another conversation: every session value goes (spec deviation 15).
+      // /clear and /resume both carry on under another conversation: every session value goes.
+      // The ending session's trail is written before clear() empties it.
+      await writeTrail($)
       if (e.reason === 'clear' || e.reason === 'resume') await clear($)
       else await flush($, [], [], await $.clock.now())
-      await writeTrail($)
     } catch (err) {
       await noteFailure($, 'session.end', err)
     }
     return next(e)
   })
 
-  // All loops. Order is assigned at entry, before any await (decision 3); the call itself is never changed.
+  // All loops. Order is assigned at entry, before any await; the call itself is never changed.
   on('tool.call', async ($, e, next) => {
     ledger.seq += 1
     const seq = ledger.seq
@@ -228,7 +231,7 @@ export const register: Register = (on, options) => {
     return ran
   }).catch(($, e, next) => next(e))
 
-  // Main loop: claims in each response's text, judged against what the ledger knew when the response began (decision 5).
+  // Main loop: claims in each response's text, judged against what the ledger knew when the response began.
   on('turn.step', async function* ($, e, next) {
     const asOf = asOfNow(ledger)
     const response = yield* next(e)

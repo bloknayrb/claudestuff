@@ -15,8 +15,8 @@ describe('harness facts the other tests rest on', () => {
     expect(world.logs.some(l => l.startsWith('claim-ledger: loaded, options '))).toBe(true)
   })
 
-  // U4 settled 2026-10-06 (review): a multiple field arrives as an array.
-  test('a list option arrives as an array (U4)', { options: { testCommands: ['make check', 'just test'] } }, async ($, on) => {
+  // A multiple field arrives as an array.
+  test('a list option arrives as an array', { options: { testCommands: ['make check', 'just test'] } }, async ($, on) => {
     const world = worldOf(on)
     mock.clock(on)
     mock.store(on)
@@ -26,7 +26,7 @@ describe('harness facts the other tests rest on', () => {
     expect(line).toContain('"testCommands":["make check","just test"]')
   })
 
-  test('turn.step and turn.complete can be driven from a test (U6)', async ($, on) => {
+  test('turn.step and turn.complete can be driven from a test', async ($, on) => {
     const world = worldOf(on)
     mock.clock(on)
     mock.store(on)

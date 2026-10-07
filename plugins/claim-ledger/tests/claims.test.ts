@@ -29,14 +29,14 @@ describe('claim forms the spec names', () => {
     expect(families('I’ve pushed it.'), 'curly apostrophe').toEqual(['shipped:push'])
   })
 
-  test('present state with the other subjects real claims use (re-review)', () => {
+  test('present state with the other subjects real claims use', () => {
     expect(families('Everything is committed.')).toEqual(['shipped:commit'])
     expect(families('The tag is pushed.')).toEqual(['shipped:push'])
     expect(families('Task 3 is committed, and its 17 tests pass.')).toEqual(['tests', 'shipped:commit'])
     expect(families('Round 2 is merged.')).toEqual(['shipped:merge'])
   })
 
-  test('sentence-initial shipped forms (review C9)', () => {
+  test('sentence-initial shipped forms', () => {
     expect(families('Committed.')).toEqual(['shipped:commit'])
     expect(families('Pushed and verified.')).toEqual(['shipped:push'])
     expect(families('Merged as `e2aa467`.')).toEqual(['shipped:merge'])
@@ -80,8 +80,8 @@ describe('forms that are not claims', () => {
     for (const text of [
       'PR #17 was merged last week.',
       'That branch was pushed yesterday.',
-      'Bryan merged PR #12.',
-      'Bryan opened PR #5.',
+      'Alex merged PR #12.',
+      'Alex opened PR #5.',
       'All 12 tests passed in CI last night.',
       'All three rows are merged into the tracker.',
     ]) {
@@ -89,7 +89,7 @@ describe('forms that are not claims', () => {
     }
   })
 
-  test('descriptions of what a thing does or how a test behaves (review C9)', () => {
+  test('descriptions of what a thing does or how a test behaves', () => {
     for (const text of ['It builds its own stub.', 'The relaunch test passes even without the epoch check.', 'Both tests pass identically under the mutation.']) {
       expect(families(text), text).toEqual([])
     }
@@ -101,17 +101,17 @@ describe('forms that are not claims', () => {
       'Run `npm test` until the tests pass.',
       '```\n$ pytest\n5 tests pass\n```',
       '> Tests pass.',
-      'Bryan wrote “I pushed it”.',
+      'Alex wrote “I pushed it”.',
     ]) {
       expect(families(text), text).toEqual([])
     }
   })
 
-  test('single-quoted text, apostrophes inside it included (review B10)', () => {
+  test('single-quoted text, apostrophes inside it included', () => {
     // The plugin's own manifest description: it would fire whenever the mod is described.
     const description = "Checks end-of-turn claims like 'tests pass', 'builds cleanly' and 'I've pushed' against the tool calls that actually ran."
     expect(families(description)).toEqual([])
-    expect(families("Bryan's note says 'the build passes'.")).toEqual([])
+    expect(families("Alex's note says 'the build passes'.")).toEqual([])
   })
 })
 
@@ -148,7 +148,7 @@ describe('shape of what is found', () => {
   })
 })
 
-describe('real examples, redacted (Task 7)', () => {
+describe('real examples, redacted', () => {
   test('each labeled sentence', () => {
     for (const { text, expect: want, why } of REAL) {
       expect(families(text), `${why}: ${text}`).toEqual(want)
@@ -166,7 +166,7 @@ describe('real examples, redacted (Task 7)', () => {
   })
 })
 
-describe('figurative "merged" (round 4)', () => {
+describe('figurative "merged"', () => {
   test('merged into something that is not a branch is not a git claim', () => {
     // The shape of a real progress heading: a bold "Merged into <a process>:" leading a list of other work.
     expect(families('**Merged into the pipeline:** two queued commits went out with the suite green.')).toEqual([])
@@ -174,5 +174,18 @@ describe('figurative "merged" (round 4)', () => {
     expect(families('Merged into main.')).toEqual(['shipped:merge'])
     expect(families('I merged it into `main`.')).toEqual(['shipped:merge'])
     expect(families('Merged into feat/x.')).toEqual(['shipped:merge'])
+  })
+})
+
+describe('idioms that are not git, and real merges into other branches', () => {
+  test('committed to a plan, a committed team', () => {
+    expect(families('I committed to the plan.')).toEqual([])
+    expect(families('The team is committed.')).toEqual([])
+    expect(families('I committed the fix.')).toEqual(['shipped:commit'])
+  })
+
+  test('merged into a branch the sentence names as one', () => {
+    expect(families('Merged into the feature branch.')).toEqual(['shipped:merge'])
+    expect(families('Merged into my-branch.')).toEqual(['shipped:merge'])
   })
 })
