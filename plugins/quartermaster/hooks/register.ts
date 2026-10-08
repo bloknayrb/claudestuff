@@ -309,10 +309,16 @@ async function claimToast($: EngineInterface, key: string): Promise<boolean> {
   if (claimed.has(key)) return false
   claimed.add(key)
   let fresh = false
-  await update($, sourceToasts, list => {
-    fresh = !list.includes(key)
-    return fresh ? [...list, key].slice(-SOURCE_TOASTS_MAX) : list
-  })
+  try {
+    await update($, sourceToasts, list => {
+      fresh = !list.includes(key)
+      return fresh ? [...list, key].slice(-SOURCE_TOASTS_MAX) : list
+    })
+  } catch (err) {
+    // Release the claim, or a failed write would suppress this toast for the rest of the session.
+    claimed.delete(key)
+    throw err
+  }
   return fresh
 }
 
@@ -358,16 +364,18 @@ const onSpawn: Hook<'agent.spawn'> = async ($, e, next) => {
   const view = viewOf(e)
   const hash = spawnHash(view)
   const source = sourceOf(e.workflow !== undefined, next.origin.plugin)
-  const fired = await judge($, view, source === null ? 'the model' : sourceLabel(source))
-  if (source !== null) return toastOnly($, e, next, view, source, fired, hash)
+  if (source !== null) return toastOnly($, e, next, view, source, await judge($, view, sourceLabel(source)), hash)
 
   const now = await $.clock.now()
   // The soft-deny contract: an unchanged re-issue runs, whatever the guards say now. One denial, one re-issue.
+  // Checked before judge, so nothing judge reads (usage, the store) can affect a re-issue.
   const same = await takeDenial($, d => d.hash === hash && isLive(d, view.loop, now))
   if (same !== undefined) {
     await safeRecord($, same.guards, hash, 'reissued')
     return admit($, e, next)
   }
+
+  const fired = await judge($, view, 'the model')
 
   const task = taskHash(view)
   const earlier = await takeDenial($, d => d.task === task && isLive(d, view.loop, now), true)
