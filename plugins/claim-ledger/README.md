@@ -120,12 +120,12 @@ Under `~/.claude/state/mods/claim-ledger/`:
 - **Stop-hook continuations.** Seen live: when a Stop hook blocks the end of a turn and Claude continues, the turn keeps
   one id and the end-of-turn event fires once, after the continuation, carrying only the newer text. Claims made before
   the block are still caught, because every response's text is read as it finishes, and their lines appear beneath the
-  final answer. A tool call can start up to tens of milliseconds before the response that issued it finishes (38 ms
+  final answer. A response with two text blocks was not seen, so how they are joined is untested live. A tool call can start up to tens of milliseconds before the response that issued it finishes (38 ms
   was measured); each response's claims are judged against the evidence as it stood when that response began.
 - **Hot reload was not verified live.** That the ledger survives a hot reload, and that a hook which throws after a
   reload fails open (the answer shows, the error goes to the health file), were not checked in a live session, because
-  `/reload-plugins` did not restart a mod loaded with `--plugin-dir`. A unit test covers restoring a saved ledger, and a test kit case covers a failing state write being recorded while
-  the line still shows.
+  `/reload-plugins` did not restart a mod loaded with `--plugin-dir`. A unit test covers restoring a saved ledger; a hook that throws has no test beyond a failing state write being
+  recorded while the line still shows.
 - **The hooks API is early access** and changes between Claude Code releases.
 
 ## Precision
@@ -159,5 +159,5 @@ claude plugin validate plugins/claim-ledger
 npx -y -p typescript@5 tsc -p plugins/claim-ledger
 ```
 
-`node scripts/precision.mjs <out> <list>` replays the detector over a list of transcripts. Its output holds transcript
+`node plugins/claim-ledger/scripts/precision.mjs <out> <list>` replays the detector over a list of transcripts. Its output holds transcript
 text and must stay out of the repository.
