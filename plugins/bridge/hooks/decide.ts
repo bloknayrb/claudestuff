@@ -42,7 +42,7 @@ export const INPUT_SCHEMA = {
 }
 
 // Caps on text length, so one call cannot put an unbounded card in the pane or the stored book.
-const MAX_CHARS = { question: 500, label: 120, context: 4000, why: 1000, why_yours: 1000 } as const
+const MAX_CHARS = { question: 500, label: 120, detail: 500, context: 4000, why: 1000, why_yours: 1000 } as const
 
 export type Checked = { isValid: true; input: DecideInput } | { isValid: false; problems: string[] }
 
@@ -71,6 +71,9 @@ export function validateDecide(raw: Record<string, unknown>): Checked {
         problems.push(`options[${i}].label is ${o.label.trim().length} characters; the limit is ${MAX_CHARS.label}`)
       }
       if (o.detail !== undefined && typeof o.detail !== 'string') problems.push(`options[${i}].detail must be a string`)
+      else if (typeof o.detail === 'string' && o.detail.length > MAX_CHARS.detail) {
+        problems.push(`options[${i}].detail is ${o.detail.length} characters; the limit is ${MAX_CHARS.detail}`)
+      }
       // Stored trimmed, so the uniqueness check below and the answer's `label` agree on what the label is.
       options.push({ label: String(o.label ?? '').trim(), ...(typeof o.detail === 'string' ? { detail: o.detail } : {}) })
     })

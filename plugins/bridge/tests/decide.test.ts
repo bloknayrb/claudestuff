@@ -45,6 +45,7 @@ describe('validateDecide', () => {
     ['a why over 1000 characters', { ...SAMPLE, why: 'w'.repeat(1001) }, 'why is 1001'],
     ['a why_yours over 1000 characters', { ...SAMPLE, why_yours: 'y'.repeat(1001) }, 'why_yours is 1001'],
     ['a label over 120 characters', { ...SAMPLE, options: [{ label: 'a'.repeat(121) }, { label: 'B' }] }, 'options[0].label is 121'],
+    ['a detail over 500 characters', { ...SAMPLE, options: [{ label: 'A', detail: 'd'.repeat(501) }, { label: 'B' }] }, 'options[0].detail is 501'],
     ['labels that differ only by padding', { ...SAMPLE, options: [{ label: 'A' }, { label: ' A ' }] }, 'differ'],
     ['recommend negative', { ...SAMPLE, recommend: -1 }, 'recommend'],
     ['recommend fractional', { ...SAMPLE, recommend: 0.5 }, 'recommend'],
