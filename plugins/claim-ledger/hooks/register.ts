@@ -139,6 +139,7 @@ async function track($: EngineInterface, input: Readonly<Record<string, unknown>
   const classified = classify(facts, config, places)
   const added = record(ledger, facts, classified, seq, ts, agentId)
   for (const path of classified.mutations) trace({ ts, ev: 'edit', seq, path })
+  // For a background run, ok is the launch status; a later read-back row carries the run's result.
   for (const e of added) trace({ ts, ev: 'run', seq, kind: e.kind, ok: e.ok, masked: e.masked, background: e.background, basis: e.basis, agentId, short: e.short })
   // A background run whose result this call read back is judged now.
   for (const e of readBack(ledger, facts, config, places)) trace({ ts, ev: 'read-back', seq: e.seq, by: seq, kind: e.kind, ok: e.ok, basis: e.basis, short: e.short })
