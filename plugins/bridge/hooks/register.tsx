@@ -100,7 +100,7 @@ async function queueDecision($: EngineInterface, input: DecideInput, useId: stri
   const now = await $.clock.now()
   // The engine always supplies tool_use_id for a tool call, so the random fallback only runs in tests;
   // a retried call there would not match its first key and could double-queue.
-  const key = useId !== '' ? useId :`local-${now}-${Math.random()}`
+  const key = useId !== '' ? useId : `local-${now}-${Math.random()}`
   const id = await transact($, s => {
     const book = addDecision(s.book, input, key, now)
     return { session: { ...s, book }, out: idForUse(book, key) }
