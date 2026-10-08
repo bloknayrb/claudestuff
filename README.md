@@ -18,6 +18,7 @@
 |----------|-------------|---------|
 | **Learning** | How plugins work | example-plugin |
 | **Developer Tools** | Role-based agents, code quality, docs, local CI | professional-agents, anti-slop, documentation-updater, dev-tools |
+| **Session Guards** | Model choice and five-hour pacing for subagents | quartermaster |
 | **Office Automation** | Document creation and editing | ms-office-suite |
 | **Personal Finance** | Budgeting, investing, financial planning | personal-finance |
 | **Career Coaching** | Career exploration, resume review, interview prep | career-coach |
@@ -65,6 +66,9 @@ Are you...
 ├── Testing GitHub Actions / GitLab CI locally?
 │   └── → dev-tools (wrkflw: validate and run workflows before pushing)
 │
+├── Spending too much on subagents?
+│   └── → quartermaster (pick a model per agent, pace the five-hour window)
+│
 └── Overwhelmed and need to focus?
     └── → focus-tools (identify ONE next action)
 ```
@@ -83,6 +87,7 @@ Are you...
 | **ghostwriter** | Easy | Low | Writing in your voice |
 | **anti-slop** | Easy | Low | Pre-PR branch quality audit |
 | **dev-tools** | Easy | Low | Local CI workflow validation and execution |
+| **quartermaster** | Easy | Low | Subagent model choice and usage pacing |
 | **focus-tools** | Medium | Medium | Executive function support |
 
 **Complexity Key:**
@@ -208,6 +213,20 @@ Are you...
 **Use for**: Catching broken CI before pushing — validate and run `.github/workflows` (and GitLab pipelines) locally with the `wrkflw` CLI
 
 **Requires**: [`wrkflw`](https://github.com/bahdotsh/wrkflw) installed (`cargo install wrkflw` or `brew install wrkflw`); Docker or Podman only for those runtimes
+
+---
+
+### quartermaster
+
+**What**: A mod (function hooks) that keeps subagent spending deliberate
+
+**Commands**: `/quartermaster` (guard counts and the five-hour pace)
+
+**Hooks**: soft-denies a spawn with no `model` (re-issue unchanged to run it), and a heavy-model spawn past 75% of the five-hour window; one status line with the projected cap time
+
+**Use for**: Choosing a model per subagent and not hitting the five-hour limit by surprise
+
+**Requires**: Claude Code with mods (function-hook plugins); a subscription for the pace line
 
 ---
 

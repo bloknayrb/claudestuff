@@ -67,6 +67,11 @@
       "name": "dev-tools",
       "source": "./plugins/dev-tools",
       "description": "Software-development tooling — starting with wrkflw for validating and running GitHub Actions/GitLab CI workflows locally before pushing"
+    },
+    {
+      "name": "quartermaster",
+      "source": "./plugins/quartermaster",
+      "description": "Mod: soft-denies subagent spawns with no model set and heavy-model spawns late in the five-hour window, and shows when the window will cap at the current pace"
     }
   ]
 }
