@@ -26,6 +26,7 @@
 | **Image Generation** | AI image prompting for Nano Banana MCP | nanobanana |
 | **Writing** | Learn your style, write in your voice | ghostwriter |
 | **Focus** | Executive function support | focus-tools |
+| **Claude Code Mods** | Live panes and hooks inside Claude Code | bridge |
 
 ## Plugins at a Glance
 
@@ -69,6 +70,9 @@ Are you...
 ├── Spending too much on subagents?
 │   └── → quartermaster (pick a model per agent, pace the five-hour window)
 │
+├── Want Claude to queue decisions instead of stopping to ask?
+│   └── → bridge (non-blocking decision pane)
+│
 └── Overwhelmed and need to focus?
     └── → focus-tools (identify ONE next action)
 ```
@@ -88,6 +92,7 @@ Are you...
 | **anti-slop** | Easy | Low | Pre-PR branch quality audit |
 | **dev-tools** | Easy | Low | Local CI workflow validation and execution |
 | **quartermaster** | Easy | Low | Subagent model choice and usage pacing |
+| **bridge** | Easy | None | Answering Claude's decisions without blocking it |
 | **focus-tools** | Medium | Medium | Executive function support |
 
 **Complexity Key:**
@@ -227,6 +232,20 @@ Are you...
 **Use for**: Choosing a model per subagent and not hitting the five-hour limit by surprise
 
 **Requires**: Claude Code with mods (function-hook plugins); a subscription for the pace line
+
+---
+
+### bridge
+
+**What**: A non-blocking decision queue: Claude posts a decision with its context and keeps working
+
+**Commands**: `/bridge`
+
+**Hooks**: a registered tool `mcp__bridge__decide`, a pane, a band above the prompt
+
+**Use for**: Answering Claude's decisions with one key while it keeps working
+
+**Requires**: Claude Code 2.1.292 or newer (function-hook mods)
 
 ---
 
