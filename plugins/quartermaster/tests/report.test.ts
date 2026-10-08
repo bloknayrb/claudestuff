@@ -25,7 +25,7 @@ describe('/quartermaster', () => {
     expect(text).toContain('this session: agents 0')
     expect(text).toContain('toast-only spawns this session: workflow 1')
     // denied(H1), reissued(H1), denied(H2), changed(H2): four ring entries.
-    expect(text).toContain('ring: 4 of the last 200 fires kept')
+    expect(text).toContain('ring: 4 of the last 200 outcomes kept')
     expect(text).toContain('config: warnAt 75% · heavy opus, fable · guard types general-purpose, claude · requireModel on')
   })
 

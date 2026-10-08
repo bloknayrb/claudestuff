@@ -49,7 +49,7 @@ with one, those spawns run on the default instead. Other agent types that set no
 A denied call's identity is a hash of `prompt`, `description`, `subagentType` and `model`, never the tool
 call id. The identical call issued again within ten minutes, from the same agent, runs. The same task
 (`prompt` and `description`) with another model or agent type counts as acting on the deny. Counters
-(`fires`, `reissued`, `changed`) and the last 200 fires are kept so a guard that is mostly re-issued can be
+(`fires`, `reissued`, `changed`) and the last 200 outcomes are kept so a guard that is mostly re-issued can be
 narrowed or removed.
 
 ## What it writes
@@ -61,6 +61,11 @@ narrowed or removed.
   One file is written per session id and never pruned; they are small and safe to delete.
 
 It makes no model calls. A guard that fails lets the spawn through and logs to the debug log.
+
+## Limits
+
+- A Workflow's agents get a toast, not a deny, by design: nothing can re-issue a spawn a Workflow script
+  starts, so a deny would only kill the step. That path was not observed live; the tests cover it.
 
 ## Developing
 

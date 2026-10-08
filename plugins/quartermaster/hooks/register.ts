@@ -475,7 +475,7 @@ const onCommand: Hook<'command.run'> = async $ => {
       : `pace: ${paceClause(cap, window.resetsAt, window.pct, await $.clock.now())}, window at ${window.pct}%`,
     `this session: ${agentsClause(await read($, agents), cfg.heavyModels)}`,
     `toast-only spawns this session: ${sources.join(', ') || 'none'}`,
-    `ring: ${ring.length} of the last ${RING_MAX} fires kept`,
+    `ring: ${ring.length} of the last ${RING_MAX} outcomes kept`,
     `config: warnAt ${cfg.warnAt}% · heavy ${cfg.heavyModels.join(', ') || 'none'} · guard types ${cfg.guardTypes.join(', ') || 'none'} · requireModel ${cfg.requireModel ? 'on' : 'off'} · list options arrived as ${current.shapes}`,
   ]
   return { text: lines.join('\n') }
