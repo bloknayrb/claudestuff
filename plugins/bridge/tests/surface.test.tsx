@@ -135,7 +135,8 @@ test('a pane gone without any hook running is found again by the band, and by th
   expect(await stale.find({ key: 'bridge-band' })).toBeDefined()
   await stale.unmount()
   await decide($, { ...SAMPLE, question: 'Two?' })
-  expect(w.toasts.at(-1)).toBe('Bridge: decision #2 queued \u00b7 /bridge to answer')
+  // The band is the notice; a queued decision raises no toast.
+  expect(w.toasts).toEqual([])
   for (const surface of SURFACES) {
     const band = await mountBand($, surface, NARROW)
     expect(await band.find({ key: 'bridge-band' })).toBeDefined()
@@ -144,8 +145,8 @@ test('a pane gone without any hook running is found again by the band, and by th
 })
 
 // A placed pane can be a background tab behind another plugin's pane: neither it nor a hidden band
-// would then tell the user a decision arrived.
-test('a pane placed behind another pane: the next decision toasts and the band still draws', async ($, on) => {
+// would then tell the user a decision arrived, so the band draws, and is the only notice.
+test('a pane placed behind another pane: the next decision is not reopened and the band still draws', async ($, on) => {
   const w = world(on)
   await start($)
   await mountBand($, 'terminal', WIDE)
@@ -155,8 +156,7 @@ test('a pane placed behind another pane: the next decision toasts and the band s
   w.isShown = false
   await decide($, { ...SAMPLE, question: 'Two?' })
   expect(w.opens).toHaveLength(1)
-  expect(w.toasts).toHaveLength(1)
-  expect(w.toasts[0]).toContain('decision #2 queued')
+  expect(w.toasts).toEqual([])
   for (const surface of SURFACES) {
     const band = await mountBand($, surface, NARROW)
     expect(await band.find({ key: 'bridge-band' })).toBeDefined()

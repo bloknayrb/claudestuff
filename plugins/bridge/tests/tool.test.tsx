@@ -1,4 +1,6 @@
+import type { RenderViewport } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
+import type { Engine } from 'claude-code/testing'
 
 import { MAIN_SCREEN, NARROW, SAMPLE, WIDE, decide, mountBand, pendingIds, start, world } from './world'
 
@@ -42,35 +44,47 @@ test('fullscreen and wide: the pane opens unasked, without focus, and no toast',
   expect(w.opens).toHaveLength(1)
 })
 
+// The band is the notice of a queued decision; no toast is raised for one.
+async function hasBand($: Engine, viewport: RenderViewport): Promise<boolean> {
+  const band = await mountBand($, 'terminal', viewport)
+  const found = (await band.find({ key: 'bridge-band' })) !== undefined
+  await band.unmount()
+  return found
+}
+
 for (const [name, viewport] of [['narrow', NARROW], ['main screen', MAIN_SCREEN]] as const) {
-  test(`${name}: no pane, one toast per decision`, async ($, on) => {
+  test(`${name}: no pane, no toast, and the band counts the decisions`, async ($, on) => {
     const w = world(on)
     await start($)
     await mountBand($, 'terminal', viewport)
     await decide($)
     await decide($, { ...SAMPLE, question: 'Again?' })
     expect(w.opens).toEqual([])
-    expect(w.toasts).toEqual(['Bridge: decision #1 queued \u00b7 /bridge to answer', 'Bridge: decision #2 queued \u00b7 /bridge to answer'])
+    expect(w.toasts).toEqual([])
+    expect(await hasBand($, viewport)).toBe(true)
   })
 }
 
-test('fullscreen unknown (the surface did not say): the band and a toast', async ($, on) => {
+test('fullscreen unknown (the surface did not say): the band, and no toast', async ($, on) => {
   const w = world(on)
+  const viewport = { columns: 160, rows: 50 }
   await start($)
-  await mountBand($, 'terminal', { columns: 160, rows: 50 })
+  await mountBand($, 'terminal', viewport)
   await decide($)
   expect(w.opens).toEqual([])
-  expect(w.toasts).toHaveLength(1)
+  expect(w.toasts).toEqual([])
+  expect(await hasBand($, viewport)).toBe(true)
 })
 
-test('wide but the engine did not place it: closed again, and a toast', async ($, on) => {
+test('wide but the engine did not place it: closed again, the band, and no toast', async ($, on) => {
   const w = world(on, { placed: false })
   await start($)
   await mountBand($, 'terminal', WIDE)
   await decide($)
   expect(w.opens).toEqual([{ id: 'bridge' }])
   expect(w.closes).toEqual(['bridge'])
-  expect(w.toasts).toHaveLength(1)
+  expect(w.toasts).toEqual([])
+  expect(await hasBand($, WIDE)).toBe(true)
 })
 
 test('once queued, the receipt comes back even if surfacing fails', async ($, on) => {

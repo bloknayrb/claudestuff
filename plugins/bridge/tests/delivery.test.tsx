@@ -291,7 +291,7 @@ test('a refused wake retries once from a timer, then toasts', async ($, on) => {
 })
 
 // Regression guard. The plugin's own close runs none of its ui.close hook, so a stale
-// isPaneUp would hide the band and every later toast.
+// isPaneUp would hide the band.
 test('answering the last card by key closes the pane, and the next decision is surfaced again', async ($, on) => {
   const w = world(on)
   await start($)
@@ -305,7 +305,8 @@ test('answering the last card by key closes the pane, and the next decision is s
   expect(w.closes).toEqual(['bridge'])
   await runTurn($, w, 'wake-1')
   await decide($, { ...SAMPLE, question: 'Two?' })
-  expect(w.toasts.at(-1)).toBe('Bridge: decision #2 queued \u00b7 /bridge to answer')
+  // The band is the notice; a queued decision raises no toast.
+  expect(w.toasts).toEqual([])
   for (const surface of SURFACES) {
     const band = await mountBand($, surface, NARROW)
     expect(await band.find({ key: 'bridge-band' })).toBeDefined()

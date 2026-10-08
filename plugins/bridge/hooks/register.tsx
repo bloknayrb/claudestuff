@@ -119,30 +119,25 @@ async function isPaneVisible($: EngineInterface): Promise<boolean> {
   return (await $.ui.panes()).some(pane => pane.id === PANE_ID && pane.isPlaced && pane.isShown)
 }
 
-async function surfaceDecision($: EngineInterface, id: number): Promise<void> {
-  const panes = await $.ui.panes()
-  const mine = panes.find(pane => pane.id === PANE_ID && pane.isPlaced)
-  const isUp = mine !== undefined
+// The band is the notice of a queued decision (it draws whenever the pane is not visible); this only
+// opens the pane unasked when the screen is wide enough. No toast: none was ever seen from this
+// tool.call path in the dogfood (D2, D4) while the band showed every time, so the band alone is kept.
+async function surfaceDecision($: EngineInterface): Promise<void> {
+  const isUp = await isPaneOpen($)
   await transact($, s => {
     if (s.view.isPaneUp === isUp) return { session: s, out: null }
     return { session: { ...s, view: { ...s.view, isPaneUp: isUp, otherFor: isUp ? s.view.otherFor : null } }, out: null }
   })
-  if (mine?.isShown === true) return
-  // Placed but behind another pane: no reopen, just a toast so the decision is not missed.
-  if (isUp) {
-    $.ui.toast(`Bridge: decision #${id} queued · /bridge to answer`)
+  // Already open, shown or behind another pane: no reopen. When it is behind, the band shows the count.
+  if (isUp) return
+  const canDock = lastViewport?.isFullscreen === true && lastViewport.columns >= UNASKED_PANE_COLUMNS
+  if (!canDock) return
+  const opened = await $.ui.open({ id: PANE_ID, title: PANE_TITLE })
+  if (opened.isPlaced) {
+    await transact($, s => ({ session: { ...s, view: { ...s.view, isPaneUp: true } }, out: null }))
     return
   }
-  const canDock = lastViewport?.isFullscreen === true && lastViewport.columns >= UNASKED_PANE_COLUMNS
-  if (canDock) {
-    const opened = await $.ui.open({ id: PANE_ID, title: PANE_TITLE })
-    if (opened.isPlaced) {
-      await transact($, s => ({ session: { ...s, view: { ...s.view, isPaneUp: true } }, out: null }))
-      return
-    }
-    await $.ui.close({ id: PANE_ID })
-  }
-  $.ui.toast(`Bridge: decision #${id} queued \u00b7 /bridge to answer`)
+  await $.ui.close({ id: PANE_ID })
 }
 
 // The key pause after an answer is a debounce. A press that lands while it runs is taken for a held
@@ -442,7 +437,7 @@ export const register: Register = on => {
     if (!checked.isValid) return { deny: denialFor(checked.problems) }
     const id = await queueDecision($, checked.input, e.tool_use_id ?? '')
     // Queued: from here the receipt always goes back, whatever surfacing does.
-    await guard($, 'surface', surfaceDecision($, id))
+    await guard($, 'surface', surfaceDecision($))
     return { result: receipt(id) }
   }).catch(async ($, e, next) => {
     if (next.error.kind !== 're-entry') await fail($, 'tool.call', next.error.message ?? next.error.kind)
