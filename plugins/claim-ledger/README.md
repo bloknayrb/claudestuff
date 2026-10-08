@@ -60,7 +60,7 @@ verdicts, and the last five flags.
 Under `~/.claude/state/mods/claim-ledger/`:
 
 - `<session id>.json`, the health file: when the mod loaded (`loadedAt`) and the last hook failure (`lastError`, or
-  `null`). Written at session start, when `/clear` moves to a new session, and on any failure.
+  `null`). Written at session start, when `/clear` or `/resume` moves to a new session, and on any failure.
 - `trail/<session id>.jsonl`, the trail: one JSON object per line, the last 200 events of the session. It records each
   code edit (`edit`), each test, build or git run with how it was judged (`run`: kind, ok, masked, background, basis), a
   background run judged when its result was read back (`read-back`), each claim's outcome (`claim`: backed, fired with
@@ -120,12 +120,13 @@ Under `~/.claude/state/mods/claim-ledger/`:
 - **Stop-hook continuations.** Seen live: when a Stop hook blocks the end of a turn and Claude continues, the turn keeps
   one id and the end-of-turn event fires once, after the continuation, carrying only the newer text. Claims made before
   the block are still caught, because every response's text is read as it finishes, and their lines appear beneath the
-  final answer. A response with two text blocks was not seen, so how they are joined is untested live. A tool call can start up to tens of milliseconds before the response that issued it finishes (38 ms
-  was measured); each response's claims are judged against the evidence as it stood when that response began.
+  final answer. A response with two text blocks was not seen, so how they are joined is untested live.
+- **A tool call can start before the response that issued it finishes** (38 ms in the one case seen); each response's
+  claims are judged against the evidence as it stood when that response began.
 - **Hot reload was not verified live.** That the ledger survives a hot reload, and that a hook which throws after a
   reload fails open (the answer shows, the error goes to the health file), were not checked in a live session, because
-  `/reload-plugins` did not restart a mod loaded with `--plugin-dir`. A unit test covers restoring a saved ledger; a hook that throws has no test beyond a failing state write being
-  recorded while the line still shows.
+  `/reload-plugins` did not restart a mod loaded with `--plugin-dir`. A unit test covers restoring a saved ledger; a hook
+  that throws has no test beyond a failing state write being recorded while the line still shows.
 - **The hooks API is early access** and changes between Claude Code releases.
 
 ## Precision
@@ -136,11 +137,12 @@ held-out set; no transcript text is kept here.
 - **Detection** (claims found that a labeller agreed were claims), held-out: tests 0.93, shipped 0.97 (build had 4
   labelled claims, too few to judge), against a 0.85 target.
 - **Flag justification** (a flag the labeller agreed was unbacked) first came in at 0.14 held-out against a 0.70
-  target. 8 of the 13 unjustified flags rested on background runs whose result a later call read back, so read-back
-  became evidence, along with `idf.py build` and a few confirmation forms.
+  target. 8 of the 13 unjustified flags, across both sets (held-out alone had 6), rested on background runs whose
+  result a later call read back, so read-back became evidence, along with `idf.py build` and a few confirmation forms.
 - **Independent re-label** of the held-out set after that change, by a separate labeller that had not tuned the
-  detector: detection tests 0.98, shipped 0.99 on 112 claims; 96% agreement with the earlier labels; 2 spurious notes in
-  112 claims; read-back credits 11 of 11 correct. Too few flags remained (3 to 5 per family) to judge justification.
+  detector: detection tests 0.98, shipped 0.99 on 112 claims (0.98, 65 of 66, on the final combined labels); 96%
+  agreement with the earlier labels; 2 spurious notes in 112 claims; read-back credits 11 of 11 correct. Too few
+  held-out flags remained (3 to 5 in total) to judge justification.
 
 ## Install
 

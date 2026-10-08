@@ -969,8 +969,9 @@ describe('time stays bounded on adversarial inputs', () => {
 
   test('heredoc openers whose only closer differs by a character trim() would strip', () => {
     // \f, \v, NBSP and BOM before the word, or \r leading it, are not what a closing line allows around its word.
-    // Not doubled like the cases around it: under the test kit the current scan already takes 15-30 ms here, and 35-77 ms
-    // at twice the size. At this size 28ec1b6 read 63-71 ms on four closers and 44 ms on the BOM one.
+    // Not doubled like the cases around it: under the full suite the current scan's fastest of five reads 27-38 ms here,
+    // and 50-77 ms at twice the size. Reverting only the trim() fix reads 70-130 ms on all five closers; 28ec1b6 read
+    // 84.5, 53.4, 48.4, 47.2 and 51.2 ms, so it is caught on the first closer only.
     for (const closer of ['\fA', 'A\v', ' A', '\rA', '﻿A']) {
       const command = (n: number) => `${'<<A\n'.repeat(n)}${closer}`
       expect(ms(2495, n => kinds(sh(command(n)))), JSON.stringify(closer)).toBeLessThan(50)
