@@ -55,7 +55,7 @@ that.
 If Claude was idle, Bridge then submits a wake, `<bridge-wake/>`, which arrives framed as "The bridge
 plugin sent a message". Answers given together share one wake. An answer given during a turn needs no
 wake if a later step of that turn reads it; otherwise one wake follows when the turn ends with an answer.
-After a turn that was interrupted or ended in an error, nothing wakes, and the answer reaches Claude with
+After a turn that was interrupted, refused or ended in an error, nothing wakes, and the answer reaches Claude with
 your next prompt. Bridge never adds anything to a prompt you type.
 
 If a wake cannot be submitted, a toast says "Bridge: answer saved; it reaches Claude with your next
@@ -69,14 +69,15 @@ two toasts are the only notice of a lost answer.
 - **A decision lives for the session.** `/clear` and `/resume` empty the queue (ids restart at 1) and
   close the pane.
 - **An answer given in prose does not close a card.** Answer from the pane.
-- **The band** is drawn on terminal and desktop only, and yields to a survey. On Remote Control a queued
-  decision shows only as the tool call in the transcript, unless the pane is open.
-- **On the phone there is no Other field** (the surface draws no text input). Picks and Make it so work.
+- **The band** is drawn on terminal and desktop only, and yields to a survey. Elsewhere (Remote Control,
+  an IDE) a queued decision shows only as the tool call in the transcript, unless the pane is open.
+- **On the phone there is no Other field** (the surface draws no text input). The pick and Make it so
+  buttons are drawn there; answering from the phone was not tried live.
 - **The key pause is sized for Windows.** macOS and X11 repeat delays can be set slower than 1.1 s, and
   there a held key can still answer the next card. The value comes from one live failure (holding `m`
   answered two cards at the old 400 ms pause, with a 500 ms repeat delay) and has not yet been re-run live.
-- **No toast for a new decision.** In testing none was ever seen from the decide tool's path while the
-  band showed every time. That was outside fullscreen mode, where a toast is a 4 s line on the
+- **No toast for a new decision.** An earlier build raised one, but in testing none was ever seen from
+  the decide tool's path while the band showed every time, so Bridge no longer raises it. That was outside fullscreen mode, where a toast is a 4 s line on the
   notification bar, so the cause is unproven; the band is the notice either way.
 
 ## Shared code
