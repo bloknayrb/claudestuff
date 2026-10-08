@@ -888,15 +888,25 @@ describe('runners are commands, not arguments; ops that do nothing', () => {
 })
 
 describe('time stays bounded on adversarial inputs', () => {
-  const ms = (fn: () => unknown) => {
-    const t = performance.now()
-    fn()
-    return performance.now() - t
+  // The fastest of five fresh inputs, sizes n to n+4, after one untimed run at n-1 so the budget times matching, not
+  // the engine's first compile of a pattern for large inputs (which a cubic pattern would not survive either: 3,000
+  // lines took 33 s). One sample is not usable: under a live session's load these read 54-108 ms, then passed on a
+  // quiet run. Nor is repeating one input: a repeat comes back nearly free (a cached result). The minimum over fresh
+  // inputs is what load inflates least and a quadratic scan still cannot get under.
+  const ms = (n: number, run: (n: number) => unknown) => {
+    run(n - 1)
+    let best = Infinity
+    for (let i = 0; i < 5; i++) {
+      const t = performance.now()
+      run(n + i)
+      best = Math.min(best, performance.now() - t)
+    }
+    return best
   }
   test('a many-variable status echo against long output lines', () => {
     for (const [k, len] of [[4, 700], [5, 300], [8, 40]] as const) {
       const vars = Array.from({ length: k }, (_, i) => `$V${i}`).join(' ')
-      expect(ms(() => kinds(sh(`npm test; echo "${vars} rc=$?"`), said('ab '.repeat(len)))), `${k} variables`).toBeLessThan(50)
+      expect(ms(len, n => kinds(sh(`npm test; echo "${vars} rc=$?"`), said('ab '.repeat(n)))), `${k} variables`).toBeLessThan(50)
     }
   })
 
@@ -905,9 +915,9 @@ describe('time stays bounded on adversarial inputs', () => {
     for (const [sep, k, unit] of [[',', 8, ',1'], [',', 10, ',1'], [':', 8, ':1'], [':', 10, ':1'], [', ', 10, ', 1'], ['/', 10, '/1'], [':', 10, '1 ']] as const) {
       const vars = Array.from({ length: k }, (_, i) => `$V${i}`).join(sep)
       // Every position is a digit or next to one, so the candidate scan runs; just under the status-line cap.
-      const line = unit.repeat(Math.floor(298 / unit.length))
-      expect(ms(() => kinds(sh(`npm test; echo "${vars} rc=$?"`), said(line))), `${JSON.stringify(sep)} x${k} on ${JSON.stringify(unit)}`).toBeLessThan(50)
-      expect(ms(() => kinds(sh(`npm test; echo "${vars} $? ${vars}"`), said(line))), `${JSON.stringify(sep)} x${k} both sides`).toBeLessThan(50)
+      const units = Math.floor(298 / unit.length) - 5
+      expect(ms(units, n => kinds(sh(`npm test; echo "${vars} rc=$?"`), said(unit.repeat(n)))), `${JSON.stringify(sep)} x${k} on ${JSON.stringify(unit)}`).toBeLessThan(50)
+      expect(ms(units, n => kinds(sh(`npm test; echo "${vars} $? ${vars}"`), said(unit.repeat(n)))), `${JSON.stringify(sep)} x${k} both sides`).toBeLessThan(50)
     }
     // Mixed separators still read the status.
     expect(kinds(sh('npm test; echo "$A,$B:$C/$D rc=$?"'), said('a,b:c/d rc=1'))).toEqual(['tests~failed'])
@@ -915,18 +925,18 @@ describe('time stays bounded on adversarial inputs', () => {
 
   test('many options before a word that is not the runner', () => {
     const re = configOf(['npm test'], []).tests[0]
-    const plain = `npm ${Array.from({ length: 24 }, (_, i) => `--opt${i}`).join(' ')} install`
-    expect(ms(() => re?.test(plain))).toBeLessThan(50)
+    const plain = (n: number) => `npm ${Array.from({ length: n }, (_, i) => `--opt${i}`).join(' ')} install`
+    expect(ms(24, n => re?.test(plain(n)))).toBeLessThan(50)
   })
 
   test('launchers and options repeated, with no runner after them', () => {
     const re = configOf(['vitest'], []).tests[0]
     kinds(sh('pnpm -a install')) // warm
-    for (const n of [24, 30]) {
+    for (const size of [24, 30]) {
       for (const unit of ['pnpm -a ', 'yarn -a ', 'bun -a ', 'npx -a ', 'pnpm --x ', 'bun run -a ', 'uv run -a ']) {
-        const command = `${unit.repeat(n)}install`
-        expect(ms(() => re?.test(command)), `${JSON.stringify(unit)} x${n}`).toBeLessThan(50)
-        expect(ms(() => kinds(sh(command))), `classify ${JSON.stringify(unit)} x${n}`).toBeLessThan(50)
+        const command = (n: number) => `${unit.repeat(n)}install`
+        expect(ms(size, n => re?.test(command(n))), `${JSON.stringify(unit)} x${size}`).toBeLessThan(50)
+        expect(ms(size, n => kinds(sh(command(n)))), `classify ${JSON.stringify(unit)} x${size}`).toBeLessThan(50)
       }
     }
   })
@@ -945,45 +955,38 @@ describe('time stays bounded on adversarial inputs', () => {
   })
 
   test('whitespace runs in a push output and digit-dense echo texts', () => {
-    // Each case runs once untimed on a slightly different input, so the budget times matching, not the engine's
-    // first compile of a pattern for large inputs (which a cubic pattern would not survive either: 3,000 lines took 33 s).
+    // Twice the sizes that first caught these scans, so a quadratic version lands far over the budget, not near it.
     const push = (out: string) => kinds(sh('git push 2>&1 | tail -3'), said(out))
-    push(`To github.com:x/y.git\n${'\n'.repeat(2999)}done`)
-    expect(ms(() => push(`To github.com:x/y.git\n${'\n'.repeat(3000)}done`)), 'blank lines').toBeLessThan(50)
-    push(`a${' \r'.repeat(399)}\nb`)
-    expect(ms(() => push(`a${' \r'.repeat(400)}\nb`)), 'space and CR').toBeLessThan(50)
+    expect(ms(6000, n => push(`To github.com:x/y.git\n${'\n'.repeat(n)}done`)), 'blank lines').toBeLessThan(50)
+    expect(ms(800, n => push(`a${' \r'.repeat(n)}\nb`)), 'space and CR').toBeLessThan(50)
     // One long run of spaces or tabs on a single line: the optional plus no longer splits it two ways.
-    push(`${' '.repeat(8999)}x`)
-    expect(ms(() => push(`${' '.repeat(9000)}x`)), '9,000 spaces').toBeLessThan(50)
-    push(`${'\t'.repeat(9899)}x`)
-    expect(ms(() => push(`${'\t'.repeat(9900)}x`)), '9,900 tabs').toBeLessThan(50)
+    expect(ms(18000, n => push(`${' '.repeat(n)}x`)), '18,000 spaces').toBeLessThan(50)
+    expect(ms(19800, n => push(`${'\t'.repeat(n)}x`)), '19,800 tabs').toBeLessThan(50)
     // 150 echoes whose texts end in 40 digits: the scan checks each maximal digit run once.
     const echoes = (n: number) => Array.from({ length: n }, (_, i) => `pytest;echo "$A$?x${i}$B ${'1'.repeat(40)}"`).join('\n')
-    kinds(sh(echoes(149)), said(''))
-    expect(ms(() => kinds(sh(echoes(150)), said(''))), 'digit-dense echoes').toBeLessThan(50)
+    expect(ms(150, n => kinds(sh(echoes(n)), said(''))), 'digit-dense echoes').toBeLessThan(50)
   })
 
   test('heredoc openers whose only closer differs by a character trim() would strip', () => {
     // \f, \v, NBSP and BOM before the word, or \r leading it, are not what a closing line allows around its word.
+    // Not doubled like the cases around it: under the test kit the current scan already takes 15-30 ms here, and 35-77 ms
+    // at twice the size. At this size 28ec1b6 read 63-71 ms on four closers and 44 ms on the BOM one.
     for (const closer of ['\fA', 'A\v', ' A', '\rA', '﻿A']) {
       const command = (n: number) => `${'<<A\n'.repeat(n)}${closer}`
-      kinds(sh(command(2494)))
-      expect(ms(() => kinds(sh(command(2495)))), JSON.stringify(closer)).toBeLessThan(50)
+      expect(ms(2495, n => kinds(sh(command(n)))), JSON.stringify(closer)).toBeLessThan(50)
     }
   })
 
   test('unterminated heredoc openers and long `${` runs', () => {
+    // Twice the sizes that first caught these, as for the push cases.
     const openers = (n: number) => `${'cat <<A '.repeat(n)}\nnpm test`
-    kinds(sh(openers(2499)))
-    expect(ms(() => kinds(sh(openers(2500)))), '2,500 openers').toBeLessThan(50)
+    expect(ms(5000, n => kinds(sh(openers(n)))), '5,000 openers').toBeLessThan(50)
     const nested = (n: number) => `bash -c 'bash -c "${'x <<A '.repeat(n)}"'`
-    kinds(sh(nested(2499)))
-    expect(ms(() => kinds(sh(nested(2500)))), '2,500 openers inside bash -c twice').toBeLessThan(50)
+    expect(ms(5000, n => kinds(sh(nested(n)))), '5,000 openers inside bash -c twice').toBeLessThan(50)
     // A real heredoc is still dropped as data, and a later run still counts.
     expect(kinds(sh("cat <<A\npytest\nA\nnpm test"))).toEqual(['tests'])
     const dollars = (n: number) => `npm test; echo "${'${'.repeat(n)} $?"`
-    kinds(sh(dollars(4984)), said('x 0'))
-    expect(ms(() => kinds(sh(dollars(4985)), said('x 0'))), '4,985 `${`').toBeLessThan(50)
+    expect(ms(9970, n => kinds(sh(dollars(n)), said('x 0'))), '9,970 `${`').toBeLessThan(50)
   })
 
   test('a segment over 1,000 characters is not matched: no run', () => {
@@ -992,10 +995,10 @@ describe('time stays bounded on adversarial inputs', () => {
   })
 
   test('a command of 1,500 runs, each with a status echo, stays linear', () => {
-    const command = Array.from({ length: 1500 }, (_, i) => `pytest tests/t${i}.py; echo "exit=$?"`).join('\n')
-    const output = Array.from({ length: 1500 }, () => 'exit=0').join('\n')
+    const command = (n: number) => Array.from({ length: n }, (_, i) => `pytest tests/t${i}.py; echo "exit=$?"`).join('\n')
+    const output = (n: number) => Array.from({ length: n }, () => 'exit=0').join('\n')
     // A wider budget than the regex probes: this one does real work per run (was 2.7 s quadratic).
-    expect(ms(() => kinds(sh(command), said(output)))).toBeLessThan(250)
+    expect(ms(1500, n => kinds(sh(command(n)), said(output(n))))).toBeLessThan(250)
   })
 })
 
