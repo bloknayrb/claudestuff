@@ -7,7 +7,11 @@ export const PANE_TITLE = 'Bridge'
 
 // After an answer, the keys are paused for this long, and each press during the pause restarts it (a
 // debounce), so a double-tap or a held key's repeat cannot answer a card the user has not read.
-export const ARM_DELAY_MS = 400
+// 1100 ms because a held key's first repeat comes only after the OS repeat delay, and Windows allows
+// 250-1000 ms, so this is above its largest. A pause shorter than the delay ends before the first repeat,
+// which then lands as a fresh press on the next card (seen live at 400 ms with a 500 ms delay). macOS and
+// X11 can be set slower than 1100 ms, and there a held key can still answer the next card.
+export const ARM_DELAY_MS = 1100
 
 // What the trees need from a surface's table. Typing UI is gated on the surface, never on whether the
 // table has an Input: every surface's table hands one out, and on mobile it draws nothing.

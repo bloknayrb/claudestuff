@@ -117,15 +117,19 @@ test('a press during the key pause answers nothing and restarts the pause; an ea
   expect(w.appends).toHaveLength(1)
   expect((await ui.find({ key: 'make-2' }))?.props.hotkey).toBe('m')
   expect(await isPaused(ui)).toBe(true)
-  await w.clock.advance(300)
+  // A press 100 ms before the answer's pause would end.
+  const early = ARM_DELAY_MS - 100
+  await w.clock.advance(early)
   await press(ui, w, 'make-2')
   expect(w.appends).toHaveLength(1)
-  // 400 ms after the answer: its own timer has fired, but the press at 300 ms pushed the end to 700 ms.
+  // ARM_DELAY_MS after the answer: its own timer has fired, but the press at `early` pushed the end to
+  // early + ARM_DELAY_MS.
   await w.clock.advance(100)
   expect(await isPaused(ui)).toBe(true)
   await press(ui, w, 'pick-2-0')
   expect(w.appends).toHaveLength(1)
-  // That press at 400 ms moved the end to 800 ms; a held key keeps the pause alive indefinitely.
+  // That press at ARM_DELAY_MS moved the end to 2 * ARM_DELAY_MS; a held key keeps the pause alive
+  // indefinitely.
   await w.clock.advance(ARM_DELAY_MS - 1)
   expect(await isPaused(ui)).toBe(true)
   await w.clock.advance(1)
@@ -134,6 +138,35 @@ test('a press during the key pause answers nothing and restarts the pause; an ea
   await ui.unmount()
   expect(w.appends).toHaveLength(2)
   expect(await pendingIds($)).toEqual([])
+})
+
+// A held key, as the dogfood saw it (D9): the first auto-repeat comes 500 ms after the press (Windows
+// KeyboardDelay 1), then one every ~33 ms. The kit presses by Button key, so each repeat presses the
+// next card's button: the answered card's own button returns early and would pass at any pause.
+test('a held key does not answer the next card: its repeats only extend the pause', async ($, on) => {
+  const w = world(on)
+  await start($)
+  await decide($)
+  await decide($, { ...SAMPLE, question: 'Second?' })
+  const ui = await mountPane($, 'terminal')
+  await press(ui, w, 'make-1')
+  expect(w.appends).toHaveLength(1)
+  await w.clock.advance(500)
+  await press(ui, w, 'make-2')
+  // Checked here too: once #2 is answered its button is gone, and a later repeat could not be pressed.
+  expect(w.appends).toHaveLength(1)
+  for (let held = 33; held <= 1000; held += 33) {
+    await w.clock.advance(33)
+    await press(ui, w, 'make-2')
+  }
+  expect(w.appends).toHaveLength(1)
+  // Let go: the pause ends ARM_DELAY_MS after the last repeat, not a moment before.
+  await w.clock.advance(ARM_DELAY_MS - 1)
+  expect(await isPaused(ui)).toBe(true)
+  await w.clock.advance(1)
+  expect(await isPaused(ui)).toBe(false)
+  await ui.unmount()
+  expect(await pendingIds($)).toEqual([2])
 })
 
 test('during a turn: append only; a later main step reads it, so no wake', async ($, on) => {
