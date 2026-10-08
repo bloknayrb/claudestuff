@@ -1,4 +1,5 @@
 import { expect, test } from 'claude-code/testing'
+import type { Engine } from 'claude-code/testing'
 
 import { ARM_DELAY_MS } from '../hooks/ui'
 import { parseRowStrict } from './strict-row'
@@ -69,6 +70,24 @@ test('Other round-trips the exact text; blank text (by Python whitespace) sends 
     expect(parseRowStrict(w.appends.at(-1) ?? '')).toEqual({ id, question: 'Which database?', choice: 'other', text })
     await runTurn($, w, `wake-${id}`)
   }
+})
+
+// Decisions are answered only from the pane: the typed go-ahead was dropped (dogfood D8), since a row
+// appended for a typed prompt reached the model only after its first tool call. The prompt now passes
+// through untouched, the decision stays pending, and Bridge appends nothing.
+test('a typed "make it so" with one decision pending leaves it pending and appends nothing', async ($, on) => {
+  const w = world(on)
+  await start($)
+  await decide($)
+  await runTurn($, w, 't0', 'Done. Tests pass.')
+  type Submit = Parameters<Engine['prompt']['submit']>[0]
+  await $.prompt.submit({ text: 'make it so', origin: { kind: 'composer' }, wait: false } as Submit)
+  await w.clock.settle()
+  await runTurn($, w, 't1')
+  expect(w.prompts.at(-1)).toEqual({ text: 'make it so', origin: 'composer', context: [] })
+  expect(w.appends).toEqual([])
+  expect(wakes(w)).toBe(0)
+  expect(await pendingIds($)).toEqual([1])
 })
 
 // Concurrency, not drawing: one surface is enough for the next three tests.

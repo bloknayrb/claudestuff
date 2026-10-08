@@ -1,13 +1,12 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderViewport } from 'claude-code'
 
-import type { Answer, BridgeSession, DecideInput, PendingRow } from '../types'
+import type { Answer, BridgeSession, DecideInput } from '../types'
 import { addDecision, idForUse, isAnsweredBy, markAnswered, pending, recommendedAnswer, reopen } from './book'
 import { mainTurnEnded, mainTurnStarted, rowAppended, stepBegan } from './delivery'
-import { asksQuestion, isFromUser, isGoAhead, stillPendingLine } from './prompt'
 import { APPEND_MARK, formatRow, isBlankText } from './row'
 import { denialFor, INPUT_SCHEMA, isSubagentCall, receipt, SUBAGENT_DENIAL, TOOL_DESCRIPTION, TOOL_NAME, validateDecide } from './decide'
-import { freshSession, lastTurn, normalize, resetSession, withTurnText } from './session'
+import { freshSession, normalize, resetSession } from './session'
 import { ARM_DELAY_MS, bandTree, PANE_ID, paneTree, PANE_TITLE } from './ui'
 import type { CardActions } from './ui'
 
@@ -21,9 +20,8 @@ const WAKE_TEXT = '<bridge-wake/>'
 const WAKE_RETRY_MS = 500
 const WAKE_FAIL_TOAST = 'Bridge: answer saved; it reaches Claude with your next prompt.'
 
-// The delivery module's row tags: an answer row, and a still-pending note.
+// The delivery module's row tag for an answer row.
 const ROW_TAG = 'decision'
-const NOTE_TAG = 'note'
 
 // The test kit's refusal of a plugin append; a live engine always serves one.
 const KIT_NO_APPEND = 'no implementation for session.append'
@@ -240,8 +238,7 @@ async function retryWake($: EngineInterface): Promise<void> {
   $.ui.toast(WAKE_FAIL_TOAST)
 }
 
-// A press answers while Claude may be idle, so the row may need a wake. The typed go-ahead takes the
-// deferred path instead (that prompt is itself the turn that reads the row).
+// A press answers while Claude may be idle, so the row may need a wake.
 async function answerWith($: EngineInterface, id: number, answer: Answer): Promise<boolean> {
   const now = await $.clock.now()
   const nonce = `${now}-${Math.random()}`
@@ -275,71 +272,6 @@ async function answerWith($: EngineInterface, id: number, answer: Answer): Promi
   if (done.isWake) startWake($)
   await closePaneIfDone($, done.session)
   return true
-}
-
-// A prompt typed while idle: the decision is claimed now (a press in between loses to it, by the
-// nonce) and its row, or the still-pending note when answer is null, waits in a queue for turn.start.
-// Queued, never a single slot, so a later go-ahead cannot overwrite a claimed row not yet flushed.
-// Returns the entry's nonce, or null when the claim was lost.
-async function deferRow($: EngineInterface, id: number, answer: Answer | null): Promise<string | null> {
-  const nonce = `${await $.clock.now()}-${Math.random()}`
-  return transact($, s => {
-    if (answer === null) {
-      const row: PendingRow = { tag: NOTE_TAG, text: stillPendingLine(id), id, nonce }
-      return { session: { ...s, pendingRows: [...s.pendingRows, row] }, out: nonce }
-    }
-    const book = markAnswered(s.book, id, answer, nonce)
-    const claimed = book.decisions.find(d => d.id === id)
-    if (!isAnsweredBy(book, id, nonce) || claimed === undefined) return { session: s, out: null }
-    const row: PendingRow = { tag: ROW_TAG, text: formatRow(claimed, answer), id, nonce }
-    return { session: { ...s, book, pendingRows: [...s.pendingRows, row] }, out: nonce }
-  })
-}
-
-// The prompt the entry was made for never entered (a settings hook dropped it): take the entry back
-// out and reopen the decision, as if the go-ahead had not been typed.
-async function undoDeferred($: EngineInterface, id: number, nonce: string): Promise<void> {
-  // Only while its entry is still queued: once a turn.start has flushed the row it was delivered, the
-  // claim stands, and reopening would let a later press append a contradictory second answer.
-  await transact($, s => {
-    if (!s.pendingRows.some(r => r.nonce === nonce)) return { session: s, out: null }
-    return {
-      session: { ...s, book: reopen(s.book, id, nonce), pendingRows: s.pendingRows.filter(r => r.nonce !== nonce) },
-      out: null,
-    }
-  })
-}
-
-// A prompt typed while a turn runs is read at that turn's next step, and no turn.start need follow, so
-// its still-pending note is appended at once. Like every note, it is not recorded with the delivery
-// module: nothing needs to track it, and a recorded note still unread at an answered turn end would
-// cause a pointless wake.
-async function appendNote($: EngineInterface, id: number): Promise<void> {
-  const appended = await appendRow($, stillPendingLine(id))
-  if (!appended.isAppended) await fail($, 'append', appended.why)
-}
-
-// From turn.start, after mainTurnStarted: the rows land before the turn's first step, so that step
-// reads them, and they never wake (the user's prompt is the turn). A failed append reopens its decision.
-async function flushPendingRows($: EngineInterface): Promise<void> {
-  const rows = await transact($, s => ({ session: { ...s, pendingRows: [] }, out: s.pendingRows }))
-  for (const row of rows) {
-    const appended = await appendRow($, row.text)
-    if (!appended.isAppended) {
-      if (row.tag === ROW_TAG) {
-        await transact($, s => ({ session: { ...s, book: reopen(s.book, row.id, row.nonce) }, out: null }))
-        $.ui.toast(`Bridge: decision #${row.id} could not be delivered (${appended.why}); it is pending again.`)
-      }
-      await fail($, 'append', appended.why)
-      continue
-    }
-    if (row.tag !== ROW_TAG) continue
-    const after = await transact($, s => {
-      const next: BridgeSession = { ...s, delivery: rowAppended(s.delivery, row.tag).delivery }
-      return { session: next, out: next }
-    })
-    await closePaneIfDone($, after)
-  }
 }
 
 async function pickOption($: EngineInterface, id: number, index: number): Promise<void> {
@@ -390,53 +322,14 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // "Make it so" typed at the prompt. Only the user's own prompt (composer or Remote Control; see
-  // prompt.ts), only the whole text "make it so"/"engage", only with exactly one decision pending. The
-  // prompt passes on exactly as received, with no context from Bridge, so nothing Bridge writes can
-  // pass for the user's words; what Bridge has to say goes in its own appended rows.
-  //
-  // Typed while idle, the prompt starts a turn, and next() resolves only after that turn has started
-  // (its turn.start has already run). So the row is claimed and queued BEFORE next, and turn.start
-  // appends it ahead of the first step. If the prompt turns out dropped, the claim is undone.
-  on('prompt.submit', async ($, e, next) => {
-    if (!isFromUser(e.origin) || !isGoAhead(e.text)) return next(e)
-    const s = await readSession($)
-    const open = pending(s.book)
-    const decision = open[0]
-    if (open.length !== 1 || decision === undefined) return next(e)
-    // Typed mid-turn, the answer it follows is still streaming: note only. The question check reads
-    // the whole visible text of the last main turn.
-    const isIdle = e.turnId === undefined
-    const canResolve = isIdle && s.last?.reason === 'answer' && !asksQuestion(s.last.text)
-    const queued = isIdle ? await deferRow($, decision.id, canResolve ? recommendedAnswer(decision) : null) : null
-    let entered: Awaited<ReturnType<typeof next>>
-    try {
-      entered = await next(e)
-    } catch (err) {
-      if (queued !== null) await guard($, 'make it so', undoDeferred($, decision.id, queued))
-      throw err
-    }
-    if (entered.drop !== undefined) {
-      if (queued !== null) await guard($, 'make it so', undoDeferred($, decision.id, queued))
-      return entered
-    }
-    if (!isIdle) await guard($, 'make it so', appendNote($, decision.id))
-    return entered
-  }).catch(async ($, e, next) => {
-    if (next.error.kind !== 're-entry') await fail($, 'prompt.submit', next.error.message ?? next.error.kind)
-    // Never drop the user's prompt: when next was called this replays what it settled to.
-    return next(e)
-  })
-
   // turn.start fires for the main loop only (a subagent's run raises none).
   on('turn.start', async ($, e, next) => {
     try {
       await transact($, s => ({
-        session: { ...s, delivery: mainTurnStarted(s.delivery), isWakeQueued: false, turnText: '' },
+        session: { ...s, delivery: mainTurnStarted(s.delivery), isWakeQueued: false },
         out: null,
       }))
       void guard($, 'heartbeat', refreshHeartbeat($))
-      await flushPendingRows($)
     } catch (err) {
       await fail($, 'turn.start', err)
     }
@@ -444,26 +337,16 @@ export const register: Register = on => {
   })
 
   // The shared race guard: "a main step began" before next, so rows appended from here on are not
-  // marked read by this step. After next, the step's visible text joins the turn's text (the question
-  // check for "make it so" reads every text block of the turn, not only the last one).
+  // marked read by this step.
   on('turn.step', async function* ($, e, next) {
-    const isMain = e.agentId === undefined
-    if (isMain) {
+    if (e.agentId === undefined) {
       try {
         await transact($, s => ({ session: { ...s, delivery: stepBegan(s.delivery) }, out: null }))
       } catch (err) {
         await fail($, 'turn.step', err)
       }
     }
-    const result = yield* next(e)
-    if (isMain && result.answer !== '') {
-      try {
-        await transact($, s => ({ session: withTurnText(s, result.answer), out: null }))
-      } catch (err) {
-        await fail($, 'turn.step', err)
-      }
-    }
-    return result
+    return yield* next(e)
   })
 
   on('turn.complete', async ($, e, next) => {
@@ -474,7 +357,7 @@ export const register: Register = on => {
         const r = mainTurnEnded(s.delivery, e.reason)
         const wake = r.isWake && !s.isWakeQueued
         return {
-          session: { ...s, delivery: r.delivery, isWakeQueued: s.isWakeQueued || wake, last: lastTurn(s, e.reason, e.answer) },
+          session: { ...s, delivery: r.delivery, isWakeQueued: s.isWakeQueued || wake },
           out: wake,
         }
       })

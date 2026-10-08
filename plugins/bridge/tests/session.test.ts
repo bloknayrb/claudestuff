@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import { addDecision } from '../hooks/book'
 import { freshDelivery, rowAppended } from '../hooks/delivery'
-import { freshSession, lastTurn, normalize, resetSession, TURN_TEXT_CAP, withTurnText } from '../hooks/session'
+import { freshSession, normalize, resetSession } from '../hooks/session'
 import { SAMPLE } from './world'
 
 test('a fresh session is empty, with the shared module fresh', () => {
@@ -28,15 +28,8 @@ test('resetSession forgets decisions and delivery', () => {
   expect(resetSession()).toEqual(freshSession())
 })
 
-test('the turn text joins every step and keeps the newest end', () => {
-  const s = withTurnText(withTurnText(withTurnText(freshSession(), 'Shall I push?'), ''), 'Done.')
-  expect(s.turnText).toBe('Shall I push?\n\nDone.')
-  expect(lastTurn(s, 'answer', 'Done.')).toEqual({ reason: 'answer', text: 'Shall I push?\n\nDone.' })
-  const long = withTurnText(freshSession(), 'x'.repeat(TURN_TEXT_CAP + 10) + '?')
-  expect(long.turnText).toHaveLength(TURN_TEXT_CAP)
-  expect(long.turnText.endsWith('?')).toBe(true)
-})
-
-test('with no step text, the last turn falls back to the final answer', () => {
-  expect(lastTurn(freshSession(), 'aborted', 'cut')).toEqual({ reason: 'aborted', text: 'cut' })
+// A value stored by the build that had the typed go-ahead (a hot reload keeps $.state).
+test('normalize drops the fields an older build stored and this one no longer has', () => {
+  const old = { ...freshSession(), turnText: 'Shall I push?', last: { reason: 'answer', text: 'x' }, pendingRows: [{ tag: 'note', text: 'n', id: 1, nonce: 'z' }] }
+  expect(normalize(old as never)).toEqual(freshSession())
 })

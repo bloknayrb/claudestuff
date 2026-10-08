@@ -51,11 +51,8 @@ export type World = {
   // false: the pane is placed but sits as a background tab behind another plugin's pane.
   isShown: boolean
   dropWakes: boolean
-  dropTyped: boolean
   // >0: each turn.step stub sleeps this long on the mock clock, so a test can press mid-step.
   stepHoldMs: number
-  // >0: each prompt.submit stub sleeps this long on the mock clock before answering (see below).
-  submitHoldMs: number
   // The visible text each next main step returns (TurnStepResult.answer), in order; '' when empty.
   stepAnswers: string[]
   // Rows the plugin appended, read from its append seam's debug lines (the kit serves no plugin append).
@@ -83,9 +80,7 @@ export function world(on: On, options: WorldOptions = {}): World {
     placed: options.placed ?? true,
     isShown: true,
     dropWakes: false,
-    dropTyped: false,
     stepHoldMs: 0,
-    submitHoldMs: 0,
     stepAnswers: [],
     appends: [],
     prompts: [],
@@ -142,12 +137,8 @@ export function world(on: On, options: WorldOptions = {}): World {
   // focus move into the Other field is checked in a live session.
   // No session.append stub: the kit never runs a test hook for a plugin's own append. The
   // plugin's append seam treats the kit's refusal as appended and logs the row under APPEND_MARK.
-  on('prompt.submit', async (_$, e) => {
-    // Holding the submit open models the engine's order: next() resolves only once the prompt's turn
-    // has started, so a test can raise turn.start while the plugin's hook is still waiting on it.
-    if (w.submitHoldMs > 0) await w.clock.sleep(w.submitHoldMs)
+  on('prompt.submit', (_$, e) => {
     if (e.origin.kind === 'plugin' && w.dropWakes) return { drop: 'wake refused in test' }
-    if (e.origin.kind !== 'plugin' && w.dropTyped) return { drop: 'prompt refused in test' }
     w.prompts.push({ text: e.text, origin: e.origin.kind, context: e.context ?? [] })
     return { text: e.text, context: e.context, origin: e.origin }
   })

@@ -5,6 +5,8 @@ export const TOOL_NAME = 'decide'
 export const TOOL_DESCRIPTION = [
   'Queue a decision for the user and keep working: the call returns at once with the decision number,',
   'and the answer arrives later as a user message `Bridge decision: {json}`.',
+  'The user answers only from the Bridge pane (`/bridge`); the band above the prompt only shows how many are pending.',
+  'A prompt the user types, such as "make it so", does not answer a decision: treat it as an ordinary message.',
   'Use it only for a call that is really the user\'s. Procedural calls are yours: make them.',
   'If you cannot go on at all without the answer, use AskUserQuestion instead; use this tool when other work does not depend on it.',
   'Put everything needed to judge on the card, since the user should not have to recall anything:',

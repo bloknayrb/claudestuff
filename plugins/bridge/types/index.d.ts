@@ -26,8 +26,8 @@ export type LabelAnswer = { choice: 'label'; label: string }
 export type OtherAnswer = { choice: 'other'; text: string }
 export type Answer = LabelAnswer | OtherAnswer
 
-// 'answered' covers every way a decision closes: a pick, Other, Make it so (button) and "make it so" typed
-// at the prompt. Each one appends a row, so there is no separate 'resolved' state.
+// 'answered' covers every way a decision closes from the pane: a pick, Other, and Make it so (button or
+// the m key). Each one appends a row, so there is no separate 'resolved' state.
 export type DecisionStatus = 'pending' | 'answered'
 
 export type Decision = DecideInput & {
@@ -43,10 +43,6 @@ export type Decision = DecideInput & {
 
 export type Book = { decisions: Decision[]; nextId: number }
 
-// How the last main turn ended, and its whole visible text (every main step's text, not only the
-// final block that turn.complete's `answer` holds).
-export type LastTurn = { reason: EndReason; text: string }
-
 // isPaneUp: Bridge's own record of whether its pane is open; re-synced from $.ui.panes() before it is
 // trusted for surfacing. otherFor: the card whose Other field is open (its hotkeys are off meanwhile).
 // keysPausedUntil: the clock time the key pause after an answer ends, or null. During it a press on a
@@ -54,20 +50,12 @@ export type LastTurn = { reason: EndReason; text: string }
 // until it has been let go for the whole delay. Each pause's timer clears only its own deadline.
 export type ViewState = { isPaneUp: boolean; otherFor: number | null; keysPausedUntil: number | null }
 
-// Rows the prompt hook decided on for a prompt typed while idle, held until turn.start appends them in order.
-// next() resolves after that turn started, so they are claimed before it and flushed by its turn.start.
-export type PendingRow = { tag: 'decision' | 'note'; text: string; id: number; nonce: string }
-
 export type BridgeSession = {
   book: Book
   // The shared module's state (copied from Red Team, hooks/delivery.ts).
   delivery: DeliveryState
   // A wake was submitted and its turn has not started yet: a second idle answer rides on it.
   isWakeQueued: boolean
-  // The running main turn's visible text so far (capped); copied into `last` when it ends.
-  turnText: string
-  last: LastTurn | null
-  pendingRows: PendingRow[]
   view: ViewState
 }
 
