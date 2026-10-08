@@ -53,7 +53,8 @@ export type World = {
   dropWakes: boolean
   // >0: each turn.step stub sleeps this long on the mock clock, so a test can press mid-step.
   stepHoldMs: number
-  // The visible text each next main step returns (TurnStepResult.answer), in order; '' when empty.
+  // What each next main step's stub returns as TurnStepResult.answer, in order ('' when empty). The
+  // stub's result type requires the field; Bridge reads nothing from it.
   stepAnswers: string[]
   // Rows the plugin appended, read from its append seam's debug lines (the kit serves no plugin append).
   appends: string[]
@@ -209,7 +210,8 @@ export async function endTurn(
   await w.clock.settle()
 }
 
-// One main turn with one step whose visible text is `answer` (so the turn's text is `answer`).
+// One main turn with one step, ending as an answer. `answer` fills the step's and the turn's answer
+// fields, which the engine's types require; Bridge does not read them.
 export async function runTurn($: Engine, w: World, turnId: string, answer = 'Done.'): Promise<void> {
   await $.turn.start({ text: 'x', turnId })
   w.stepAnswers.push(answer)

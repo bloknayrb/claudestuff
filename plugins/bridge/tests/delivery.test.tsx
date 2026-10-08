@@ -74,7 +74,9 @@ test('Other round-trips the exact text; blank text (by Python whitespace) sends 
 
 // Decisions are answered only from the pane: the typed go-ahead was dropped (dogfood D8), since a row
 // appended for a typed prompt reached the model only after its first tool call. The prompt now passes
-// through untouched, the decision stays pending, and Bridge appends nothing.
+// through untouched, the decision stays pending, and Bridge appends nothing. The 'Done. Tests pass.'
+// turn first recreates the conditions under which the old build took a typed go-ahead as the answer
+// (a finished turn, one decision pending), so the test fails if that path comes back.
 test('a typed "make it so" with one decision pending leaves it pending and appends nothing', async ($, on) => {
   const w = world(on)
   await start($)
@@ -188,6 +190,31 @@ test('a held key does not answer the next card: its repeats only extend the paus
   expect(await pendingIds($)).toEqual([2])
 })
 
+// Windows' slowest key repeat delay (KeyboardDelay 3). ARM_DELAY_MS is chosen to sit above it.
+const WINDOWS_MAX_REPEAT_DELAY_MS = 1000
+
+// The same held key at the slowest Windows delay: the first repeat comes a full second after the press.
+// A pause shorter than that (600 ms, say) has ended by then, and the repeat answers the next card.
+test('a held key at the slowest Windows repeat delay does not answer the next card', async ($, on) => {
+  const w = world(on)
+  await start($)
+  await decide($)
+  await decide($, { ...SAMPLE, question: 'Second?' })
+  const ui = await mountPane($, 'terminal')
+  await press(ui, w, 'make-1')
+  expect(w.appends).toHaveLength(1)
+  await w.clock.advance(WINDOWS_MAX_REPEAT_DELAY_MS)
+  await press(ui, w, 'make-2')
+  expect(w.appends).toHaveLength(1)
+  for (let held = 33; held <= 1000; held += 33) {
+    await w.clock.advance(33)
+    await press(ui, w, 'make-2')
+  }
+  await ui.unmount()
+  expect(w.appends).toHaveLength(1)
+  expect(await pendingIds($)).toEqual([2])
+})
+
 test('during a turn: append only; a later main step reads it, so no wake', async ($, on) => {
   const w = world(on)
   await start($)
@@ -290,8 +317,9 @@ test('a refused wake retries once from a timer, then toasts', async ($, on) => {
   expect(w.toasts.filter(t => t.includes('next prompt'))).toHaveLength(1)
 })
 
-// Regression guard. The plugin's own close runs none of its ui.close hook, so a stale
-// isPaneUp would hide the band.
+// Regression guard. The plugin's own close runs none of its ui.close hook, so it clears isPaneUp itself.
+// The band reads the engine's pane record, not that flag, so a stale flag would not hide the band; it
+// would only cost an extra close later (at a /clear, say).
 test('answering the last card by key closes the pane, and the next decision is surfaced again', async ($, on) => {
   const w = world(on)
   await start($)

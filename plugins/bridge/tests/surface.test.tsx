@@ -1,4 +1,5 @@
 import { expect, test } from 'claude-code/testing'
+import type { Engine } from 'claude-code/testing'
 
 import { BAND_PROPS, SAMPLE, SURFACES, WIDE, NARROW, decide, mountBand, mountPane, openWithCommand, start, world } from './world'
 
@@ -142,6 +143,10 @@ test('a pane gone without any hook running is found again by the band, and by th
     expect(await band.find({ key: 'bridge-band' })).toBeDefined()
     await band.unmount()
   }
+  // The next decision re-synced the stored flag to closed: a /clear, which closes only a pane it
+  // believes is up (or the engine says is), now closes nothing.
+  await $.session.end({ reason: 'clear', sessionId: w.sessionId, resume: { id: w.sessionId } } as Parameters<Engine['session']['end']>[0])
+  expect(w.closes).toEqual([])
 })
 
 // A placed pane can be a background tab behind another plugin's pane: neither it nor a hidden band
