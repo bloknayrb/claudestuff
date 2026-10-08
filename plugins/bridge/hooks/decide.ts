@@ -41,6 +41,9 @@ export const INPUT_SCHEMA = {
   },
 }
 
+// Caps on text length, so one call cannot put an unbounded card in the pane or the stored book.
+const MAX_CHARS = { question: 500, label: 120, context: 4000, why: 1000, why_yours: 1000 } as const
+
 export type Checked = { isValid: true; input: DecideInput } | { isValid: false; problems: string[] }
 
 function isText(value: unknown): value is string {
@@ -52,7 +55,9 @@ function isText(value: unknown): value is string {
 export function validateDecide(raw: Record<string, unknown>): Checked {
   const problems: string[] = []
   for (const key of ['question', 'context', 'why', 'why_yours'] as const) {
-    if (!isText(raw[key])) problems.push(`${key} must be a non-empty string`)
+    const value = raw[key]
+    if (!isText(value)) problems.push(`${key} must be a non-empty string`)
+    else if (value.length > MAX_CHARS[key]) problems.push(`${key} is ${value.length} characters; the limit is ${MAX_CHARS[key]}`)
   }
   const options: BridgeOption[] = []
   const given = raw.options
@@ -62,8 +67,12 @@ export function validateDecide(raw: Record<string, unknown>): Checked {
     given.forEach((option: unknown, i) => {
       const o = (option ?? {}) as Record<string, unknown>
       if (!isText(o.label)) problems.push(`options[${i}].label must be a non-empty string`)
+      else if (o.label.trim().length > MAX_CHARS.label) {
+        problems.push(`options[${i}].label is ${o.label.trim().length} characters; the limit is ${MAX_CHARS.label}`)
+      }
       if (o.detail !== undefined && typeof o.detail !== 'string') problems.push(`options[${i}].detail must be a string`)
-      options.push({ label: String(o.label ?? ''), ...(typeof o.detail === 'string' ? { detail: o.detail } : {}) })
+      // Stored trimmed, so the uniqueness check below and the answer's `label` agree on what the label is.
+      options.push({ label: String(o.label ?? '').trim(), ...(typeof o.detail === 'string' ? { detail: o.detail } : {}) })
     })
     if (new Set(options.map(o => o.label.trim())).size !== options.length) problems.push('option labels must differ')
   }

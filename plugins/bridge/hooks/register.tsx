@@ -98,7 +98,9 @@ async function guard($: EngineInterface, where: string, work: Promise<void>): Pr
 
 async function queueDecision($: EngineInterface, input: DecideInput, useId: string): Promise<number> {
   const now = await $.clock.now()
-  const key = useId !== '' ? useId : `local-${now}-${Math.random()}`
+  // The engine always supplies tool_use_id for a tool call, so the random fallback only runs in tests;
+  // a retried call there would not match its first key and could double-queue.
+  const key = useId !== '' ? useId :`local-${now}-${Math.random()}`
   const id = await transact($, s => {
     const book = addDecision(s.book, input, key, now)
     return { session: { ...s, book }, out: idForUse(book, key) }

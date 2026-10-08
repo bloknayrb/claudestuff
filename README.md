@@ -18,7 +18,6 @@
 |----------|-------------|---------|
 | **Learning** | How plugins work | example-plugin |
 | **Developer Tools** | Role-based agents, code quality, docs, local CI | professional-agents, anti-slop, documentation-updater, dev-tools |
-| **Session Guards** | Model choice and five-hour pacing for subagents | quartermaster |
 | **Office Automation** | Document creation and editing | ms-office-suite |
 | **Personal Finance** | Budgeting, investing, financial planning | personal-finance |
 | **Career Coaching** | Career exploration, resume review, interview prep | career-coach |
@@ -26,7 +25,7 @@
 | **Image Generation** | AI image prompting for Nano Banana MCP | nanobanana |
 | **Writing** | Learn your style, write in your voice | ghostwriter |
 | **Focus** | Executive function support | focus-tools |
-| **Claude Code Mods** | Live panes and hooks inside Claude Code | bridge |
+| **Claude Code Mods** | Subagent model choice and pacing, live panes and hooks inside Claude Code | quartermaster, bridge |
 
 ## Plugins at a Glance
 
@@ -92,7 +91,7 @@ Are you...
 | **anti-slop** | Easy | Low | Pre-PR branch quality audit |
 | **dev-tools** | Easy | Low | Local CI workflow validation and execution |
 | **quartermaster** | Easy | Low | Subagent model choice and usage pacing |
-| **bridge** | Easy | None | Answering Claude's decisions without blocking it |
+| **bridge** | Easy | None needed | Answering Claude's decisions without blocking it |
 | **focus-tools** | Medium | Medium | Executive function support |
 
 **Complexity Key:**
