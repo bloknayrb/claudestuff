@@ -1,0 +1,7 @@
+{
+  "name": "bridge",
+  "version": "0.1.0",
+  "description": "A non-blocking decision queue: Claude posts a decision with its context and keeps working; you answer from a pane with one key.",
+  "author": { "name": "bloknayrb" },
+  "types": "./types/index.d.ts"
+}
