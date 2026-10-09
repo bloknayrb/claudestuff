@@ -77,6 +77,11 @@
       "name": "bridge",
       "source": "./plugins/bridge",
       "description": "A non-blocking decision queue for Claude Code: Claude posts a decision with its context and keeps working; you answer from a pane with one key"
+    },
+    {
+      "name": "claim-ledger",
+      "source": "./plugins/claim-ledger",
+      "description": "Mod that checks Claude's end-of-turn claims (tests pass, builds cleanly, I've pushed) against the tool calls that actually ran"
     }
   ]
 }

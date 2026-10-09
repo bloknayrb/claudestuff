@@ -25,7 +25,7 @@
 | **Image Generation** | AI image prompting for Nano Banana MCP | nanobanana |
 | **Writing** | Learn your style, write in your voice | ghostwriter |
 | **Focus** | Executive function support | focus-tools |
-| **Claude Code Mods** | Subagent model choice and pacing, live panes and hooks inside Claude Code | quartermaster, bridge |
+| **Claude Code Mods** | Subagent model choice and pacing, live panes and hooks inside Claude Code | quartermaster, bridge, claim-ledger |
 
 ## Plugins at a Glance
 
@@ -72,6 +72,9 @@ Are you...
 ├── Want Claude to queue decisions instead of stopping to ask?
 │   └── → bridge (non-blocking decision pane)
 │
+├── Want Claude's "tests pass" claims checked against what actually ran?
+│   └── → claim-ledger (mod: flags claims with no evidence)
+│
 └── Overwhelmed and need to focus?
     └── → focus-tools (identify ONE next action)
 ```
@@ -92,6 +95,7 @@ Are you...
 | **dev-tools** | Easy | Low | Local CI workflow validation and execution |
 | **quartermaster** | Easy | Low | Subagent model choice and usage pacing |
 | **bridge** | Easy | None needed | Answering Claude's decisions without blocking it |
+| **claim-ledger** | Easy | Low | Catching unbacked "tests pass" claims |
 | **focus-tools** | Medium | Medium | Executive function support |
 
 **Complexity Key:**
@@ -201,6 +205,16 @@ Are you...
 **Agents**: anti-slop auditor (checks description-diff alignment, commit hygiene, template compliance)
 
 **Use for**: Catching lazy PRs before they hit review — mismatched descriptions, missing Closes #N, bad commit messages
+
+---
+
+### claim-ledger
+
+**What**: A Claude Code mod (function hooks, early access) that checks end-of-turn claims against the tool calls that actually ran
+
+**Commands**: `/claim-ledger` (how often a flagged claim was later backed)
+
+**Use for**: Catching "tests pass" after an edit with no test run, a piped run whose output shows no result, or "I've pushed" with no push
 
 ---
 

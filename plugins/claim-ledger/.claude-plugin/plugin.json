@@ -1,0 +1,30 @@
+{
+  "name": "claim-ledger",
+  "version": "0.1.0",
+  "description": "Checks end-of-turn claims like 'tests pass', 'builds cleanly' and 'I've pushed' against the tool calls that actually ran, and notes each claim that has no evidence.",
+  "author": { "name": "bloknayrb" },
+  "repository": "https://github.com/bloknayrb/claudestuff",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "tellModel": {
+      "type": "boolean",
+      "title": "Tell Claude too",
+      "description": "Also add each flag as a hidden note Claude reads on its next request. It never starts a turn.",
+      "default": true
+    },
+    "testCommands": {
+      "type": "string",
+      "multiple": true,
+      "title": "Test commands",
+      "description": "Commands whose successful foreground run backs a 'tests pass' claim, matched as whole words in Bash and PowerShell commands.",
+      "default": ["pytest", "uv run pytest", "npm test", "npm run test", "npm run test:e2e", "pnpm test", "yarn test", "vitest", "jest", "npx playwright test", "cargo test", "go test", "claude plugin test"]
+    },
+    "buildCommands": {
+      "type": "string",
+      "multiple": true,
+      "title": "Build commands",
+      "description": "Commands whose successful foreground run backs a 'builds cleanly' or 'type-checks' claim.",
+      "default": ["tsc", "cargo build", "npm run build", "npm run typecheck", "npm run typecheck:tests", "idf.py build"]
+    }
+  }
+}
