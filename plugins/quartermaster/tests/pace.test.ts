@@ -113,10 +113,12 @@ describe('pace line', () => {
     expect(w.status.filter(s => s !== undefined)).toEqual([])
   })
 
-  test('an unchanged line is drawn once', async ($, on) => {
+  test('an unchanged line is drawn once, hidden or shown', async ($, on) => {
     const w = world(on)
     for (let i = 0; i < 4; i++) await $.session.measure(measure([fiveHourAt(10 + i)]))
     expect(w.status).toEqual([undefined])
+    for (let i = 0; i < 3; i++) await $.session.measure(measure([fiveHourAt(100)]))
+    expect(w.status).toEqual([undefined, 'QM 5h capped'])
   })
 
   test('session start takes a reading', async ($, on) => {
@@ -160,17 +162,33 @@ describe('pace line', () => {
 })
 
 describe('the idle line', () => {
-  test('a timer redraws it: a passed cap time reads capped soon, and a passed reset hides it', async ($, on) => {
+  test('a timer redraws it: flat idle usage pushes the cap past the reset, never "capped soon"', async ($, on) => {
     const w = world(on, {
       limits: [fiveHourAt(50)],
       store: { readings: { [windowKey(RESET)]: [[T0 - 60 * MIN, 10], [T0 - 30 * MIN, 30]] } },
     })
     await $.session.start(START)
     expect(last(w.status)).toBe(`QM 5h cap ~${clockText(T0 + 75 * MIN)}`)
+    // Idle at 50% past the frozen fit's cap time: the fit, with now at 50%, puts the cap after the reset.
     await w.clock.advance(80 * MIN)
-    expect(last(w.status)).toBe('QM 5h capped soon')
-    await w.clock.advance(110 * MIN)
+    expect(w.status.filter(s => s === 'QM 5h capped soon')).toEqual([])
     expect(last(w.status)).toBeUndefined()
+  })
+
+  test('a passed reset hides a capped line', async ($, on) => {
+    const w = world(on, { limits: [fiveHourAt(100)] })
+    await $.session.start(START)
+    expect(last(w.status)).toBe('QM 5h capped')
+    await w.clock.advance(181 * MIN)
+    expect(last(w.status)).toBeUndefined()
+  })
+
+  test('the timer runs even when session start fails after it', async ($, on) => {
+    const w = world(on, { limits: [fiveHourAt(100)], failStoreSet: true })
+    await $.session.start(START)
+    w.setLimits([fiveHourAt(100)])
+    await w.clock.advance(2 * MIN)
+    expect(last(w.status)).toBe('QM 5h capped')
   })
 })
 

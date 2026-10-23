@@ -161,10 +161,12 @@ export function usageLine(
   time: (ms: number) => string,
 ): string {
   const { pct, resetsAt } = window
+  const due = resetsAt !== null && now >= resetsAt
   const resets =
-    resetsAt === null ? '' : now >= resetsAt ? ', reset due' : `, resets ${time(resetsAt)} (in ${durationText(resetsAt - now)})`
+    resetsAt === null ? '' : due ? ', reset due' : `, resets ${time(resetsAt)} (in ${durationText(resetsAt - now)})`
   const parts = [`${pct}%${resets}`]
-  if (rate !== null && f.kind !== 'capped') parts.push(rateText(rate))
+  // A rate fitted to a window that has reset describes nothing now.
+  if (rate !== null && f.kind !== 'capped' && !due) parts.push(rateText(rate))
   parts.push(forecastText(f, time))
   return parts.join(' · ')
 }

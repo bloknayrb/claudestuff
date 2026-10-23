@@ -87,7 +87,7 @@ async function ensureHeartbeat($: EngineInterface, fresh = false): Promise<void>
 
 async function registerCommand($: EngineInterface): Promise<void> {
   try {
-    await $.command.register({ name: COMMAND, description: 'Quartermaster: guard fires and re-issues, and the five-hour pace' })
+    await $.command.register({ name: COMMAND, description: 'Quartermaster: five-hour and weekly forecasts, this session\'s agents, guard fires' })
   } catch (error) {
     // A failed registration must not cost the caller its other work.
     await noteFailure($, 'command.register', error)
@@ -265,8 +265,18 @@ async function outlook($: EngineInterface, window: Window | null, series: Series
   return { window, readings: series === WEEK ? weekFitReadings(readings) : readings }
 }
 
+/**
+ * The readings a fit takes now: the stored ones, plus the current percent at the current time. Readings stop
+ * while the session is idle, so without that point a frozen fit's cap time would pass and read "capped soon"
+ * for hours of flat usage; with it, a flat stretch flattens the line and the forecast fades.
+ */
+function fitReadings(o: Outlook, now: number): readonly Reading[] {
+  const last = o.readings[o.readings.length - 1]
+  return last === undefined || now <= last[0] ? o.readings : [...o.readings, [now, o.window.pct]]
+}
+
 function forecastOf(o: Outlook, now: number) {
-  return forecast(fitCap(o.readings), o.window.resetsAt, o.window.pct, now)
+  return forecast(fitCap(fitReadings(o, now)), o.window.resetsAt, o.window.pct, now)
 }
 
 /** The last text this module drew, so a tick that changes nothing redraws nothing; null before the first. */
@@ -495,12 +505,13 @@ async function clearSession($: EngineInterface): Promise<void> {
 const onSessionStart: Hook<'session.start'> = async ($, e, next) => {
   $.ui.log(`quartermaster: list options arrived as ${current.shapes}`, { to: 'debug' })
   // session.start fires on every hot reload too: each load gets a fresh heartbeat.
+  // First, so a failure below (usage, a full store) still leaves the idle redraw running.
+  startTicker($)
   await ensureHeartbeat($, true)
   await registerCommand($)
   const { rateLimits } = await $.session.usage()
   await recordReading($, rateLimits)
   await refreshStatus($, rateLimits)
-  startTicker($)
   return next(e)
 }
 
@@ -535,7 +546,7 @@ function guardLine(name: string, c: Counter): string {
 /** One window's line in the report, or that there is no reading for it. */
 function windowLine(name: string, o: Outlook | null, now: number, time: (ms: number) => string): string {
   if (o === null) return `${name}: no reading`
-  return `${name}: ${usageLine(o.window, forecastOf(o, now), fitRate(o.readings), now, time)}`
+  return `${name}: ${usageLine(o.window, forecastOf(o, now), fitRate(fitReadings(o, now)), now, time)}`
 }
 
 /** Usage first, then this session's agents, then the guards' record, then config. */
