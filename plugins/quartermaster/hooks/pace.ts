@@ -1,14 +1,22 @@
 import type { SessionRateLimit } from 'claude-code'
 
 export type Reading = [ts: number, pct: number]
-export type FiveHour = { pct: number; resetsAt: number | null }
+export type Window = { pct: number; resetsAt: number | null }
 
-/** The five-hour window from rateLimits, an array by kind; resetsAt may be missing. */
-export function fiveHour(limits: readonly SessionRateLimit[]): FiveHour | null {
-  const window = limits.find(limit => limit.kind === 'five_hour')
+/** A window from rateLimits, an array by kind (`five_hour`, `seven_day`); resetsAt may be missing. */
+function windowOf(limits: readonly SessionRateLimit[], kind: string): Window | null {
+  const window = limits.find(limit => limit.kind === kind)
   if (window === undefined) return null
   const resetsAt = window.resetsAt === undefined ? NaN : Date.parse(window.resetsAt)
   return { pct: window.percentUsed, resetsAt: Number.isFinite(resetsAt) ? resetsAt : null }
+}
+
+export function fiveHour(limits: readonly SessionRateLimit[]): Window | null {
+  return windowOf(limits, 'five_hour')
+}
+
+export function sevenDay(limits: readonly SessionRateLimit[]): Window | null {
+  return windowOf(limits, 'seven_day')
 }
 
 /** A new window's store key: resetsAt to the nearest minute. Rounding alone splits jitter across hh:mm:30. */
@@ -31,8 +39,8 @@ export function matchWindow(keys: readonly string[], resetsAt: number): string {
   return best ?? windowKey(resetsAt)
 }
 
-/** Least-squares line of percent over time; when it reaches 100, or null under 3 readings or no growth. */
-export function fitCap(readings: readonly Reading[]): number | null {
+/** Least-squares line of percent over time, slope in percent per minute; null under 3 readings or one instant. */
+export function fitLine(readings: readonly Reading[]): { t0: number; slope: number; intercept: number } | null {
   if (readings.length < 3) return null
   const t0 = readings[0]![0]
   const xs = readings.map(r => (r[0] - t0) / 60_000)
@@ -48,30 +56,120 @@ export function fitCap(readings: readonly Reading[]): number | null {
   }
   if (sxx === 0) return null
   const slope = sxy / sxx
-  if (slope <= 0) return null
-  const intercept = my - slope * mx
-  return t0 + Math.round(((100 - intercept) / slope) * 60_000)
+  return { t0, slope, intercept: my - slope * mx }
 }
 
-/** HH:MM in the hooks environment's local time (not UTC). */
+/** When the fitted line reaches 100, or null under 3 readings or no growth. */
+export function fitCap(readings: readonly Reading[]): number | null {
+  const line = fitLine(readings)
+  if (line === null || line.slope <= 0) return null
+  return line.t0 + Math.round(((100 - line.intercept) / line.slope) * 60_000)
+}
+
+/** The fitted rate in percent per hour, or null with no fit. */
+export function fitRate(readings: readonly Reading[]): number | null {
+  const line = fitLine(readings)
+  return line === null ? null : line.slope * 60
+}
+
+/**
+ * The weekly fit needs this much history: a burst's first half hour, projected across a week, would call a
+ * cap days early.
+ */
+export const WEEK_MIN_SPAN_MS = 12 * 60 * 60_000
+
+/** The weekly readings a fit may use: all of them once they span WEEK_MIN_SPAN_MS, else none. */
+export function weekFitReadings(readings: readonly Reading[]): readonly Reading[] {
+  const first = readings[0]
+  const last = readings[readings.length - 1]
+  return first !== undefined && last !== undefined && last[0] - first[0] >= WEEK_MIN_SPAN_MS ? readings : []
+}
+
+/** `3:40pm` in the hooks environment's local time (not UTC), as the user's own statusline prints it. */
 export function clockText(ms: number): string {
   const d = new Date(ms)
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  const h = d.getHours()
+  return `${h % 12 === 0 ? 12 : h % 12}:${String(d.getMinutes()).padStart(2, '0')}${h < 12 ? 'am' : 'pm'}`
 }
 
-/** `capped (resets 17:00)`, `capped soon (resets 17:00)` for a stale fit, `cap ~15:40 (resets 17:00)`, `no cap before reset (resets 17:00)`, or `— (resets 17:00)`. */
-export function paceClause(cap: number | null, resetsAt: number | null, pct = 0, now = 0): string {
-  const resets = resetsAt === null ? '' : ` (resets ${clockText(resetsAt)})`
-  // At 100% the fitted cap time is in the past: say so instead of projecting it.
-  if (pct >= 100) return `capped${resets}`
-  // A fit that puts the cap before now (a steep rise that then flattened) is stale too.
-  if (cap !== null && now > 0 && cap <= now) return `capped soon${resets}`
-  if (cap === null) return `—${resets}`
-  if (resetsAt !== null && cap >= resetsAt) return `no cap before reset${resets}`
-  return `cap ~${clockText(cap)}${resets}`
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** `Oct 25, 9:00am`: for the weekly window, where a bare clock or weekday could mean the next week. */
+export function dateClockText(ms: number): string {
+  const d = new Date(ms)
+  return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${clockText(ms)}`
 }
 
-/** `five-hour window at 82%, resets 17:00; on pace to cap at 15:40`: the reading the heavy guard and toasts give. */
+/** `2d 4h`, `2h 10m`, `25m`, rounded down; `0m` for anything not ahead. */
+export function durationText(ms: number): string {
+  const mins = Math.max(0, Math.floor(ms / 60_000))
+  const d = Math.floor(mins / 1440)
+  const h = Math.floor((mins % 1440) / 60)
+  const m = mins % 60
+  if (d > 0) return `${d}d ${h}h`
+  if (h > 0) return `${h}h ${m}m`
+  return `${m}m`
+}
+
+export type Forecast =
+  | { kind: 'capped' }
+  | { kind: 'soon' }
+  | { kind: 'cap'; at: number }
+  | { kind: 'safe' }
+  | { kind: 'unknown' }
+
+/**
+ * Where the window is headed. A reset already past (the session sat idle across it) knows nothing, so a
+ * stale `capped` never outlives its window. A fit that puts the cap before now (a steep rise that then
+ * flattened) reads `soon`, never a past time.
+ */
+export function forecast(cap: number | null, resetsAt: number | null, pct: number, now: number): Forecast {
+  if (resetsAt !== null && now >= resetsAt) return { kind: 'unknown' }
+  if (pct >= 100) return { kind: 'capped' }
+  if (cap !== null && cap <= now) return { kind: 'soon' }
+  if (cap === null) return { kind: 'unknown' }
+  if (resetsAt !== null && cap >= resetsAt) return { kind: 'safe' }
+  return { kind: 'cap', at: cap }
+}
+
+/** The status line's clause for a window: only a forecast worth acting on, else null. */
+export function alertClause(label: string, f: Forecast, time: (ms: number) => string): string | null {
+  if (f.kind === 'capped') return `${label} capped`
+  if (f.kind === 'soon') return `${label} capped soon`
+  if (f.kind === 'cap') return `${label} cap ~${time(f.at)}`
+  return null
+}
+
+function forecastText(f: Forecast, time: (ms: number) => string): string {
+  if (f.kind === 'capped') return 'capped'
+  if (f.kind === 'soon') return 'capped soon'
+  if (f.kind === 'cap') return `cap ~${time(f.at)}`
+  if (f.kind === 'safe') return 'no cap before reset'
+  return 'pace unknown'
+}
+
+function rateText(rate: number): string {
+  return `~${Math.abs(rate) < 10 ? rate.toFixed(1) : Math.round(rate)}%/h`
+}
+
+/** `42%, resets 5:00pm (in 2h 10m) · ~12%/h · cap ~3:40pm`: one window's line in /quartermaster. */
+export function usageLine(
+  window: Window,
+  f: Forecast,
+  rate: number | null,
+  now: number,
+  time: (ms: number) => string,
+): string {
+  const { pct, resetsAt } = window
+  const resets =
+    resetsAt === null ? '' : now >= resetsAt ? ', reset due' : `, resets ${time(resetsAt)} (in ${durationText(resetsAt - now)})`
+  const parts = [`${pct}%${resets}`]
+  if (rate !== null && f.kind !== 'capped') parts.push(rateText(rate))
+  parts.push(forecastText(f, time))
+  return parts.join(' · ')
+}
+
+/** `five-hour window at 82%, resets 5:00pm; on pace to cap at 3:40pm`: the reading the heavy guard and toasts give. */
 export function windowText(pct: number, resetsAt: number | null, cap: number | null, now = 0): string {
   const resets = resetsAt === null ? '' : `, resets ${clockText(resetsAt)}`
   const pace =
@@ -87,16 +185,30 @@ export function windowText(pct: number, resetsAt: number | null, cap: number | n
   return `five-hour window at ${pct}%${resets}; ${pace}`
 }
 
-/** `agents 4 (2 opus)`: distinct subagents, and how many ran on each heavy model (zeros left out). */
-export function agentsClause(tally: Readonly<Record<string, string>>, heavyModels: readonly string[]): string {
-  const models = Object.values(tally).map(m => m.toLowerCase())
-  const heavy = heavyModels
-    .map(token => [token, models.filter(m => m.includes(token)).length] as const)
-    .filter(([, count]) => count > 0)
-    .map(([token, count]) => `${count} ${token}`)
-  return `agents ${models.length}${heavy.length > 0 ? ` (${heavy.join(', ')})` : ''}`
+const FAMILIES = ['fable', 'opus', 'sonnet', 'haiku']
+
+/** A model id's family (`claude-opus-5-5` → `opus`), else the id itself. */
+export function familyOf(model: string): string {
+  const id = model.toLowerCase()
+  return FAMILIES.find(f => id.includes(f)) ?? id
 }
 
-export function statusText(pace: string, agentsText: string): string {
-  return `QM pace: ${pace} · ${agentsText}`
+/** `agents 4 (2 opus, 2 sonnet)`: distinct subagents and the split by model family, largest first. */
+export function agentsClause(tally: Readonly<Record<string, string>>): string {
+  const counts = new Map<string, number>()
+  for (const model of Object.values(tally)) {
+    const family = familyOf(model)
+    counts.set(family, (counts.get(family) ?? 0) + 1)
+  }
+  const split = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([family, n]) => `${n} ${family}`)
+  const total = Object.keys(tally).length
+  return `agents ${total}${split.length > 0 ? ` (${split.join(', ')})` : ''}`
+}
+
+/** `QM 5h cap ~3:40pm · agents 4 (2 opus, 2 sonnet)`, or undefined when no clause has anything to say. */
+export function statusText(clauses: readonly (string | null)[]): string | undefined {
+  const shown = clauses.filter((c): c is string => c !== null)
+  return shown.length === 0 ? undefined : `QM ${shown.join(' · ')}`
 }

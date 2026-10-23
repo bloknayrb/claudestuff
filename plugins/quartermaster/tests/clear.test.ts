@@ -1,9 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 import { MODEL_TEXT } from '../hooks/rules'
-import { clockText } from '../hooks/pace'
-import { END_CLEAR, MIN, START, T0, fiveHourAt, measure, spawn, turnEnd, world } from './harness'
+import { END_CLEAR, START, fiveHourAt, measure, spawn, turnEnd, world } from './harness'
 
-const RESET = T0 + 180 * MIN
 const last = (xs: (string | undefined)[]) => xs[xs.length - 1]
 
 describe('/clear and fail-open', () => {
@@ -16,7 +14,8 @@ describe('/clear and fail-open', () => {
     expect(last(w.status)).toContain('agents 1')
 
     await $.session.end(END_CLEAR)
-    expect(last(w.status)).toBe(`QM pace: — (resets ${clockText(RESET)}) · agents 0`)
+    // Nothing left to say: no agents, and one reading forecasts nothing.
+    expect(last(w.status)).toBeUndefined()
 
     w.setSessionId('S2')
     expect((await $.agent.spawn(spawn())).deny).toBe(MODEL_TEXT)

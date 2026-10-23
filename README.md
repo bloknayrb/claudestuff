@@ -67,7 +67,7 @@ Are you...
 │   └── → dev-tools (wrkflw: validate and run workflows before pushing)
 │
 ├── Spending too much on subagents?
-│   └── → quartermaster (pick a model per agent, pace the five-hour window)
+│   └── → quartermaster (pick a model per agent, forecast the five-hour and weekly caps)
 │
 ├── Want Claude to queue decisions instead of stopping to ask?
 │   └── → bridge (non-blocking decision pane)

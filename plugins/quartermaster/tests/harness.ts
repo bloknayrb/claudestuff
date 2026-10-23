@@ -131,6 +131,12 @@ export function fiveHourAt(pct: number, resetsAt: number = T0 + 180 * MIN): Sess
   return { kind: 'five_hour', percentUsed: pct, resetsAt: new Date(resetsAt).toISOString() }
 }
 
+export const DAY = 24 * 60 * MIN
+
+export function sevenDayAt(pct: number, resetsAt: number = T0 + 3 * DAY): SessionRateLimit {
+  return { kind: 'seven_day', percentUsed: pct, resetsAt: new Date(resetsAt).toISOString() }
+}
+
 export function measure(rateLimits: SessionRateLimit[]) {
   return { context: { window: 200_000 }, rateLimits, changed: ['rateLimits'] as UsageUnit[] }
 }

@@ -1,10 +1,25 @@
-import type { AgentSpawnResult, EngineInterface, Hook, Register, SessionRateLimit } from 'claude-code'
+import type { AgentSpawnResult, EngineInterface, Hook, Register, SessionRateLimit, Timer } from 'claude-code'
 import { atom, read, update } from 'claude-code'
 import type { QmDenial, QmGuard, QmHealth } from '../types'
 import { current, parseConfig, shapeOf } from './config'
 import { spawnHash, taskHash } from './hash'
-import type { Reading } from './pace'
-import { agentsClause, fitCap, fiveHour, matchWindow, paceClause, statusText, windowText } from './pace'
+import type { Reading, Window } from './pace'
+import {
+  agentsClause,
+  alertClause,
+  clockText,
+  dateClockText,
+  fitCap,
+  fitRate,
+  fiveHour,
+  forecast,
+  matchWindow,
+  sevenDay,
+  statusText,
+  usageLine,
+  weekFitReadings,
+  windowText,
+} from './pace'
 import type { Fired, SpawnView } from './rules'
 import {
   DENIAL_TTL_MS,
@@ -159,8 +174,14 @@ function recordFires($: EngineInterface, guards: readonly QmGuard[], hash: strin
   })
 }
 
-const READINGS_MAX = 300
-const DUPLICATE_MS = 60_000
+/**
+ * Where each window's readings live, how many are kept, and the gap under which a new one is skipped. The
+ * five-hour list skips only a repeat of the same percent within a minute; the weekly list keeps one reading
+ * per quarter hour whatever it says (672 in a week), so a busy day can't push the week's start out of the fit.
+ */
+type Series = { storeKey: string; max: number; gapMs: number; sameOnly: boolean }
+const FIVE_HOUR: Series = { storeKey: 'readings', max: 300, gapMs: 60_000, sameOnly: true }
+const WEEK: Series = { storeKey: 'weekReadings', max: 700, gapMs: 15 * 60_000, sameOnly: false }
 
 /** Keeps the current window and the one before it (the two latest resets). */
 function keepTwoWindows<T>(byWindow: Record<string, T>): Record<string, T> {
@@ -172,29 +193,29 @@ function keepTwoWindows<T>(byWindow: Record<string, T>): Record<string, T> {
 
 type WindowReadings = { key: string; readings: Reading[] }
 
-async function allReadings($: EngineInterface): Promise<Record<string, Reading[]>> {
-  return ((await $.store.get('readings')) ?? {}) as Record<string, Reading[]>
+async function allReadings($: EngineInterface, series: Series): Promise<Record<string, Reading[]>> {
+  return ((await $.store.get(series.storeKey)) ?? {}) as Record<string, Reading[]>
 }
 
 /** The readings of the window that resets at resetsAt, under the key matchWindow picks. */
-async function windowReadings($: EngineInterface, resetsAt: number): Promise<WindowReadings> {
-  const all = await allReadings($)
+async function windowReadings($: EngineInterface, resetsAt: number, series: Series = FIVE_HOUR): Promise<WindowReadings> {
+  const all = await allReadings($, series)
   const key = matchWindow(Object.keys(all), resetsAt)
   return { key, readings: all[key] ?? [] }
 }
 
-/** Adds a reading to its window and returns the window; a repeat within a minute is skipped. */
-function addReading($: EngineInterface, resetsAt: number, reading: Reading): Promise<WindowReadings> {
+/** Adds a reading to its window and returns the window; one inside the series' gap is skipped. */
+function addReading($: EngineInterface, resetsAt: number, reading: Reading, series: Series = FIVE_HOUR): Promise<WindowReadings> {
   return serial(async () => {
-    const all = await allReadings($)
+    const all = await allReadings($, series)
     const key = matchWindow(Object.keys(all), resetsAt)
     const list = all[key] ?? []
     const prior = list[list.length - 1]
-    if (prior !== undefined && prior[1] === reading[1] && reading[0] - prior[0] < DUPLICATE_MS) {
+    if (prior !== undefined && (!series.sameOnly || prior[1] === reading[1]) && reading[0] - prior[0] < series.gapMs) {
       return { key, readings: list }
     }
-    const kept = [...list, reading].slice(-READINGS_MAX)
-    await $.store.set('readings', keepTwoWindows({ ...all, [key]: kept }))
+    const kept = [...list, reading].slice(-series.max)
+    await $.store.set(series.storeKey, keepTwoWindows({ ...all, [key]: kept }))
     return { key, readings: kept }
   })
 }
@@ -220,8 +241,13 @@ function claimThreshold($: EngineInterface, key: string, pct: number): Promise<n
 
 // ==== pacing ====
 
-/** Stores a five-hour reading under its window, and toasts a threshold the first time any session crosses it. */
+/**
+ * Stores each window's reading, and toasts a five-hour threshold the first time any session crosses it.
+ * The weekly reading is stored first, so a toast never waits on it.
+ */
 async function recordReading($: EngineInterface, limits: readonly SessionRateLimit[]): Promise<void> {
+  const week = sevenDay(limits)
+  if (week !== null && week.resetsAt !== null) await addReading($, week.resetsAt, [await $.clock.now(), week.pct], WEEK)
   const window = fiveHour(limits)
   if (window === null || window.resetsAt === null) return
   const { key, readings } = await addReading($, window.resetsAt, [await $.clock.now(), window.pct])
@@ -229,16 +255,55 @@ async function recordReading($: EngineInterface, limits: readonly SessionRateLim
   if (crossed !== null) $.ui.toast(`Quartermaster: ${windowText(window.pct, window.resetsAt, fitCap(readings), await $.clock.now())}.`)
 }
 
-/** The one status line; hidden with no five-hour reading. */
+type Outlook = { window: Window; readings: readonly Reading[] }
+
+/** A window and the readings its fit may use: the weekly ones only once they span WEEK_MIN_SPAN_MS. */
+async function outlook($: EngineInterface, window: Window | null, series: Series): Promise<Outlook | null> {
+  if (window === null) return null
+  if (window.resetsAt === null) return { window, readings: [] }
+  const { readings } = await windowReadings($, window.resetsAt, series)
+  return { window, readings: series === WEEK ? weekFitReadings(readings) : readings }
+}
+
+function forecastOf(o: Outlook, now: number) {
+  return forecast(fitCap(o.readings), o.window.resetsAt, o.window.pct, now)
+}
+
+/** The last text this module drew, so a tick that changes nothing redraws nothing; null before the first. */
+let drawn: string | undefined | null = null
+
+/**
+ * The one status line. It carries only what a usage bar doesn't: a cap coming in either window, and the
+ * subagents this session has run. With neither, it is hidden.
+ */
 async function refreshStatus($: EngineInterface, limits?: readonly SessionRateLimit[]): Promise<void> {
-  const window = fiveHour(limits ?? (await $.session.usage()).rateLimits)
-  if (window === null) {
-    $.ui.status(undefined)
-    return
-  }
-  const cap = window.resetsAt === null ? null : fitCap((await windowReadings($, window.resetsAt)).readings)
-  const tally = agentsClause(await read($, agents), current.cfg.heavyModels)
-  $.ui.status(statusText(paceClause(cap, window.resetsAt, window.pct, await $.clock.now()), tally))
+  const rateLimits = limits ?? (await $.session.usage()).rateLimits
+  const now = await $.clock.now()
+  const short = await outlook($, fiveHour(rateLimits), FIVE_HOUR)
+  const week = await outlook($, sevenDay(rateLimits), WEEK)
+  const tally = await read($, agents)
+  const text = statusText([
+    short === null ? null : alertClause('5h', forecastOf(short, now), clockText),
+    week === null ? null : alertClause('week', forecastOf(week, now), dateClockText),
+    Object.keys(tally).length === 0 ? null : agentsClause(tally),
+  ])
+  if (text === drawn) return
+  drawn = text
+  $.ui.status(text)
+}
+
+/**
+ * Status events stop while the session sits idle, so a timer redraws the line: a cap time that has passed,
+ * or a window that has reset, must not stay up. Timers are dropped on a reload, and session.start starts one.
+ */
+const TICK_MS = 60_000
+let ticker: Timer | null = null
+
+function startTicker($: EngineInterface): void {
+  ticker?.cancel()
+  ticker = $.clock.every(TICK_MS, () => {
+    void refreshStatus($).catch(error => noteFailure($, 'status tick', error))
+  })
 }
 
 // ==== guards ====
@@ -435,6 +500,7 @@ const onSessionStart: Hook<'session.start'> = async ($, e, next) => {
   const { rateLimits } = await $.session.usage()
   await recordReading($, rateLimits)
   await refreshStatus($, rateLimits)
+  startTicker($)
   return next(e)
 }
 
@@ -466,25 +532,34 @@ function guardLine(name: string, c: Counter): string {
   return `${name}: ${c.fires} fires · ${c.reissued} re-issued (${rate(c.reissued)}) · ${c.changed} changed (${rate(c.changed)})`
 }
 
+/** One window's line in the report, or that there is no reading for it. */
+function windowLine(name: string, o: Outlook | null, now: number, time: (ms: number) => string): string {
+  if (o === null) return `${name}: no reading`
+  return `${name}: ${usageLine(o.window, forecastOf(o, now), fitRate(o.readings), now, time)}`
+}
+
+/** Usage first, then this session's agents, then the guards' record, then config. */
 const onCommand: Hook<'command.run'> = async $ => {
   const cfg = current.cfg
   const counters = await readCounters($)
   const ring = await readRing($)
-  const window = fiveHour((await $.session.usage()).rateLimits)
-  const cap =
-    window === null || window.resetsAt === null ? null : fitCap((await windowReadings($, window.resetsAt)).readings)
+  const { rateLimits } = await $.session.usage()
+  const now = await $.clock.now()
+  const short = await outlook($, fiveHour(rateLimits), FIVE_HOUR)
+  const week = await outlook($, sevenDay(rateLimits), WEEK)
   const sources = Object.entries(await read($, sourceSpawns)).map(([source, n]) => `${source} ${n}`)
+  const usage =
+    short === null && week === null
+      ? ['usage: no rate-limit reading (rate limits come with a subscription)']
+      : [windowLine('five-hour', short, now, clockText), windowLine('weekly', week, now, dateClockText)]
   const lines = [
     'Quartermaster',
+    ...usage,
+    `this session: ${agentsClause(await read($, agents))}${sources.length > 0 ? ` · toast-only spawns: ${sources.join(', ')}` : ''}`,
     guardLine('model guard', counters.model),
     guardLine('heavy guard', counters.heavy),
-    window === null
-      ? 'pace: no five-hour reading (rate limits come with a subscription)'
-      : `pace: ${paceClause(cap, window.resetsAt, window.pct, await $.clock.now())}, window at ${window.pct}%`,
-    `this session: ${agentsClause(await read($, agents), cfg.heavyModels)}`,
-    `toast-only spawns this session: ${sources.join(', ') || 'none'}`,
-    `ring: ${ring.length} of the last ${RING_MAX} outcomes kept`,
-    `config: warnAt ${cfg.warnAt}% · heavy ${cfg.heavyModels.join(', ') || 'none'} · guard types ${cfg.guardTypes.join(', ') || 'none'} · requireModel ${cfg.requireModel ? 'on' : 'off'} · list options arrived as ${current.shapes}`,
+    `config: warnAt ${cfg.warnAt}% · heavy ${cfg.heavyModels.join(', ') || 'none'} · guard types ${cfg.guardTypes.join(', ') || 'none'} · requireModel ${cfg.requireModel ? 'on' : 'off'}`,
+    `debug: ring ${ring.length} of the last ${RING_MAX} outcomes · list options arrived as ${current.shapes}`,
   ]
   return { text: lines.join('\n') }
 }
@@ -494,6 +569,8 @@ const onCommand: Hook<'command.run'> = async $ => {
 export const register: Register = (on, options) => {
   current.cfg = parseConfig(options)
   current.shapes = `heavyModels ${shapeOf(options['heavyModels'])}, guardTypes ${shapeOf(options['guardTypes'])}`
+  // A fresh load draws its first line whatever the last load drew.
+  drawn = null
 
   on('session.start', onSessionStart).catch(async ($, e, next) => {
     await noteFailure($, 'session.start', next.error)
