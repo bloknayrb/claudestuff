@@ -18,6 +18,7 @@ import {
   statusText,
   usageLine,
   weekFitReadings,
+  withIdle,
   windowText,
 } from './pace'
 import type { Fired, SpawnView } from './rules'
@@ -175,13 +176,14 @@ function recordFires($: EngineInterface, guards: readonly QmGuard[], hash: strin
 }
 
 /**
- * Where each window's readings live, how many are kept, and the gap under which a new one is skipped. The
- * five-hour list skips only a repeat of the same percent within a minute; the weekly list keeps one reading
- * per quarter hour whatever it says (672 in a week), so a busy day can't push the week's start out of the fit.
+ * Where each window's readings live, how many are kept, the gap under which a new one is skipped, and the
+ * step an idle stretch is filled at (withIdle). The five-hour list skips only a repeat of the same percent
+ * within a minute; the weekly list keeps one reading per quarter hour whatever it says (672 in a week), so a
+ * busy day can't push the week's start out of the fit.
  */
-type Series = { storeKey: string; max: number; gapMs: number; sameOnly: boolean }
-const FIVE_HOUR: Series = { storeKey: 'readings', max: 300, gapMs: 60_000, sameOnly: true }
-const WEEK: Series = { storeKey: 'weekReadings', max: 700, gapMs: 15 * 60_000, sameOnly: false }
+type Series = { storeKey: string; max: number; gapMs: number; sameOnly: boolean; fillMs: number }
+const FIVE_HOUR: Series = { storeKey: 'readings', max: 300, gapMs: 60_000, sameOnly: true, fillMs: 5 * 60_000 }
+const WEEK: Series = { storeKey: 'weekReadings', max: 700, gapMs: 15 * 60_000, sameOnly: false, fillMs: 15 * 60_000 }
 
 /** Keeps the current window and the one before it (the two latest resets). */
 function keepTwoWindows<T>(byWindow: Record<string, T>): Record<string, T> {
@@ -255,24 +257,19 @@ async function recordReading($: EngineInterface, limits: readonly SessionRateLim
   if (crossed !== null) $.ui.toast(`Quartermaster: ${windowText(window.pct, window.resetsAt, fitCap(readings), await $.clock.now())}.`)
 }
 
-type Outlook = { window: Window; readings: readonly Reading[] }
+type Outlook = { window: Window; readings: readonly Reading[]; series: Series }
 
 /** A window and the readings its fit may use: the weekly ones only once they span WEEK_MIN_SPAN_MS. */
 async function outlook($: EngineInterface, window: Window | null, series: Series): Promise<Outlook | null> {
   if (window === null) return null
-  if (window.resetsAt === null) return { window, readings: [] }
+  if (window.resetsAt === null) return { window, readings: [], series }
   const { readings } = await windowReadings($, window.resetsAt, series)
-  return { window, readings: series === WEEK ? weekFitReadings(readings) : readings }
+  return { window, readings: series === WEEK ? weekFitReadings(readings) : readings, series }
 }
 
-/**
- * The readings a fit takes now: the stored ones, plus the current percent at the current time. Readings stop
- * while the session is idle, so without that point a frozen fit's cap time would pass and read "capped soon"
- * for hours of flat usage; with it, a flat stretch flattens the line and the forecast fades.
- */
+/** The readings a fit takes now, the idle stretch since the last one included (withIdle). */
 function fitReadings(o: Outlook, now: number): readonly Reading[] {
-  const last = o.readings[o.readings.length - 1]
-  return last === undefined || now <= last[0] ? o.readings : [...o.readings, [now, o.window.pct]]
+  return withIdle(o.readings, o.window.pct, now, o.series.fillMs)
 }
 
 function forecastOf(o: Outlook, now: number) {
@@ -338,7 +335,10 @@ async function judge($: EngineInterface, view: SpawnView, label: string): Promis
     const window = fiveHour((await $.session.usage()).rateLimits)
     if (window !== null && window.pct >= cfg.warnAt) {
       const held = window.resetsAt === null ? null : await windowReadings($, window.resetsAt)
-      const reading = windowText(window.pct, window.resetsAt, held === null ? null : fitCap(held.readings), await $.clock.now())
+      const now = await $.clock.now()
+      // The same fit the status line draws, so the deny never names a cap the line has let fade.
+      const cap = held === null ? null : fitCap(withIdle(held.readings, window.pct, now, FIVE_HOUR.fillMs))
+      const reading = windowText(window.pct, window.resetsAt, cap, now)
       fired.windowKey = held === null ? null : held.key
       fired.guards.push('heavy')
       fired.denyTexts.push(`Quartermaster: ${reading}. Re-issue unchanged to spend it anyway.`)

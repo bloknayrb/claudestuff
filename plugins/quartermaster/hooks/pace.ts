@@ -73,6 +73,22 @@ export function fitRate(readings: readonly Reading[]): number | null {
 }
 
 /**
+ * The readings plus the idle stretch since the last one, as flat readings at the live percent every `stepMs`
+ * and one at `now`. Readings stop while the session is idle; without these, a frozen fit's cap time would
+ * pass and read "capped soon" through hours of flat usage. Filling at the stored cadence weighs the idle
+ * stretch as a session watching it would have, so the forecast fades instead of lingering. Under three real
+ * readings there is no fit to correct, and nothing is added.
+ */
+export function withIdle(readings: readonly Reading[], pct: number, now: number, stepMs: number): readonly Reading[] {
+  const last = readings[readings.length - 1]
+  if (readings.length < 3 || last === undefined || now <= last[0]) return readings
+  const filled: Reading[] = [...readings]
+  for (let t = last[0] + stepMs; t < now; t += stepMs) filled.push([t, pct])
+  filled.push([now, pct])
+  return filled
+}
+
+/**
  * The weekly fit needs this much history: a burst's first half hour, projected across a week, would call a
  * cap days early.
  */

@@ -9,8 +9,9 @@ import {
   weekFitReadings,
   windowKey,
   windowText,
+  withIdle,
 } from '../hooks/pace'
-import { DAY, MIN, START, T0, command, fiveHourAt, measure, sevenDayAt, world } from './harness'
+import { DAY, MIN, START, T0, command, fiveHourAt, measure, sevenDayAt, spawn, world } from './harness'
 
 const RESET = T0 + 180 * MIN
 const HOUR = 60 * MIN
@@ -173,6 +174,38 @@ describe('the idle line', () => {
     await w.clock.advance(80 * MIN)
     expect(w.status.filter(s => s === 'QM 5h capped soon')).toEqual([])
     expect(last(w.status)).toBeUndefined()
+  })
+
+  test('a dense rising history fades too once idle past its cap time', async ($, on) => {
+    const rising: [number, number][] = []
+    for (let m = -60; m < 0; m += 5) rising.push([T0 + m * MIN, 50 + (40 * m) / 60])
+    const w = world(on, { limits: [fiveHourAt(50)], store: { readings: { [windowKey(RESET)]: rising } } })
+    await $.session.start(START)
+    expect(last(w.status)).toBe(`QM 5h cap ~${clockText(T0 + 75 * MIN)}`)
+    await w.clock.advance(80 * MIN)
+    expect(w.status.filter(s => s === 'QM 5h capped soon')).toEqual([])
+    expect(last(w.status)).toBeUndefined()
+  })
+
+  test('the heavy guard reads the same idle-filled fit as the line, not the stale one', async ($, on) => {
+    const stored: [number, number][] = [[T0 - 60 * MIN, 40], [T0 - 30 * MIN, 60], [T0, 80]]
+    const w = world(on, { limits: [fiveHourAt(80)], store: { readings: { [windowKey(RESET)]: stored } } })
+    await w.clock.advance(90 * MIN)
+    const now = T0 + 90 * MIN
+    // Stored alone, the fit capped at T0+30 and would read "about to cap".
+    expect(fitCap(stored)).toBe(T0 + 30 * MIN)
+    const cap = fitCap(withIdle(stored, 80, now, 5 * MIN))
+    expect(cap).not.toBeNull()
+    expect(cap!).toBeGreaterThan(now)
+    const { deny } = await $.agent.spawn(spawn({ model: 'opus' }))
+    expect(deny).toContain(windowText(80, RESET, cap, now))
+  })
+
+  test('the idle fill needs three real readings', () => {
+    const two: [number, number][] = [[T0, 10], [T0 + MIN, 20]]
+    expect(withIdle(two, 20, T0 + 60 * MIN, 5 * MIN)).toEqual(two)
+    const three: [number, number][] = [...two, [T0 + 2 * MIN, 30]]
+    expect(withIdle(three, 30, T0 + 12 * MIN, 5 * MIN)).toEqual([...three, [T0 + 7 * MIN, 30], [T0 + 12 * MIN, 30]])
   })
 
   test('a passed reset hides a capped line', async ($, on) => {
