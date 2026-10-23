@@ -9,6 +9,7 @@ import {
   alertClause,
   clockText,
   dateClockText,
+  durationText,
   fitCap,
   fitRate,
   fiveHour,
@@ -504,6 +505,8 @@ async function clearSession($: EngineInterface): Promise<void> {
   await update($, spawnModels, () => ({}))
   await update($, sourceToasts, () => [])
   await update($, sourceSpawns, () => ({}))
+  // Draw the next line whatever this one drew, in case the engine cleared it with the session.
+  drawn = null
   // No session.start follows: the next measure or main turn re-arms the heartbeat under the new id.
   await update($, health, () => null)
 }
@@ -513,6 +516,7 @@ const onSessionStart: Hook<'session.start'> = async ($, e, next) => {
   // session.start fires on every hot reload too: each load gets a fresh heartbeat.
   // First, so a failure below (usage, a full store) still leaves the idle redraw running.
   startTicker($)
+  drawn = null
   await ensureHeartbeat($, true)
   await registerCommand($)
   const { rateLimits } = await $.session.usage()
@@ -555,6 +559,20 @@ function windowLine(name: string, o: Outlook | null, now: number, time: (ms: num
   return `${name}: ${usageLine(o.window, forecastOf(o, now), fitRate(fitReadings(o, now)), now, time)}`
 }
 
+/**
+ * `weekly store 1 window, 34 readings over 8h 15m`: the raw weekly history. A window count that keeps
+ * climbing, or readings that never span the 12 h gate, would mean the weekly resetsAt moves between readings.
+ */
+async function weekStoreText($: EngineInterface, week: Window | null): Promise<string> {
+  const all = await allReadings($, WEEK)
+  const windows = Object.keys(all).length
+  const list = week === null || week.resetsAt === null ? [] : (await windowReadings($, week.resetsAt, WEEK)).readings
+  const first = list[0]
+  const last = list[list.length - 1]
+  const span = first === undefined || last === undefined ? '' : ` over ${durationText(last[0] - first[0])}`
+  return `weekly store ${windows} window${windows === 1 ? '' : 's'}, ${list.length} readings${span}`
+}
+
 /** Usage first, then this session's agents, then the guards' record, then config. */
 const onCommand: Hook<'command.run'> = async $ => {
   const cfg = current.cfg
@@ -576,7 +594,7 @@ const onCommand: Hook<'command.run'> = async $ => {
     guardLine('model guard', counters.model),
     guardLine('heavy guard', counters.heavy),
     `config: warnAt ${cfg.warnAt}% · heavy ${cfg.heavyModels.join(', ') || 'none'} · guard types ${cfg.guardTypes.join(', ') || 'none'} · requireModel ${cfg.requireModel ? 'on' : 'off'}`,
-    `debug: ring ${ring.length} of the last ${RING_MAX} outcomes · list options arrived as ${current.shapes}`,
+    `debug: ring ${ring.length} of the last ${RING_MAX} outcomes · ${await weekStoreText($, sevenDay(rateLimits))} · list options arrived as ${current.shapes}`,
   ]
   return { text: lines.join('\n') }
 }

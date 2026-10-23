@@ -255,6 +255,7 @@ describe('weekly window', () => {
     expect(last(w.status)).toBe(`QM week cap ~${dateClockText(T0 + 34 * HOUR)}`)
     w.setLimits([sevenDayAt(56)])
     const { text } = await $.command.run(command('quartermaster'))
+    expect(text).toContain('weekly store 1 window, 13 readings over 12h 0m')
     expect(text).toContain(`weekly: 56%, resets ${dateClockText(T0 + 3 * DAY)} (in 2d 12h) · ~2.0%/h · cap ~${dateClockText(T0 + 34 * HOUR)}`)
   })
 
