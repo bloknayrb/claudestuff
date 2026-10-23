@@ -1,6 +1,17 @@
 import { describe, expect, test } from 'claude-code/testing'
 import { clockText, windowKey } from '../hooks/pace'
-import { MIN, T0, fiveHourAt, measure, world } from './harness'
+import { MIN, T0, fiveHourAt, measure, sevenDayAt, world } from './harness'
+
+describe('a failing weekly write', () => {
+  test('still stores the five-hour reading and toasts its threshold', async ($, on) => {
+    const w = world(on, { failStoreKeys: ['weekReadings'] })
+    await $.session.measure(measure([sevenDayAt(30), fiveHourAt(60)]))
+    expect(w.toasts).toEqual([`Quartermaster: five-hour window at 60%, resets ${clockText(T0 + 180 * MIN)}; pace unknown.`])
+    expect(w.store.has('readings')).toBe(true)
+    // The kit reports a thrown store.set as unanswered; what matters is that the failure is logged by name.
+    expect(w.logs.some(l => l.text.startsWith('quartermaster: weekly reading:'))).toBe(true)
+  })
+})
 
 const RESET = T0 + 180 * MIN
 const toast = (pct: number, reset = RESET) =>

@@ -245,11 +245,17 @@ function claimThreshold($: EngineInterface, key: string, pct: number): Promise<n
 
 /**
  * Stores each window's reading, and toasts a five-hour threshold the first time any session crosses it.
- * The weekly reading is stored first, so a toast never waits on it.
+ * A failed weekly write is logged and passed over, so it never costs the five-hour reading or its toast.
  */
 async function recordReading($: EngineInterface, limits: readonly SessionRateLimit[]): Promise<void> {
   const week = sevenDay(limits)
-  if (week !== null && week.resetsAt !== null) await addReading($, week.resetsAt, [await $.clock.now(), week.pct], WEEK)
+  if (week !== null && week.resetsAt !== null) {
+    try {
+      await addReading($, week.resetsAt, [await $.clock.now(), week.pct], WEEK)
+    } catch (error) {
+      await noteFailure($, 'weekly reading', error)
+    }
+  }
   const window = fiveHour(limits)
   if (window === null || window.resetsAt === null) return
   const { key, readings } = await addReading($, window.resetsAt, [await $.clock.now(), window.pct])

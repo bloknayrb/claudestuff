@@ -74,7 +74,6 @@ It makes no model calls. A guard that fails lets the spawn through and logs to t
   says `pace unknown` when there is no forecast.
 - Readings are taken only while a Claude Code session runs. Usage from elsewhere (claude.ai, another device)
   arrives as a jump at the next reading.
-
 - A Workflow's agents get a toast, not a deny, by design: nothing can re-issue a spawn a Workflow script
   starts, so a deny would only kill the step. That path was not observed live; the tests cover it.
 
