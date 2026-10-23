@@ -276,6 +276,8 @@ async function outlook($: EngineInterface, window: Window | null, series: Series
 
 /** The readings a fit takes now, the idle stretch since the last one included (withIdle). */
 function fitReadings(o: Outlook, now: number): readonly Reading[] {
+  // Past its reset a window forecasts nothing, and a fill would grow with every idle minute.
+  if (o.window.resetsAt !== null && now >= o.window.resetsAt) return o.readings
   return withIdle(o.readings, o.window.pct, now, o.series.fillMs)
 }
 
