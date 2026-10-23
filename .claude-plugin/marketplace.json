@@ -71,7 +71,7 @@
     {
       "name": "quartermaster",
       "source": "./plugins/quartermaster",
-      "description": "Mod: soft-denies subagent spawns with no model set and heavy-model spawns late in the five-hour window, and shows when the window will cap at the current pace"
+      "description": "Mod: soft-denies subagent spawns with no model set and heavy-model spawns late in the five-hour window, and forecasts five-hour and weekly caps at the current pace"
     },
     {
       "name": "bridge",

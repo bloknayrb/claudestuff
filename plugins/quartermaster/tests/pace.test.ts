@@ -1,8 +1,20 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { clockText, fitCap, matchWindow, paceClause, windowKey, windowText } from '../hooks/pace'
-import { MIN, START, T0, command, fiveHourAt, measure, world } from './harness'
+import {
+  clockText,
+  dateClockText,
+  durationText,
+  fitCap,
+  forecast,
+  matchWindow,
+  weekFitReadings,
+  windowKey,
+  windowText,
+  withIdle,
+} from '../hooks/pace'
+import { DAY, MIN, START, T0, command, fiveHourAt, measure, sevenDayAt, spawn, world } from './harness'
 
 const RESET = T0 + 180 * MIN
+const HOUR = 60 * MIN
 const last = (xs: (string | undefined)[]) => xs[xs.length - 1]
 
 describe('pace (pure)', () => {
@@ -25,6 +37,38 @@ describe('pace (pure)', () => {
     expect(matchWindow([windowKey(before)], after)).toBe(windowKey(before))
     expect(matchWindow([k], RESET + 300 * MIN)).toBe(windowKey(RESET + 300 * MIN))
   })
+
+  test('times read as the user statusline prints them', () => {
+    const at = new Date(2026, 9, 25, 9, 5).getTime()
+    expect(clockText(at)).toBe('9:05am')
+    expect(clockText(new Date(2026, 9, 25, 0, 0).getTime())).toBe('12:00am')
+    expect(clockText(new Date(2026, 9, 25, 12, 30).getTime())).toBe('12:30pm')
+    expect(clockText(new Date(2026, 9, 25, 15, 40).getTime())).toBe('3:40pm')
+    expect(dateClockText(at)).toBe('Oct 25, 9:05am')
+  })
+
+  test('durations round down to two units', () => {
+    expect(durationText(25 * MIN + 59_000)).toBe('25m')
+    expect(durationText(2 * HOUR + 10 * MIN)).toBe('2h 10m')
+    expect(durationText(2 * DAY + 4 * HOUR + 59 * MIN)).toBe('2d 4h')
+    expect(durationText(-MIN)).toBe('0m')
+  })
+
+  test('the forecast: capped, soon, a time, safe, unknown, and nothing once the reset has passed', () => {
+    expect(forecast(null, RESET, 100, T0)).toEqual({ kind: 'capped' })
+    expect(forecast(T0 - MIN, RESET, 98, T0)).toEqual({ kind: 'soon' })
+    expect(forecast(T0 + MIN, RESET, 98, T0)).toEqual({ kind: 'cap', at: T0 + MIN })
+    expect(forecast(RESET + MIN, RESET, 50, T0)).toEqual({ kind: 'safe' })
+    expect(forecast(null, RESET, 50, T0)).toEqual({ kind: 'unknown' })
+    expect(forecast(null, RESET, 100, RESET)).toEqual({ kind: 'unknown' })
+  })
+
+  test('a weekly fit waits for twelve hours of readings', () => {
+    const short: [number, number][] = [[T0, 10], [T0 + 6 * HOUR, 20], [T0 + 11 * HOUR, 30]]
+    expect(weekFitReadings(short)).toEqual([])
+    const long: [number, number][] = [...short, [T0 + 12 * HOUR, 31]]
+    expect(weekFitReadings(long)).toEqual(long)
+  })
 })
 
 describe('pace line', () => {
@@ -35,21 +79,21 @@ describe('pace line', () => {
     expect(last(w.status)).toBeUndefined()
   })
 
-  test('shows — with fewer than three readings', async ($, on) => {
+  test('hidden with fewer than three readings', async ($, on) => {
     const w = world(on)
     await $.session.measure(measure([fiveHourAt(10)]))
     await w.clock.advance(30 * MIN)
     await $.session.measure(measure([fiveHourAt(30)]))
-    expect(last(w.status)).toBe(`QM pace: — (resets ${clockText(RESET)}) · agents 0`)
+    expect(w.status.filter(s => s !== undefined)).toEqual([])
   })
 
-  test('shows — when usage is flat', async ($, on) => {
+  test('hidden when usage is flat', async ($, on) => {
     const w = world(on)
     for (let i = 0; i < 3; i++) {
       await $.session.measure(measure([fiveHourAt(40)]))
       await w.clock.advance(30 * MIN)
     }
-    expect(last(w.status)).toBe(`QM pace: — (resets ${clockText(RESET)}) · agents 0`)
+    expect(w.status.filter(s => s !== undefined)).toEqual([])
   })
 
   test('projects the cap from a rising line', async ($, on) => {
@@ -58,22 +102,30 @@ describe('pace line', () => {
       await $.session.measure(measure([fiveHourAt(pct)]))
       if (pct !== 50) await w.clock.advance(30 * MIN)
     }
-    expect(last(w.status)).toBe(`QM pace: cap ~${clockText(T0 + 135 * MIN)} (resets ${clockText(RESET)}) · agents 0`)
+    expect(last(w.status)).toBe(`QM 5h cap ~${clockText(T0 + 135 * MIN)}`)
   })
 
-  test('says no cap before reset when the line reaches 100 after it', async ($, on) => {
+  test('hidden when the line reaches 100 only after the reset', async ($, on) => {
     const w = world(on)
     for (const pct of [10, 20, 30]) {
       await $.session.measure(measure([fiveHourAt(pct)]))
       if (pct !== 30) await w.clock.advance(30 * MIN)
     }
-    expect(last(w.status)).toBe(`QM pace: no cap before reset (resets ${clockText(RESET)}) · agents 0`)
+    expect(w.status.filter(s => s !== undefined)).toEqual([])
   })
 
-  test('session start takes a reading and shows the line', async ($, on) => {
+  test('an unchanged line is drawn once, hidden or shown', async ($, on) => {
+    const w = world(on)
+    for (let i = 0; i < 4; i++) await $.session.measure(measure([fiveHourAt(10 + i)]))
+    expect(w.status).toEqual([undefined])
+    for (let i = 0; i < 3; i++) await $.session.measure(measure([fiveHourAt(100)]))
+    expect(w.status).toEqual([undefined, 'QM 5h capped'])
+  })
+
+  test('session start takes a reading', async ($, on) => {
     const w = world(on, { limits: [fiveHourAt(12)] })
     await $.session.start(START)
-    expect(last(w.status)).toBe(`QM pace: — (resets ${clockText(RESET)}) · agents 0`)
+    expect(last(w.status)).toBeUndefined()
     expect((w.store.get('readings') as Record<string, unknown[]>)[windowKey(RESET)]).toEqual([[T0, 12]])
   })
 
@@ -100,12 +152,134 @@ describe('pace line', () => {
       await $.session.measure(measure([fiveHourAt(pct)]))
       await w.clock.advance(30 * MIN)
     }
+    expect(last(w.status)).toContain('QM 5h cap ~')
     const nextReset = RESET + 300 * MIN
     await $.session.measure(measure([fiveHourAt(1, nextReset)]))
-    expect(last(w.status)).toBe(`QM pace: — (resets ${clockText(nextReset)}) · agents 0`)
+    expect(last(w.status)).toBeUndefined()
     await $.session.measure(measure([fiveHourAt(1, nextReset + 300 * MIN)]))
     const keys = Object.keys(w.store.get('readings') as object)
     expect(keys.sort()).toEqual([windowKey(nextReset), windowKey(nextReset + 300 * MIN)].sort())
+  })
+})
+
+describe('the idle line', () => {
+  test('a timer redraws it: flat idle usage pushes the cap past the reset, never "capped soon"', async ($, on) => {
+    const w = world(on, {
+      limits: [fiveHourAt(50)],
+      store: { readings: { [windowKey(RESET)]: [[T0 - 60 * MIN, 10], [T0 - 30 * MIN, 30]] } },
+    })
+    await $.session.start(START)
+    expect(last(w.status)).toBe(`QM 5h cap ~${clockText(T0 + 75 * MIN)}`)
+    // Idle at 50% past the frozen fit's cap time: the fit, with now at 50%, puts the cap after the reset.
+    await w.clock.advance(80 * MIN)
+    expect(w.status.filter(s => s === 'QM 5h capped soon')).toEqual([])
+    expect(last(w.status)).toBeUndefined()
+  })
+
+  test('a dense rising history fades too once idle past its cap time', async ($, on) => {
+    const rising: [number, number][] = []
+    for (let m = -60; m < 0; m += 5) rising.push([T0 + m * MIN, 50 + (40 * m) / 60])
+    const w = world(on, { limits: [fiveHourAt(50)], store: { readings: { [windowKey(RESET)]: rising } } })
+    await $.session.start(START)
+    expect(last(w.status)).toBe(`QM 5h cap ~${clockText(T0 + 75 * MIN)}`)
+    await w.clock.advance(80 * MIN)
+    expect(w.status.filter(s => s === 'QM 5h capped soon')).toEqual([])
+    expect(last(w.status)).toBeUndefined()
+  })
+
+  test('a minute-by-minute rising history fades at its own cadence', async ($, on) => {
+    const rising: [number, number][] = []
+    for (let m = -60; m < 0; m += 1) rising.push([T0 + m * MIN, 50 + (40 * m) / 60])
+    const w = world(on, { limits: [fiveHourAt(50)], store: { readings: { [windowKey(RESET)]: rising } } })
+    await $.session.start(START)
+    expect(last(w.status)).toBe(`QM 5h cap ~${clockText(T0 + 75 * MIN)}`)
+    // 66 min idle: filled minute by minute the cap lands ~15 min past the reset; filled every 5 min it would
+    // land ~18 min before it and still show.
+    await w.clock.advance(66 * MIN)
+    expect(w.status.filter(s => s === 'QM 5h capped soon')).toEqual([])
+    expect(last(w.status)).toBeUndefined()
+  })
+
+  test("the heavy guard's deny uses the idle-filled fit, not the stale one", async ($, on) => {
+    const stored: [number, number][] = [[T0 - 60 * MIN, 40], [T0 - 30 * MIN, 60], [T0, 80]]
+    const w = world(on, { limits: [fiveHourAt(80)], store: { readings: { [windowKey(RESET)]: stored } } })
+    await w.clock.advance(90 * MIN)
+    const now = T0 + 90 * MIN
+    // Stored alone, the fit capped at T0+30 and would read "about to cap".
+    expect(fitCap(stored)).toBe(T0 + 30 * MIN)
+    const cap = fitCap(withIdle(stored, 80, now, MIN))
+    expect(cap).not.toBeNull()
+    expect(cap!).toBeGreaterThan(now)
+    const { deny } = await $.agent.spawn(spawn({ model: 'opus' }))
+    expect(deny).toContain(windowText(80, RESET, cap, now))
+  })
+
+  test('the idle fill needs three real readings', () => {
+    const two: [number, number][] = [[T0, 10], [T0 + MIN, 20]]
+    expect(withIdle(two, 20, T0 + 60 * MIN, 5 * MIN)).toEqual(two)
+    const three: [number, number][] = [...two, [T0 + 2 * MIN, 30]]
+    expect(withIdle(three, 30, T0 + 12 * MIN, 5 * MIN)).toEqual([...three, [T0 + 7 * MIN, 30], [T0 + 12 * MIN, 30]])
+    // The readings' own spacing (3 min) wins over a shorter floor.
+    const sparse: [number, number][] = [[T0, 10], [T0 + 3 * MIN, 20], [T0 + 6 * MIN, 30]]
+    expect(withIdle(sparse, 30, T0 + 12 * MIN, MIN)).toEqual([...sparse, [T0 + 9 * MIN, 30], [T0 + 12 * MIN, 30]])
+  })
+
+  test('a passed reset hides a capped line', async ($, on) => {
+    const w = world(on, { limits: [fiveHourAt(100)] })
+    await $.session.start(START)
+    expect(last(w.status)).toBe('QM 5h capped')
+    await w.clock.advance(181 * MIN)
+    expect(last(w.status)).toBeUndefined()
+  })
+
+  test('the timer runs even when session start fails after it', async ($, on) => {
+    const w = world(on, { limits: [fiveHourAt(100)], failStoreSet: true })
+    await $.session.start(START)
+    w.setLimits([fiveHourAt(100)])
+    await w.clock.advance(2 * MIN)
+    expect(last(w.status)).toBe('QM 5h capped')
+  })
+})
+
+describe('weekly window', () => {
+  test('forecasts a weekly cap once twelve hours of readings agree, with the date', async ($, on) => {
+    const w = world(on)
+    const shown: (string | undefined)[] = []
+    for (let h = 0; h <= 12; h++) {
+      await $.session.measure(measure([sevenDayAt(32 + 2 * h)]))
+      shown.push(last(w.status))
+      if (h !== 12) await w.clock.advance(HOUR)
+    }
+    // Hidden until the twelfth hour; then 56% rising 2%/h caps 22 hours on.
+    expect(shown.slice(0, 12).every(s => s === undefined)).toBe(true)
+    expect(last(w.status)).toBe(`QM week cap ~${dateClockText(T0 + 34 * HOUR)}`)
+    w.setLimits([sevenDayAt(56)])
+    const { text } = await $.command.run(command('quartermaster'))
+    expect(text).toContain('weekly store 1 window, 13 readings over 12h 0m')
+    expect(text).toContain(`weekly: 56%, resets ${dateClockText(T0 + 3 * DAY)} (in 2d 12h) · ~2.0%/h · cap ~${dateClockText(T0 + 34 * HOUR)}`)
+  })
+
+  test('keeps one weekly reading per quarter hour', async ($, on) => {
+    const w = world(on)
+    for (let i = 0; i < 6; i++) {
+      await $.session.measure(measure([sevenDayAt(10 + i)]))
+      await w.clock.advance(5 * MIN)
+    }
+    const week = w.store.get('weekReadings') as Record<string, [number, number][]>
+    expect(Object.values(week)[0]).toEqual([[T0, 10], [T0 + 15 * MIN, 13]])
+  })
+
+  test('both windows alert together, five-hour first', async ($, on) => {
+    const weekly: [number, number][] = [[T0 - 24 * HOUR, 40], [T0 - 12 * HOUR, 60], [T0 - 15 * MIN, 79]]
+    const w = world(on, {
+      limits: [fiveHourAt(50), sevenDayAt(80)],
+      store: {
+        readings: { [windowKey(RESET)]: [[T0 - 60 * MIN, 10], [T0 - 30 * MIN, 30]] },
+        weekReadings: { [windowKey(T0 + 3 * DAY)]: weekly },
+      },
+    })
+    await $.session.start(START)
+    expect(last(w.status)).toMatch(/^QM 5h cap ~\S+ · week cap ~/)
   })
 })
 
@@ -116,16 +290,11 @@ describe('capped window', () => {
       await $.session.measure(measure([fiveHourAt(pct)]))
       await w.clock.advance(30 * MIN)
     }
-    expect(last(w.status)).toBe(`QM pace: capped (resets ${clockText(RESET)}) · agents 0`)
+    expect(last(w.status)).toBe('QM 5h capped')
   })
 })
 
 describe('pace text edges', () => {
-  test('a fit that puts the cap before now reads capped soon', () => {
-    expect(paceClause(T0 - MIN, RESET, 98, T0)).toBe(`capped soon (resets ${clockText(RESET)})`)
-    expect(paceClause(T0 + MIN, RESET, 98, T0)).toBe(`cap ~${clockText(T0 + MIN)} (resets ${clockText(RESET)})`)
-  })
-
   test('the reading at 100% says already capped', () => {
     expect(windowText(100, RESET, T0 - MIN)).toBe(`five-hour window at 100%, resets ${clockText(RESET)}; already capped`)
   })
@@ -139,12 +308,12 @@ describe('a stale fit through the hooks', () => {
       await w.clock.set(T0 + at * MIN)
       await $.session.measure(measure([fiveHourAt(pct)]))
     }
-    expect(last(w.status)).toBe(`QM pace: capped soon (resets ${clockText(RESET)}) · agents 0`)
+    expect(last(w.status)).toBe('QM 5h capped soon')
     expect(windowText(92, RESET, T0 + 109 * MIN, T0 + 120 * MIN)).toBe(
       `five-hour window at 92%, resets ${clockText(RESET)}; about to cap`,
     )
     w.setLimits([fiveHourAt(92)])
     const { text } = await $.command.run(command('quartermaster'))
-    expect(text).toContain(`pace: capped soon (resets ${clockText(RESET)}), window at 92%`)
+    expect(text).toMatch(/five-hour: 92%, resets .+ \(in 1h 0m\) · ~\S+%\/h · capped soon/)
   })
 })

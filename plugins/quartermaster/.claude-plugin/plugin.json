@@ -1,7 +1,7 @@
 {
   "name": "quartermaster",
-  "version": "0.1.0",
-  "description": "Soft-denies subagent spawns with no model set and heavy-model spawns late in the five-hour window, and shows when the window will cap at the current pace",
+  "version": "0.2.0",
+  "description": "Soft-denies subagent spawns with no model set and heavy-model spawns late in the five-hour window, and forecasts five-hour and weekly caps at the current pace",
   "author": { "name": "bloknayrb" },
   "repository": "https://github.com/bloknayrb/claudestuff",
   "types": "./types/index.d.ts",

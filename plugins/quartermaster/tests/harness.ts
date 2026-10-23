@@ -27,6 +27,8 @@ export type WorldInit = {
   store?: Record<string, unknown>
   env?: Record<string, string>
   failStoreSet?: boolean
+  /** Store keys whose writes fail, the rest writing normally. */
+  failStoreKeys?: string[]
   failUsage?: boolean
 }
 
@@ -62,7 +64,7 @@ export function world(on: On, init: WorldInit = {}): World {
   on('store.get', (_$, e) => ({ value: copy(w.store.get(e.key)) }))
   on('store.set', (_$, e) => {
     // Thrown, not { deny }: a throw beneath the plugin surely rejects the plugin's $.store.set.
-    if (init.failStoreSet === true) throw new Error('store full')
+    if (init.failStoreSet === true || init.failStoreKeys?.includes(e.key) === true) throw new Error('store full')
     w.store.set(e.key, copy(e.value))
     return { value: undefined }
   })
@@ -129,6 +131,12 @@ export function spawn(over: Partial<AgentSpawnInput> = {}): AgentSpawnInput {
 
 export function fiveHourAt(pct: number, resetsAt: number = T0 + 180 * MIN): SessionRateLimit {
   return { kind: 'five_hour', percentUsed: pct, resetsAt: new Date(resetsAt).toISOString() }
+}
+
+export const DAY = 24 * 60 * MIN
+
+export function sevenDayAt(pct: number, resetsAt: number = T0 + 3 * DAY): SessionRateLimit {
+  return { kind: 'seven_day', percentUsed: pct, resetsAt: new Date(resetsAt).toISOString() }
 }
 
 export function measure(rateLimits: SessionRateLimit[]) {

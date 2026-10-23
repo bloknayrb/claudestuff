@@ -9,11 +9,15 @@ A Claude Code mod that keeps subagent spending deliberate.
   five-hour window is at or past `warnAt` (75%) is denied once with the reading and the projected cap time.
   Re-issue unchanged to spend it anyway, or name a model: choosing a heavy one after seeing the reading
   passes.
-- **Pace line.** One status line: when the five-hour window will cap at the current pace, and how many
-  subagents this session has run. `QM pace: cap ~15:40 (resets 17:00) · agents 4 (2 opus)`. Hidden off a
-  subscription.
+- **Pace line.** One status line that carries what a usage bar doesn't: a cap coming in either window at
+  the current pace, and how many subagents this session has run, by model family.
+  `QM 5h cap ~3:40pm · week cap ~Oct 25, 9:00am · agents 4 (2 opus, 2 sonnet)`. Each part shows only when it
+  has something to say, and the line is hidden when none does. It doesn't repeat the usage percentages: pair
+  it with a status line that shows them. A timer redraws it every minute, so a passed cap time or a reset
+  doesn't stay up while the session is idle.
 - **Threshold toasts** at 50, 75 and 90% of the five-hour window, once each per window.
-- **`/quartermaster`** reports each guard's fires, re-issues and changes, the pace and the config.
+- **`/quartermaster`** leads with both windows (percent, reset and time to it, burn rate, forecast), then
+  this session's agents, each guard's fires, re-issues and changes, and the config.
 
 Spawns made by other plugins or by workflow scripts can't re-issue, so for them the guards never deny: they
 toast, once per plugin and agent type (model guard) or per plugin and window (heavy guard).
@@ -54,8 +58,8 @@ narrowed or removed.
 
 ## What it writes
 
-- The plugin's own store (pace readings for the current and previous window, toasts sent, counters, the fire
-  ring).
+- The plugin's own store (five-hour and weekly readings for the current and previous window of each, toasts
+  sent, counters, the fire ring). Weekly readings are kept at most one per quarter hour.
 - A heartbeat at `~/.claude/state/mods/quartermaster/<sessionId>.json`:
   `{ "loadedAt", "lastError" }`.
   One file is written per session id and never pruned; they are small and safe to delete.
@@ -64,6 +68,12 @@ It makes no model calls. A guard that fails lets the spawn through and logs to t
 
 ## Limits
 
+- A hidden line means "no cap coming" or "no forecast yet", and the line alone can't tell you which. A
+  five-hour forecast needs three readings of a rising percent. A weekly one waits for twelve hours of
+  readings, because a burst's first half hour projected across a week calls a cap days early. `/quartermaster`
+  says `pace unknown` when there is no forecast.
+- Readings are taken only while a Claude Code session runs. Usage from elsewhere (claude.ai, another device)
+  arrives as a jump at the next reading.
 - A Workflow's agents get a toast, not a deny, by design: nothing can re-issue a spawn a Workflow script
   starts, so a deny would only kill the step. That path was not observed live; the tests cover it.
 
