@@ -193,8 +193,9 @@ describe('the idle line', () => {
     const w = world(on, { limits: [fiveHourAt(50)], store: { readings: { [windowKey(RESET)]: rising } } })
     await $.session.start(START)
     expect(last(w.status)).toBe(`QM 5h cap ~${clockText(T0 + 75 * MIN)}`)
-    // An hour idle: filled minute by minute the cap moves past the reset; filled every 5 min it would not yet.
-    await w.clock.advance(60 * MIN)
+    // 66 min idle: filled minute by minute the cap lands ~15 min past the reset; filled every 5 min it would
+    // land ~18 min before it and still show.
+    await w.clock.advance(66 * MIN)
     expect(w.status.filter(s => s === 'QM 5h capped soon')).toEqual([])
     expect(last(w.status)).toBeUndefined()
   })
