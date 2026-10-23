@@ -177,12 +177,12 @@ function recordFires($: EngineInterface, guards: readonly QmGuard[], hash: strin
 
 /**
  * Where each window's readings live, how many are kept, the gap under which a new one is skipped, and the
- * step an idle stretch is filled at (withIdle). The five-hour list skips only a repeat of the same percent
+ * shortest step an idle stretch is filled at (withIdle). The five-hour list skips only a repeat of the same percent
  * within a minute; the weekly list keeps one reading per quarter hour whatever it says (672 in a week), so a
  * busy day can't push the week's start out of the fit.
  */
 type Series = { storeKey: string; max: number; gapMs: number; sameOnly: boolean; fillMs: number }
-const FIVE_HOUR: Series = { storeKey: 'readings', max: 300, gapMs: 60_000, sameOnly: true, fillMs: 5 * 60_000 }
+const FIVE_HOUR: Series = { storeKey: 'readings', max: 300, gapMs: 60_000, sameOnly: true, fillMs: 60_000 }
 const WEEK: Series = { storeKey: 'weekReadings', max: 700, gapMs: 15 * 60_000, sameOnly: false, fillMs: 15 * 60_000 }
 
 /** Keeps the current window and the one before it (the two latest resets). */

@@ -72,16 +72,23 @@ export function fitRate(readings: readonly Reading[]): number | null {
   return line === null ? null : line.slope * 60
 }
 
+/** The median gap between consecutive readings, or 0 under two. */
+function medianGap(readings: readonly Reading[]): number {
+  const gaps = readings.slice(1).map((r, i) => r[0] - readings[i]![0]).sort((a, b) => a - b)
+  return gaps.length === 0 ? 0 : gaps[Math.floor(gaps.length / 2)]!
+}
+
 /**
- * The readings plus the idle stretch since the last one, as flat readings at the live percent every `stepMs`
- * and one at `now`. Readings stop while the session is idle; without these, a frozen fit's cap time would
- * pass and read "capped soon" through hours of flat usage. Filling at the stored cadence weighs the idle
- * stretch as a session watching it would have, so the forecast fades instead of lingering. Under three real
- * readings there is no fit to correct, and nothing is added.
+ * The readings plus the idle stretch since the last one, as flat readings at the live percent and one at
+ * `now`. Readings stop while the session is idle; without these, a frozen fit's cap time would pass and read
+ * "capped soon" through hours of flat usage. The fill steps at the readings' own median spacing (never under
+ * `minStepMs`), so the idle stretch weighs what the same stretch of watched readings would, and the forecast
+ * fades instead of lingering. Under three real readings there is no fit to correct, and nothing is added.
  */
-export function withIdle(readings: readonly Reading[], pct: number, now: number, stepMs: number): readonly Reading[] {
+export function withIdle(readings: readonly Reading[], pct: number, now: number, minStepMs: number): readonly Reading[] {
   const last = readings[readings.length - 1]
   if (readings.length < 3 || last === undefined || now <= last[0]) return readings
+  const stepMs = Math.max(minStepMs, medianGap(readings))
   const filled: Reading[] = [...readings]
   for (let t = last[0] + stepMs; t < now; t += stepMs) filled.push([t, pct])
   filled.push([now, pct])
