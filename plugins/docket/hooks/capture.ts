@@ -25,10 +25,19 @@ function isTurnOpener(m: SessionMessage, midTurn: ReadonlySet<string>): boolean 
   return !midTurn.has(t)
 }
 
-// The messages of the turn that just ended. While the list is under the cap and has not shrunk
-// (compaction), everything past the count taken at turn.start; otherwise a walk back to the user
-// message that opened the turn.
-export function turnSlice(msgs: readonly SessionMessage[], startLen: number | undefined, midTurn: ReadonlySet<string>): SessionMessage[] {
+// The messages of the turn that just ended, by the first of these that works:
+// 1. the newest user message holding the turn's opening prompt (turn.start's text): immune to the
+//    4096 cap and to compaction, and not fooled by user-role rows other mods append mid-turn;
+// 2. everything past the count taken at turn.start, while the list is under the cap and has not shrunk;
+// 3. a walk back to the newest user text that looks like a prompt.
+export function turnSlice(msgs: readonly SessionMessage[], startLen: number | undefined, midTurn: ReadonlySet<string>, opener?: string): SessionMessage[] {
+  const open = opener?.trim() ?? ''
+  if (open !== '') {
+    for (let j = msgs.length - 1; j >= 0; j -= 1) {
+      const m = msgs[j] as SessionMessage
+      if (m.role === 'user' && (m.toolResults?.length ?? 0) === 0 && m.text.trim() === open) return msgs.slice(j + 1)
+    }
+  }
   if (startLen !== undefined && msgs.length < MESSAGES_CAP && msgs.length >= startLen) return msgs.slice(startLen)
   let i = msgs.length - 1
   while (i >= 0 && !isTurnOpener(msgs[i] as SessionMessage, midTurn)) i -= 1

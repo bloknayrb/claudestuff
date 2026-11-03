@@ -5,7 +5,7 @@ import type { DocketSession } from '../types'
 import { bashInput, material, turnSlice } from './capture'
 import { buildPrompt, parseVerdict, RULES } from './judge'
 import type { Mode } from './judge'
-import { addManual, addToolAsked, addUser, applyVerdict, clearAll, closedForJudge, closeGroups, dismiss, freshSession, markDone, normalize, openItems, reopen } from './ledger'
+import { addManual, addToolAsked, addTurn, addUser, applyVerdict, clearAll, closedForJudge, closeGroups, dismiss, freshSession, markDone, normalize, openItems, reopen } from './ledger'
 import { clip } from './text'
 import { ARM_DELAY_MS, indicatorText, indicatorTree, PANE_COLUMNS, PANE_ID, PANE_TITLE, paneTree } from './ui'
 import type { Actions } from './ui'
@@ -28,7 +28,8 @@ let controller: AbortController | undefined
 // Bumped by /clear and /resume: a verdict for an earlier epoch is thrown away.
 let epoch = 0
 let droppedNotice: string | undefined
-let turnStartLen: { turnId: string; len: number } | undefined
+// The message count and the opening prompt's text at turn.start: how turn.complete finds the turn.
+let turnStartLen: { turnId: string; len: number; opener: string } | undefined
 // Prompts typed into the running turn: user rows that do not open a turn (see capture.ts).
 let midTurn = new Set<string>()
 let isUsageLogged = false
@@ -218,10 +219,16 @@ async function runCheck($: EngineInterface, mode: Mode, model: string): Promise<
   }
   const now = await $.clock.now()
   const result = await transact($, cur => {
+    // Checked again here, at the write: a /clear landing in the awaits above must not get the old
+    // conversation's verdict written into the fresh session.
+    if (myEpoch !== epoch) return { session: cur, out: undefined }
     const a = applyVerdict(cur, parsed.verdict, built.snapshot, now)
     const checkedTurns = cur.lastCheck.checkedTurns + (mode === 'full' ? 1 : 0)
     return { session: { ...a.session, lastCheck: { ok: true, at: now, reason: '', streak: 0, checkedTurns } }, out: a }
   })
+  if (result === undefined) return
+  // The user's words that answer an item this verdict added were kept: check them against it now.
+  if (result.keptForNew) resolveDue = true
   if (parsed.dropped > 0 || result.refused.length > 0) {
     $.ui.log(`docket: verdict dropped ${parsed.dropped}, refused [${result.refused.join(', ')}]`, { to: 'debug' })
   }
@@ -391,7 +398,7 @@ export const register: Register = (on, options) => {
     if (e.agentId === undefined) {
       try {
         midTurn = new Set()
-        turnStartLen = { turnId: e.turnId, len: (await $.session.messages()).length }
+        turnStartLen = { turnId: e.turnId, len: (await $.session.messages()).length, opener: e.text.trim() }
         if (heartbeatFor !== (await $.session.id())) void guard($, 'heartbeat', writeHealth($))
       } catch (err) {
         await fail($, 'turn.start', err)
@@ -404,15 +411,15 @@ export const register: Register = (on, options) => {
     const done = await next(e)
     if (e.agentId !== undefined) return done
     try {
-      const start = turnStartLen?.turnId === e.turnId ? turnStartLen.len : undefined
+      const mark = turnStartLen?.turnId === e.turnId ? turnStartLen : undefined
       turnStartLen = undefined
       const msgs = await $.session.messages()
       const s0 = await readSession($)
       const turn = s0.turn + 1
-      const got = material(turnSlice(msgs, start, midTurn), e.answer, turn)
+      const got = material(turnSlice(msgs, mark?.len, midTurn, mark?.opener), e.answer, turn)
       midTurn = new Set()
       const final = got.claude.at(-1)?.text
-      await change($, s => addToolAsked({ ...s, turn, claude: [...s.claude, ...got.claude], tools: [...s.tools, ...got.tools], lastFinal: final ?? s.lastFinal }, got.asked))
+      await change($, s => addToolAsked(addTurn({ ...s, turn, lastFinal: final ?? s.lastFinal }, got.claude, got.tools), got.asked))
       // Only a turn that ended with an answer is judged; an aborted, refused or failed one leaves its
       // material for the next check.
       if (e.reason === 'answer') {
@@ -487,7 +494,7 @@ export const register: Register = (on, options) => {
   on('command.run', { command: 'docket' }, async ($, e, next) => {
     try {
       const args = e.args.trim()
-      if (args.startsWith('add')) {
+      if (args === 'add' || args.startsWith('add ')) {
         const text = args.slice(3).trim()
         if (text === '') return { text: 'Docket: /docket add <what you need to decide or do>' }
         await change($, s => addManual(s, text))

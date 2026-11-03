@@ -1,12 +1,16 @@
 // Pure: the item list and every change to it. Nothing here takes $.
 
-import type { DocketSession, Item, UserEntry } from '../types'
+import type { ClaudeEntry, DocketSession, Item, ToolLine, UserEntry } from '../types'
 import type { CheckedResolve, Snapshot, Verdict } from './judge'
 import { clip, isBare, normalise, occursIn, sanitise } from './text'
 
 // Closes kept for "Recently closed" and for the judge's do-not-re-add list. A clear batch counts once.
 export const KEEP_CLOSES = 15
 export const KEEP_TOOL_ASKED = 10
+// While checks keep failing nothing is consumed; these caps keep the backlog (and $.state) bounded.
+export const KEEP_USER = 30
+export const KEEP_CLAUDE = 120
+export const KEEP_TOOLS = 200
 
 export function freshSession(): DocketSession {
   return {
@@ -78,8 +82,11 @@ export function refusal(s: DocketSession, item: Item, r: CheckedResolve): string
     const e: UserEntry = r.entry
     if (e.afterTurn < item.openedTurn) return 'evidence-before-item'
     if (item.reopenedAtSeq !== undefined && e.seq <= item.reopenedAtSeq) return 'evidence-before-reopen'
-    if (isBare(r.evidence) || isBare(e.text)) {
-      const openedThen = s.items.filter(i => i.source === 'judge' && i.openedTurn === e.afterTurn)
+    // Bare means the whole reply is a bare go-ahead or refusal. A reply that names its item ("Re: Merge
+    // PR #18 — yes", from the Reply button) is not bare, though the judge's shortest span may be "yes".
+    if (isBare(e.text)) {
+      // A dismissed sibling no longer makes the reply ambiguous.
+      const openedThen = s.items.filter(i => i.source === 'judge' && i.openedTurn === e.afterTurn && i.status !== 'dismissed')
       const isOnly = openedThen.length === 1 && openedThen[0]?.id === item.id
       if (!item.singleRec || item.openedTurn !== e.afterTurn || !isOnly) return 'bare-reply-ambiguous'
     }
@@ -87,18 +94,21 @@ export function refusal(s: DocketSession, item: Item, r: CheckedResolve): string
   }
   if (r.turn < item.openedTurn) return 'evidence-before-item'
   if (item.reopenedAtTurn !== undefined && r.turn <= item.reopenedAtTurn) return 'evidence-before-reopen'
-  // The sentence that raised the item is not proof it is done.
-  if (item.quote !== '' && occursIn(r.evidence, item.quote)) return 'evidence-is-the-ask'
+  // The sentence that raised the item is not proof it is done. Only in the turn that raised it: a later
+  // short report ("merged") may share words with the ask.
+  if (r.turn === item.openedTurn && item.quote !== '' && occursIn(r.evidence, item.quote)) return 'evidence-is-the-ask'
   return ''
 }
 
-export type Applied = { session: DocketSession; added: number; resolved: number; refused: string[] }
+// keptForNew: some of the user's words were kept for a resolve check on items this verdict added.
+export type Applied = { session: DocketSession; added: number; resolved: number; refused: string[]; keptForNew: boolean }
 
 // Applies a checked verdict: resolves first (against the items the judge saw), then adds. A full
 // check's verdict also consumes what it was handed.
 export function applyVerdict(s: DocketSession, v: Verdict, snap: Snapshot, now: number): Applied {
   const refused: string[] = []
   const ok: CheckedResolve[] = []
+  let keptForNew = false
   for (const r of v.resolves) {
     const item = s.items.find(i => i.id === r.id && i.status === 'open')
     if (item === undefined) { refused.push('not-open'); continue }
@@ -125,14 +135,22 @@ export function applyVerdict(s: DocketSession, v: Verdict, snap: Snapshot, now: 
   }
   next = { ...next, items, nextId }
   if (snap.mode === 'full') {
+    // An item cannot be resolved in the verdict that adds it, so the user's words written after its
+    // turn ended are kept for the resolve check that follows (applied.keptForNew); else an answer that
+    // arrived in the same check (a failed check retried, a reply typed while a check ran) would be
+    // consumed and the item left open for good.
+    const newTurns = items.slice(items.length - added).map(i => i.openedTurn)
+    const firstNew = newTurns.length === 0 ? Number.POSITIVE_INFINITY : Math.min(...newTurns)
+    const isKept = (u: UserEntry) => u.seq > snap.consumedSeq || u.afterTurn >= firstNew
+    keptForNew = next.pendingUser.some(u => u.seq <= snap.consumedSeq && u.afterTurn >= firstNew)
     next = {
       ...next,
-      pendingUser: next.pendingUser.filter(u => u.seq > snap.consumedSeq),
+      pendingUser: next.pendingUser.filter(isKept),
       claude: next.claude.slice(snap.consumedClaude),
       tools: next.tools.slice(snap.consumedTools),
     }
   }
-  return { session: next, added, resolved: ok.length, refused }
+  return { session: next, added, resolved: ok.length, refused, keptForNew }
 }
 
 export function dismiss(s: DocketSession, id: number, now: number): DocketSession {
@@ -172,7 +190,12 @@ export function addManual(s: DocketSession, text: string): DocketSession {
 
 export function addUser(s: DocketSession, text: string): DocketSession {
   const entry: UserEntry = { seq: s.nextSeq, text: clip(text, 20000), afterTurn: s.turn }
-  return { ...s, pendingUser: [...s.pendingUser, entry], nextSeq: s.nextSeq + 1 }
+  return { ...s, pendingUser: [...s.pendingUser, entry].slice(-KEEP_USER), nextSeq: s.nextSeq + 1 }
+}
+
+// Appends one turn's material, oldest dropped past the caps.
+export function addTurn(s: DocketSession, claude: readonly ClaudeEntry[], tools: readonly ToolLine[]): DocketSession {
+  return { ...s, claude: [...s.claude, ...claude].slice(-KEEP_CLAUDE), tools: [...s.tools, ...tools].slice(-KEEP_TOOLS) }
 }
 
 export function addToolAsked(s: DocketSession, questions: readonly string[]): DocketSession {

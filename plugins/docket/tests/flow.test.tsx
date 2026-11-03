@@ -103,6 +103,20 @@ test('a full check due during a resolve check runs after it, never mid-turn', as
   expect(w.calls[2]?.prompt.includes('Still waiting on the cache choice.')).toBe(true)
 })
 
+test('an answer carried in the same check as its ask still closes it (a resolve check follows)', async ($, on) => {
+  const w = world(on)
+  await start($)
+  // The check after t1 fails; the user answers; the retry after t2 adds the ask from t1 and sees the
+  // answer, which it cannot resolve in the verdict that adds the item.
+  w.replies.push({ fail: 'api-error' })
+  await turn($, w, 't1', [ASK])
+  await say($, w, 'use sqlite')
+  w.replies.push(ADD_ASK, verdict({ resolve: [{ id: 1, by: 'you', note: 'SQLite', evidence: 'use sqlite' }] }))
+  await turn($, w, 't2', ['Noted.'])
+  expect(w.calls.at(-1)?.prompt.includes('resolve-only')).toBe(true)
+  expect(await openIds($)).toEqual([])
+})
+
 test('an aborted turn is not judged; its text rides with the next check', async ($, on) => {
   const w = world(on)
   await start($)

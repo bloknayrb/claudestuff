@@ -40,8 +40,9 @@ Requires Claude Code 2.1.317 or newer (function-hook mods).
 After each turn Docket sends a judge model what Claude wrote that turn (its text and a one-line
 summary of each tool call), what you typed since the last check, and the open and recently closed
 items. The judge answers with items to add and items to close. When you submit a prompt while items
-are open, a smaller check sends only your words and the open items, so an answer closes its item
-right away instead of a turn later.
+are open, a smaller check sends your words, the open items and the end of Claude's latest message
+(so a reply like "2. done" can be read against its list), and an answer closes its item right away
+instead of a turn later. That latest message is context only: a close still has to quote your words.
 
 Code checks the judge's answer before anything changes:
 
@@ -77,6 +78,9 @@ they can any plugin's model call.
   you in its own words, which Docket does see.
 - **Things you do outside the chat** close an item only if Claude's later text or a tool line shows
   them (a `gh pr view` saying merged, say). Otherwise use Done.
+- **An answer typed while Claude is still working** on the turn that asked doesn't close that ask,
+  because it was written before the item existed. Claude usually reports such an answer back, which
+  closes it; otherwise use Done.
 - **The judge can miss an ask or misread an answer.** Reopen undoes a wrong close; `/docket add`
   covers a miss.
 - **The panel never opens by itself.** A mod cannot see other mods' panels, so opening unasked could

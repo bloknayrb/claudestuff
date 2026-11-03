@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { CheckedResolve, Snapshot, Verdict } from '../hooks/judge'
-import { addManual, addUser, applyVerdict, clearAll, closedForJudge, closeGroups, dismiss, freshSession, KEEP_CLOSES, openItems, reopen } from '../hooks/ledger'
+import { addManual, addUser, applyVerdict, clearAll, closedForJudge, closeGroups, dismiss, freshSession, KEEP_CLOSES, KEEP_USER, openItems, reopen } from '../hooks/ledger'
 import { isBare } from '../hooks/text'
 import type { DocketSession, Item } from '../types'
 
@@ -54,6 +54,46 @@ test('a bare go-ahead is refused when two items opened that turn', async () => {
 test('a bare refusal follows the same rule', async () => {
   const s = withItems([{ singleRec: true, openedTurn: 3 }, { openedTurn: 3 }], 3)
   expect(applyVerdict(s, v([you(1, 'no', 1, 3)]), snap(), 0).refused).toEqual(['bare-reply-ambiguous'])
+})
+
+test('a Reply-prefixed "yes" closes an older item, though the judge quotes only "yes"', async () => {
+  const s = withItems([{ text: 'Merge PR #18', openedTurn: 1 }, { openedTurn: 1 }], 4)
+  const r = applyVerdict(s, v([you(1, 'yes', 1, 4, 'Re: Merge PR #18 — yes')]), snap(), 0)
+  expect(r.refused).toEqual([])
+  expect(openItems(r.session).map(i => i.id)).toEqual([2])
+})
+
+test('a dismissed sibling no longer makes a bare go-ahead ambiguous', async () => {
+  let s = withItems([{ singleRec: true, openedTurn: 3 }, { openedTurn: 3 }], 3)
+  s = dismiss(s, 2, 0)
+  expect(applyVerdict(s, v([you(1, 'yes', 1, 3)]), snap(), 0).refused).toEqual([])
+})
+
+test("Claude's later short report may share words with the ask", async () => {
+  const s = withItems([{ quote: 'Merge #18 once it is merged upstream?', openedTurn: 2 }], 3)
+  expect(applyVerdict(s, v([claude(1, 'merged', 3)]), snap(), 0).refused).toEqual([])
+})
+
+test('words written after a new item opened are kept for the resolve check that follows', async () => {
+  let s = { ...freshSession(), turn: 3 }
+  s = addUser(s, 'earlier words')
+  s = { ...s, turn: 4 }
+  s = addUser(s, 'use sqlite')
+  const add = { kind: 'decide' as const, text: 'Choose the cache', quote: 'q', singleRec: false, turn: 4 }
+  const r = applyVerdict(s, v([], [add]), snap({ consumedSeq: 2 }), 0)
+  expect(r.keptForNew).toBe(true)
+  expect(r.session.pendingUser.map(u => u.text)).toEqual(['use sqlite'])
+  // With no add, the same words are consumed.
+  const none = applyVerdict(s, v([]), snap({ consumedSeq: 2 }), 0)
+  expect(none.keptForNew).toBe(false)
+  expect(none.session.pendingUser.length).toBe(0)
+})
+
+test('the backlog is capped while checks fail', async () => {
+  let s = freshSession()
+  for (let i = 0; i < 50; i += 1) s = addUser(s, `m${i}`)
+  expect(s.pendingUser.length).toBe(KEEP_USER)
+  expect(s.pendingUser.at(-1)?.text).toBe('m49')
 })
 
 test('isBare reads go-ahead and refusal phrases, not specific replies', async () => {
