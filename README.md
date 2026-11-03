@@ -25,7 +25,7 @@
 | **Image Generation** | AI image prompting for Nano Banana MCP | nanobanana |
 | **Writing** | Learn your style, write in your voice | ghostwriter |
 | **Focus** | Executive function support | focus-tools |
-| **Claude Code Mods** | Subagent model choice and pacing, live panes and hooks inside Claude Code | quartermaster, bridge, claim-ledger |
+| **Claude Code Mods** | Subagent model choice and pacing, live panes and hooks inside Claude Code | quartermaster, bridge, claim-ledger, docket |
 
 ## Plugins at a Glance
 
@@ -72,6 +72,9 @@ Are you...
 ├── Want Claude to queue decisions instead of stopping to ask?
 │   └── → bridge (non-blocking decision pane)
 │
+├── Losing track of what Claude asked you to decide or do?
+│   └── → docket (mod: a list of open asks that clears as you answer)
+│
 ├── Want Claude's "tests pass" claims checked against what actually ran?
 │   └── → claim-ledger (mod: flags claims with no evidence)
 │
@@ -96,6 +99,7 @@ Are you...
 | **quartermaster** | Easy | Low | Subagent model choice and usage pacing |
 | **bridge** | Easy | None needed | Answering Claude's decisions without blocking it |
 | **claim-ledger** | Easy | Low | Catching unbacked "tests pass" claims |
+| **docket** | Easy | None needed | Keeping track of what Claude asked you to decide or do |
 | **focus-tools** | Medium | Medium | Executive function support |
 
 **Complexity Key:**
@@ -259,6 +263,20 @@ Are you...
 **Use for**: Answering Claude's decisions with one key while it keeps working
 
 **Requires**: Claude Code 2.1.292 or newer (function-hook mods)
+
+---
+
+### docket
+
+**What**: A list of everything Claude said in prose is yours to decide or do (not AskUserQuestion); each item clears when you answer or act, Claude reports it done, or you dismiss it
+
+**Commands**: `/docket` (open or close the panel), `/docket add <text>`, `/docket clear`
+
+**Hooks**: a panel, a clickable button above the prompt, a judge model call after each turn
+
+**Use for**: Not losing the asks that scroll away in Claude's replies
+
+**Requires**: Claude Code 2.1.317 or newer (function-hook mods)
 
 ---
 

@@ -1,0 +1,17 @@
+{
+  "name": "docket",
+  "version": "0.1.0",
+  "description": "A pane listing what Claude has said in prose is yours to decide or do (not AskUserQuestion); each item drops off when you decide or act, Claude reports it done, or you dismiss it.",
+  "author": { "name": "bloknayrb" },
+  "repository": "https://github.com/bloknayrb/claudestuff",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "model": {
+      "type": "string",
+      "title": "Judge model",
+      "description": "The model that reads each turn for asks and answers. One call after each turn and one per reply while items are open, about 2-8k tokens each: under a cent on haiku, a few cents on opus.",
+      "options": ["haiku", "sonnet", "opus"],
+      "default": "haiku"
+    }
+  }
+}
