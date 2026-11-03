@@ -83,8 +83,9 @@ export type Snapshot = {
   openIds: number[]
   // What a full check consumes when its verdict applies: the entries it was handed, sent or cut.
   consumedSeq: number
-  consumedClaude: number
-  consumedTools: number
+  // Claude text and tool lines are consumed by turn, not by count: the backlog caps drop entries from
+  // the front, which would shift a count, while turns only grow.
+  consumedTurn: number
 }
 
 export type Built = { prompt: string; snapshot: Snapshot }
@@ -148,8 +149,7 @@ export function buildPrompt(input: JudgeInput): Built {
       user,
       openIds: input.open.map(i => i.id),
       consumedSeq: input.user.reduce((m, u) => Math.max(m, u.seq), 0),
-      consumedClaude: input.claude.length,
-      consumedTools: input.tools.length,
+      consumedTurn: Math.max(0, ...input.claude.map(c => c.turn), ...input.tools.map(t => t.turn)),
     },
   }
 }

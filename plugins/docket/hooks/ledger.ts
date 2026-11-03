@@ -82,9 +82,11 @@ export function refusal(s: DocketSession, item: Item, r: CheckedResolve): string
     const e: UserEntry = r.entry
     if (e.afterTurn < item.openedTurn) return 'evidence-before-item'
     if (item.reopenedAtSeq !== undefined && e.seq <= item.reopenedAtSeq) return 'evidence-before-reopen'
-    // Bare means the whole reply is a bare go-ahead or refusal. A reply that names its item ("Re: Merge
-    // PR #18 — yes", from the Reply button) is not bare, though the judge's shortest span may be "yes".
-    if (isBare(e.text)) {
+    // A bare go-ahead or refusal names no item, whether the whole reply is one ("yes") or only the span
+    // the judge quoted ("ok" from "ok thanks"). The exception is a reply that names the item itself, as
+    // the Reply button's "Re: <item> — yes" does.
+    const namesItem = normalise(e.text).toLowerCase().includes(normalise(`Re: ${item.text}`).toLowerCase())
+    if ((isBare(r.evidence) || isBare(e.text)) && !namesItem) {
       // A dismissed sibling no longer makes the reply ambiguous.
       const openedThen = s.items.filter(i => i.source === 'judge' && i.openedTurn === e.afterTurn && i.status !== 'dismissed')
       const isOnly = openedThen.length === 1 && openedThen[0]?.id === item.id
@@ -146,8 +148,8 @@ export function applyVerdict(s: DocketSession, v: Verdict, snap: Snapshot, now: 
     next = {
       ...next,
       pendingUser: next.pendingUser.filter(isKept),
-      claude: next.claude.slice(snap.consumedClaude),
-      tools: next.tools.slice(snap.consumedTools),
+      claude: next.claude.filter(c => c.turn > snap.consumedTurn),
+      tools: next.tools.filter(t => t.turn > snap.consumedTurn),
     }
   }
   return { session: next, added, resolved: ok.length, refused, keptForNew }

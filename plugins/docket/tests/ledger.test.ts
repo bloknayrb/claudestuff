@@ -6,7 +6,7 @@ import { isBare } from '../hooks/text'
 import type { DocketSession, Item } from '../types'
 
 const snap = (over: Partial<Snapshot> = {}): Snapshot => ({
-  mode: 'full', claude: [], tools: [], user: [], openIds: [], consumedSeq: 0, consumedClaude: 0, consumedTools: 0, ...over,
+  mode: 'full', claude: [], tools: [], user: [], openIds: [], consumedSeq: 0, consumedTurn: 0, ...over,
 })
 
 function withItems(items: Partial<Item>[], turn = 1): DocketSession {
@@ -61,6 +61,12 @@ test('a Reply-prefixed "yes" closes an older item, though the judge quotes only 
   const r = applyVerdict(s, v([you(1, 'yes', 1, 4, 'Re: Merge PR #18 — yes')]), snap(), 0)
   expect(r.refused).toEqual([])
   expect(openItems(r.session).map(i => i.id)).toEqual([2])
+})
+
+test('a bare span quoted out of a longer reply is still gated', async () => {
+  const s = withItems([{ text: 'Merge PR #18', openedTurn: 1 }, { openedTurn: 1 }], 4)
+  expect(applyVerdict(s, v([you(1, 'ok', 1, 4, 'ok thanks')]), snap(), 0).refused).toEqual(['bare-reply-ambiguous'])
+  expect(applyVerdict(s, v([you(1, 'yes', 1, 4, 'yes, and run the tests')]), snap(), 0).refused).toEqual(['bare-reply-ambiguous'])
 })
 
 test('a dismissed sibling no longer makes a bare go-ahead ambiguous', async () => {
@@ -132,9 +138,9 @@ test('a full verdict consumes what it was handed; a resolve-only one consumes no
   let s = withItems([{}])
   s = addUser(addUser(s, 'a'), 'b')
   s = { ...s, claude: [{ turn: 1, text: 'x', isFinal: true }], tools: [{ turn: 1, text: 'Bash: ls' }] }
-  const kept = applyVerdict(s, v([]), snap({ mode: 'resolve', consumedSeq: 2, consumedClaude: 1, consumedTools: 1 }), 0).session
+  const kept = applyVerdict(s, v([]), snap({ mode: 'resolve', consumedSeq: 2, consumedTurn: 1 }), 0).session
   expect(kept.pendingUser.length).toBe(2)
-  const used = applyVerdict(s, v([]), snap({ consumedSeq: 1, consumedClaude: 1, consumedTools: 1 }), 0).session
+  const used = applyVerdict(s, v([]), snap({ consumedSeq: 1, consumedTurn: 1 }), 0).session
   expect(used.pendingUser.map(u => u.text)).toEqual(['b'])
   expect(used.claude.length + used.tools.length).toBe(0)
 })

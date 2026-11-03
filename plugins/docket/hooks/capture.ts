@@ -35,7 +35,7 @@ export function turnSlice(msgs: readonly SessionMessage[], startLen: number | un
   if (open !== '') {
     for (let j = msgs.length - 1; j >= 0; j -= 1) {
       const m = msgs[j] as SessionMessage
-      if (m.role === 'user' && (m.toolResults?.length ?? 0) === 0 && m.text.trim() === open) return msgs.slice(j + 1)
+      if (m.role === 'user' && (m.toolResults?.length ?? 0) === 0 && m.text.trim().startsWith(open)) return msgs.slice(j + 1)
     }
   }
   if (startLen !== undefined && msgs.length < MESSAGES_CAP && msgs.length >= startLen) return msgs.slice(startLen)

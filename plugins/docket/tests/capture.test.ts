@@ -15,6 +15,11 @@ test('the opening prompt finds the turn past the 4096 cap, through rows other mo
   expect(slice.map(m => m.text)).toEqual(['First, should I delete the old branch?', 'Bridge decision: {"id":1}', 'Done.'])
 })
 
+test('the opener matches a user row that carries extra blocks after the prompt', async () => {
+  const msgs = [user('earlier'), claude('x'), user('please refactor\n<system-reminder>ctx</system-reminder>'), claude('Should I delete it?')]
+  expect(turnSlice(msgs, undefined, new Set(), 'please refactor').map(m => m.text)).toEqual(['Should I delete it?'])
+})
+
 test('with no opener the count taken at turn.start slices the turn', async () => {
   const msgs = [user('a'), claude('b'), user('c'), claude('d')]
   expect(turnSlice(msgs, 3, new Set()).map(m => m.text)).toEqual(['d'])

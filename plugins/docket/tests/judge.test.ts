@@ -109,7 +109,7 @@ test('the budget cuts quotes, then old intermediate text, keeps the final messag
   expect(built.snapshot.claude.some(c => c.text.startsWith('old '))).toBe(false)
   for (const c of closed) expect(built.prompt.includes(`${c.id}: [decide]`)).toBe(true)
   // Everything handed in is consumed, cut or not.
-  expect(built.snapshot.consumedClaude).toBe(4)
+  expect(built.snapshot.consumedTurn).toBe(2)
 })
 
 test('user text beyond the newest 4 KB is cut oldest first', async () => {
