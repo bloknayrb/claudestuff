@@ -85,7 +85,7 @@ export function refusal(s: DocketSession, item: Item, r: CheckedResolve): string
     // A bare go-ahead or refusal names no item, whether the whole reply is one ("yes") or only the span
     // the judge quoted ("ok" from "ok thanks"). The exception is a reply that names the item itself, as
     // the Reply button's "Re: <item> — yes" does.
-    const namesItem = normalise(e.text).toLowerCase().includes(normalise(`Re: ${item.text}`).toLowerCase())
+    const namesItem = normalise(e.text).toLowerCase().includes(normalise(`Re: ${item.text} —`).toLowerCase())
     if ((isBare(r.evidence) || isBare(e.text)) && !namesItem) {
       // A dismissed sibling no longer makes the reply ambiguous.
       const openedThen = s.items.filter(i => i.source === 'judge' && i.openedTurn === e.afterTurn && i.status !== 'dismissed')
