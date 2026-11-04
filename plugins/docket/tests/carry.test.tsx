@@ -399,10 +399,8 @@ test('forget on a carry a later session took still writes the off record: no ite
   await w.clock.settle()
   await command($, 'forget')
   await w.clock.settle()
-  for (const p of [carryPath('sess-1', 'a'), carryPath('sess-1', 'b')]) {
-    const f = w.files.get(p)
-    if (f !== undefined && parseCarry(f.text, 'sess-1')?.seq === carryOf(w, 'sess-1')?.seq) expect(f.text.includes('Secret plan')).toBe(false)
-  }
+  // Neither A/B slot keeps the item text.
+  for (const p of [carryPath('sess-1', 'a'), carryPath('sess-1', 'b')]) expect(w.files.get(p)?.text.includes('Secret plan') ?? false).toBe(false)
   expect(carryOf(w, 'sess-1')?.on).toBe(false)
 })
 
@@ -417,7 +415,16 @@ test('carry on after forget writes the carry again', async ($, on) => {
   expect(carryOf(w, 'sess-1')?.items.length).toBe(1)
 })
 
-test('the chain stops after 8 hops; a missing hop takes nothing', async ($, on) => {
+test('a chain hop whose carry file is missing takes nothing', async ($, on) => {
+  const w = world(on)
+  seedCarry(w, source('src-1', ['Old']), { mtime: 990 })
+  w.files.set(claimPath('src-1', 1, 'gone-1'), { text: claimText('src-1', 1, 'gone-1', 1), mtimeMs: 950 })
+  w.sessionId = 'sess-9'
+  await freshProcess($, w)
+  expect(await openIds($)).toEqual([])
+})
+
+test('the chain stops after 8 hops', async ($, on) => {
   const w = world(on)
   // s0 claimed by s1, ... s9: ten links, newest first is s0.
   for (let n = 0; n <= 9; n += 1) {
@@ -446,10 +453,68 @@ test('sticky chain: C closes all and quits, D takes the empty carry and quits, E
   w.fileClock = 1500
   await $.session.end(endAs('prompt_input_exit', 'd-1'))
   expect(carryOf(w, 'd-1')?.on).toBe(true)
-  // A third fresh session: what it finds is D's (empty, on) carry, and its switch ends up on.
-  const found = carryOf(w, 'd-1')
-  expect(found?.items).toEqual([])
+  expect(carryOf(w, 'd-1')?.items).toEqual([])
   expect(w.files.has(claimPath('c-1', 1, 'd-1'))).toBe(true)
+})
+
+test('sticky chain, the E step: a fresh session takes D\'s empty carry, claims it and starts with carry on', async ($, on) => {
+  const w = world(on)
+  seedCarry(w, source('c-1', []), { mtime: 900 })
+  w.files.set(claimPath('c-1', 1, 'd-1'), { text: claimText('c-1', 1, 'd-1', 1), mtimeMs: 950 })
+  seedCarry(w, source('d-1', []), { mtime: 1000 })
+  w.sessionId = 'e-1'
+  await freshProcess($, w)
+  expect(w.files.has(claimPath('d-1', 1, 'e-1'))).toBe(true)
+  expect(String(((await command($, 'carry')) as { text?: string }).text)).toBe('Docket: carry is on.')
+})
+
+test('a claim write that fails is retried after a reload, writing only the claim (no second copy)', async ($, on) => {
+  const w = world(on)
+  seedCarry(w, source('src-1', ['Renew the domain']))
+  w.sessionId = 'sess-9'
+  w.failWriteMatch = '/claims/'
+  await freshProcess($, w)
+  expect(await openIds($)).toEqual([1])
+  expect(w.files.has(claimPath('src-1', 1, 'sess-9'))).toBe(false)
+  w.failWriteMatch = null
+  await start($)
+  await w.clock.settle()
+  expect(w.files.has(claimPath('src-1', 1, 'sess-9'))).toBe(true)
+  expect(await openIds($)).toEqual([1])
+})
+
+test('a claim write that fails is retried when the session is left (switchAway)', async ($, on) => {
+  const w = world(on)
+  seedCarry(w, source('src-1', ['Renew the domain']))
+  w.sessionId = 'sess-9'
+  w.failWriteMatch = '/claims/'
+  await freshProcess($, w)
+  w.failWriteMatch = null
+  await classic($, w, 'clear', 'sess-10')
+  await $.session.end(endAs('clear', 'sess-9'))
+  w.sessionId = 'sess-10'
+  await w.clock.settle()
+  expect(w.files.has(claimPath('src-1', 1, 'sess-9'))).toBe(true)
+})
+
+test('a lazy landing, then the classic clear call before the take resolves: one take, not two', async ($, on) => {
+  const w = world(on)
+  await freshProcess($, w)
+  await command($, 'add Renew the domain')
+  await command($, 'carry on')
+  await w.clock.settle()
+  await $.session.end(endAs('clear', 'sess-1'))
+  w.sessionId = 'sess-2'
+  let release: () => void = () => {}
+  w.listGate = { match: '/claims/sess-1/', gate: new Promise<void>(r => { release = r }) }
+  const typing = say($, w, 'hello')
+  await w.clock.settle()
+  await classic($, w, 'clear', 'sess-2')
+  release()
+  w.listGate = null
+  await typing
+  await w.clock.settle()
+  expect((await openIds($)).length).toBe(1)
 })
 
 test('Reply on a carried item brings Claude\'s words; the band says carried, then next session', async ($, on) => {

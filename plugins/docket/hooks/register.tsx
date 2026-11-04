@@ -61,6 +61,7 @@ const noticeCheckedAt = new Map<string, number>()
 const NOTICE_EVERY_MS = 30000
 // roots/<key> folders whose real path was checked to sit under the base.
 const safeRoots = new Set<string>()
+let baseRealCache: string | undefined
 
 // Every session change goes through here, and queues a save of what it wrote.
 async function transact<T>($: EngineInterface, change: (s: DocketSession) => { session: DocketSession; out: T }): Promise<T> {
@@ -242,11 +243,14 @@ async function rootDir($: EngineInterface, base: string, root: string): Promise<
   const key = rootKey(root)
   const dir = `${base}/roots/${key}`
   const lower = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
-  let baseReal = base
-  try {
-    baseReal = (await $.fs.stat(base, { resolve: true })).realPath ?? base
-  } catch {
-    // Not there yet: nothing under it can be a planted link either.
+  let baseReal = baseRealCache ?? base
+  if (baseRealCache === undefined) {
+    try {
+      baseReal = (await $.fs.stat(base, { resolve: true })).realPath ?? base
+      baseRealCache = baseReal
+    } catch {
+      // Not there yet: nothing under it can be a planted link either.
+    }
   }
   // Every folder level Docket writes through must, if it exists, be a plain folder that resolves to
   // exactly where it should: a junction at roots/, roots/<key>, carry/ or claims/ must not redirect.
@@ -518,6 +522,20 @@ async function rehomeCore($: EngineInterface, sid: string): Promise<void> {
     const k = writeKey(sid, 'snap')
     const text = ledgerText(restore(restored.ledger, sid, restored.root || root))
     await changeWriter($, w => (w.pending[k] === undefined ? { ...w, lastText: withKey(w.lastText, k, text), rootBy: withKey(w.rootBy, sid, restored.root || root) } : w))
+    // The carry slots' seq seeds the writer too, before the restore can queue a carry write: a resumed
+    // session's next carry write must win over what an earlier process left in the other slot. Reads
+    // only, so not gated on session.end.
+    if (restored.ledger.carry.gen > 0) {
+      const base = await baseDir($)
+      const dir = base === undefined ? undefined : await rootDir($, base, restored.root || root)
+      if (dir !== undefined) {
+        const a = parseCarry(await readText($, `${dir}/carry/${sid}.a.json`), sid)
+        const b = parseCarry(await readText($, `${dir}/carry/${sid}.b.json`), sid)
+        const top = Math.max(a?.seq ?? 0, b?.seq ?? 0)
+        const ck = writeKey(sid, 'carry')
+        if (top > 0) await changeWriter($, w => ({ ...w, seqBy: withKey(w.seqBy, ck, Math.max(top, w.seqBy[ck] ?? 0)) }))
+      }
+    }
   }
   const old = await transact($, cur => {
     if (cur.sid === sid) return { session: cur, out: null }
@@ -530,17 +548,8 @@ async function rehomeCore($: EngineInterface, sid: string): Promise<void> {
   if (now.sid === sid && now.restored && now.carry.gen > 0 && !isEnding) {
     const base = await baseDir($)
     const dir = base === undefined ? undefined : await rootDir($, base, now.root)
-    if (dir !== undefined) {
-      // The carry slots' seq seeds the writer, as the snapshot's does: a resumed session's next carry
-      // write must win over what an earlier process left in the other slot.
-      const a = parseCarry(await readText($, `${dir}/carry/${sid}.a.json`), sid)
-      const b = parseCarry(await readText($, `${dir}/carry/${sid}.b.json`), sid)
-      const top = Math.max(a?.seq ?? 0, b?.seq ?? 0)
-      const ck = writeKey(sid, 'carry')
-      if (top > 0) await changeWriter($, w => ({ ...w, seqBy: withKey(w.seqBy, ck, Math.max(top, w.seqBy[ck] ?? 0)) }))
-      // Source notices on restore: a later session may have taken this carry while it was away.
-      await isOwnCarryTaken($, dir, sid, now.carry.gen, true)
-    }
+    // Source notices on restore: a later session may have taken this carry while it was away.
+    if (dir !== undefined) await isOwnCarryTaken($, dir, sid, now.carry.gen, true)
   }
   redraw($)
 }
@@ -640,11 +649,27 @@ async function carryCommand($: EngineInterface, arg: string): Promise<string> {
 
 async function forget($: EngineInterface): Promise<string> {
   // The carry goes off first, and its off record is written, before saving stops for this session.
-  if ((await readSession($)).carry.on) {
+  const s0 = await readSession($)
+  if (s0.carry.on) {
     await setCarry($, false)
     const drained = saveChain.then(() => drainSaves($, () => true))
     saveChain = drained.catch(() => undefined)
     await drained.catch(() => undefined)
+  }
+  // The off record lands in one A/B slot; the other still holds the last on-carry with its items. Put
+  // the off record in both, so no item text survives the forget.
+  if (s0.carry.gen > 0 && isRealSid(s0.sid)) {
+    const b0 = await baseDir($)
+    const dir = b0 === undefined ? undefined : await rootDir($, b0, s0.root)
+    const seq = (await readWriter($)).seqBy[writeKey(s0.sid, 'carry')] ?? 0
+    if (dir !== undefined && seq > 0) {
+      const off = carryEnvelope(s0.sid, s0.root, seq, await $.clock.now(), JSON.stringify({ gen: s0.carry.gen, on: false, items: [] }))
+      const erase = saveChain.then(async () => {
+        for (const slot of ['a', 'b']) await $.fs.write(`${dir}/carry/${s0.sid}.${slot}.json`, off)
+      })
+      saveChain = erase.catch(err => fail($, 'forget', err))
+      await erase.catch(() => undefined)
+    }
   }
   const s = await readSession($)
   if (!isRealSid(s.sid)) return 'Docket: nothing saved for this session yet.'

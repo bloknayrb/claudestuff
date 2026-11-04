@@ -88,7 +88,7 @@ function row(els: Els, item: Item, n: number, turn: number, act: Actions, isFocu
       )}
       {isFocusedItem && item.carriedAt !== undefined && (
         <Box paddingLeft={2}>
-          <Text dimColor>{`↳ from the ${new Date(item.firstSeenAt ?? item.carriedAt).toISOString().slice(0, 10)} session`}</Text>
+          <Text dimColor>{`↳ from the ${dayLabel(item.firstSeenAt ?? item.carriedAt)} session`}</Text>
         </Box>
       )}
       {isFocusedItem && item.source === 'manual' && (
@@ -131,9 +131,14 @@ function closedRow(els: Els, g: CloseGroup, act: Actions) {
 export type OriginGroup = { key: string; label: string | null; decide: Item[]; doItems: Item[] }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+// Local time throughout, so a heading and a focused row agree near midnight.
 const dayLabel = (ms: number): string => {
   const d = new Date(ms)
   return `${MONTHS[d.getMonth()]} ${d.getDate()}`
+}
+const timeLabel = (ms: number): string => {
+  const d = new Date(ms)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
 export function originGroups(open: readonly Item[], sid: string, now: number): OriginGroup[] {
@@ -155,9 +160,13 @@ export function originGroups(open: readonly Item[], sid: string, now: number): O
   const isSplit = older.length > 0
   const groups: OriginGroup[] = []
   if (mine.length > 0 || !isSplit) groups.push({ key: 'this', label: isSplit ? 'This session' : null, ...split(mine) })
+  // Two source sessions from the same day get the time too, so their headings differ.
+  const days = older.map(([, xs]) => dayLabel(oldest(xs)))
   for (const [k, xs] of older) {
     const first = oldest(xs)
-    groups.push({ key: k, label: `From ${dayLabel(first)} session (↪ ${wallAge(now - first)})`, ...split(xs) })
+    const day = dayLabel(first)
+    const when = days.filter(d => d === day).length > 1 ? `${day}, ${timeLabel(first)}` : day
+    groups.push({ key: k, label: `From ${when} session (↪ ${wallAge(now - first)})`, ...split(xs) })
   }
   return groups
 }

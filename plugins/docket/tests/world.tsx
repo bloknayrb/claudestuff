@@ -57,6 +57,8 @@ export type World = {
   links: Map<string, string>
   // Set: an fs.list of a path containing `match` waits for `gate` (a slow claim listing).
   listGate: { match: string; gate: Promise<void> } | null
+  // Set: an fs.write of a path containing this fails (a guard on one folder).
+  failWriteMatch: string | null
   // Set: every fs.write waits for this (a slow disk).
   writeGate: Promise<void> | null
 }
@@ -87,6 +89,7 @@ export function world(on: On): World {
     root: 'C:/work',
     links: new Map(),
     listGate: null,
+    failWriteMatch: null,
     writeGate: null,
   }
   mock.env(on, { USERPROFILE: 'C:\\Users\\tester' })
@@ -100,6 +103,7 @@ export function world(on: On): World {
   const norm = (p: string) => p.replace(/\\/g, '/')
   on('fs.write', async (_$, e) => {
     if (w.failWrites) throw new Error('blocked by a guard')
+    if (w.failWriteMatch !== null && norm(e.path).includes(w.failWriteMatch)) throw new Error('blocked by a guard')
     if (w.writeGate !== null) await w.writeGate
     w.writes.push({ path: norm(e.path), text: e.text })
     w.files.set(norm(e.path), { text: e.text, mtimeMs: w.fileClock })
