@@ -270,9 +270,9 @@ Are you...
 
 **What**: A list of everything Claude said in prose is yours to decide or do (not AskUserQuestion); each item clears when you answer or act, Claude reports it done, or you dismiss it
 
-**Commands**: `/docket` (open or close the panel), `/docket add <text>`, `/docket clear`
+**Commands**: `/docket` (open or close the panel), `/docket add <text>`, `/docket clear`, `/docket forget`
 
-**Hooks**: a panel, a clickable button above the prompt, a judge model call after each turn
+**Hooks**: a panel, a clickable button above the prompt, a judge model call after each turn; each conversation's docket is saved and comes back on resume
 
 **Use for**: Not losing the asks that scroll away in Claude's replies
 

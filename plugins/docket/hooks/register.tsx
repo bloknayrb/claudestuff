@@ -1,11 +1,12 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { DocketSession } from '../types'
+import type { DocketProc, DocketSession, DocketWriter, PendingWrite } from '../types'
 import { bashInput, material, turnSlice } from './capture'
 import { buildPrompt, parseVerdict, RULES } from './judge'
 import type { Mode } from './judge'
 import { addManual, addToolAsked, addTurn, addUser, applyVerdict, clearAll, closedForJudge, closeGroups, dismiss, freshSession, markDone, normalize, openItems, reopen } from './ledger'
+import { envelope, freshProc, freshWriter, isRealSid, isSafeSid, ledgerText, normProc, normWriter, parseSlot, pickSlot, restore, RETAIN_MS, slotName, tombstone, withKey, withoutKey, writeKey } from './persist'
 import { clip } from './text'
 import { ARM_DELAY_MS, indicatorText, indicatorTree, PANE_COLUMNS, PANE_ID, PANE_TITLE, paneTree } from './ui'
 import type { Actions } from './ui'
@@ -17,17 +18,29 @@ const FAIL_TOAST = (reason: string) => `Docket: couldn't check the last turn (${
 // The one state value, defined beside every read and update of it (the validator refuses a state atom
 // read from another file). A value an earlier build stored is filled out by normalize().
 const SESSION = atom({ plugin: 'docket', key: 'session' } as const, freshSession())
+// Process-scoped bookkeeping and the save queue: a /clear or /resume replaces SESSION, never these.
+const PROC = atom({ plugin: 'docket', key: 'proc' } as const, freshProc())
+const WRITER = atom({ plugin: 'docket', key: 'writer' } as const, freshWriter())
+
+const SAVE_TOAST = (reason: string) => `Docket: couldn't save the docket (${clip(reason, 80)}).`
+// A session.end drain stops starting writes when less than this is left of its shared bound.
+const END_MARGIN_MS = 250
+const END_BOUND_MS = 1500
+const RETENTION_DELAY_MS = 60000
 
 // Module state: lost on a hot reload, which is the point for the runner's flags (a reload must not
-// strand a check as running). Nothing a drawing needs to survive lives here.
+// strand a check as running; the epoch in PROC, bumped by session.start, discards the old one's verdict).
+// Nothing a drawing needs to survive lives here.
 let resolveDue = false
 let fullDue = false
 let inFlight = false
 let isResolving = false
 let controller: AbortController | undefined
-// Bumped by /clear and /resume: a verdict for an earlier epoch is thrown away.
-let epoch = 0
-let droppedNotice: string | undefined
+// Writes run one after another on this chain, so no two share a slot.
+let saveChain: Promise<void> = Promise.resolve()
+// Set while session.end drains: every drain, including one already running, stops starting writes once
+// the hook's shared bound runs low.
+let endBudget: (() => boolean) | null = null
 // The message count and the opening prompt's text at turn.start: how turn.complete finds the turn.
 let turnStartLen: { turnId: string; len: number; opener: string } | undefined
 // Prompts typed into the running turn: user rows that do not open a turn (see capture.ts).
@@ -36,16 +49,271 @@ let isUsageLogged = false
 let loadedAt = 0
 let heartbeatFor = ''
 
+// Every session change goes through here, and queues a save of what it wrote.
 async function transact<T>($: EngineInterface, change: (s: DocketSession) => { session: DocketSession; out: T }): Promise<T> {
-  const box: { out?: T; isRun: boolean } = { isRun: false }
+  const box: { out?: T; isRun: boolean; after?: DocketSession; before?: DocketSession } = { isRun: false }
   await update($, SESSION, value => {
-    const r = change(normalize(value))
+    const before = normalize(value)
+    const r = change(before)
     box.out = r.out
     box.isRun = true
+    box.before = before
+    box.after = r.session
     return r.session
   })
   if (!box.isRun) throw new Error('docket: the state update did not run')
+  if (box.after !== undefined && box.after !== box.before) await queueSave($, box.after, false)
   return box.out as T
+}
+
+async function readProc($: EngineInterface): Promise<DocketProc> {
+  return normProc(await read($, PROC))
+}
+
+async function changeProc($: EngineInterface, fn: (p: DocketProc) => DocketProc): Promise<DocketProc> {
+  let out = freshProc()
+  await update($, PROC, v => {
+    out = fn(normProc(v))
+    return out
+  })
+  return out
+}
+
+async function readWriter($: EngineInterface): Promise<DocketWriter> {
+  return normWriter(await read($, WRITER))
+}
+
+async function changeWriter($: EngineInterface, fn: (w: DocketWriter) => DocketWriter): Promise<void> {
+  await update($, WRITER, v => fn(normWriter(v)))
+}
+
+// --- files ---
+
+async function baseDir($: EngineInterface): Promise<string | undefined> {
+  const config = await $.env.get('CLAUDE_CONFIG_DIR')
+  const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME'))
+  const dir = config !== undefined && config !== '' ? config : home === undefined || home === '' ? undefined : `${home}/.claude`
+  return dir === undefined ? undefined : `${dir.replace(/\\/g, '/').replace(/\/+$/, '')}/state/mods/docket`
+}
+
+async function readText($: EngineInterface, path: string): Promise<string | undefined> {
+  try {
+    return await $.fs.read(path)
+  } catch {
+    return undefined
+  }
+}
+
+// --- the writer ---
+
+// Queues the session's snapshot. A final (the session is being left) is written even for a closed sid.
+async function queueSave($: EngineInterface, s: DocketSession, isFinal: boolean): Promise<void> {
+  if (!isRealSid(s.sid)) return
+  if (!(s.everHadItem || s.items.length > 0 || s.carry.gen > 0)) return
+  const text = ledgerText(s)
+  const k = writeKey(s.sid, 'snap')
+  let isQueued = false
+  await changeWriter($, w => {
+    let next = w
+    const forgotAt = w.forgotten[s.sid]
+    if (forgotAt !== undefined) {
+      // Forgotten until an item first seen after the forget arrives.
+      if (!s.items.some(i => (i.firstSeenAt ?? 0) > forgotAt)) return w
+      next = { ...next, forgotten: withoutKey(next.forgotten, s.sid) }
+    }
+    if (next.closed[s.sid] === true && !isFinal) return w
+    const p = next.pending[k]
+    if (p === undefined && next.lastText[k] === text) return next
+    if (p !== undefined && p.text === text && (p.isFinal || !isFinal)) return next
+    isQueued = true
+    const entry: PendingWrite = { sid: s.sid, root: s.root, kind: 'snap', text, isFinal: isFinal || (p?.isFinal ?? false) }
+    return { ...next, pending: withKey(next.pending, k, entry) }
+  })
+  if (isQueued) kickSave($)
+}
+
+// Runs the queue from its own dispatch: work that outlives a hook goes through $.clock.after.
+function kickSave($: EngineInterface): void {
+  $.clock.after(0, () => {
+    saveChain = saveChain.then(() => drainSaves($, () => true)).catch(err => fail($, 'save', err))
+  })
+}
+
+// Writes every pending entry once (a failed one waits for the next queue or session.start).
+async function drainSaves($: EngineInterface, mayStart: () => boolean): Promise<void> {
+  const tried = new Set<string>()
+  for (;;) {
+    const w = await readWriter($)
+    const k = Object.keys(w.pending).find(x => !tried.has(x))
+    if (k === undefined || !mayStart() || (endBudget !== null && !endBudget())) return
+    tried.add(k)
+    const p = w.pending[k]
+    if (p !== undefined) await writeOne($, k, p, w)
+  }
+}
+
+async function writeOne($: EngineInterface, k: string, p: PendingWrite, w: DocketWriter): Promise<void> {
+  const base = await baseDir($)
+  if (base === undefined || !isSafeSid(p.sid)) return
+  const seq = (w.seqBy[k] ?? 0) + 1
+  try {
+    await $.fs.write(`${base}/sessions/${p.sid}.${slotName(seq)}.json`, envelope(p.sid, p.root, seq, await $.clock.now(), p.text))
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err)
+    $.ui.log(`docket: save failed: ${reason}`, { to: 'debug' })
+    await writeHealth($, `save: ${reason}`)
+    const proc = await readProc($)
+    if (!proc.saveToastShown) {
+      await changeProc($, x => ({ ...x, saveToastShown: true }))
+      $.ui.toast(SAVE_TOAST(reason))
+    }
+    return
+  }
+  await changeWriter($, cur => ({
+    ...cur,
+    seqBy: withKey(cur.seqBy, k, Math.max(seq, cur.seqBy[k] ?? 0)),
+    // A forget that landed while this write was in flight keeps its tombstone as the last text.
+    lastText: cur.forgotten[p.sid] !== undefined ? cur.lastText : withKey(cur.lastText, k, p.text),
+    rootBy: withKey(cur.rootBy, p.sid, p.root),
+    pending: cur.pending[k]?.text === p.text ? withoutKey(cur.pending, k) : cur.pending,
+  }))
+}
+
+// The latest saved ledger for a sid: the writer's own text first (a final may still be queued), else
+// the newer valid slot on disk, whose seq seeds the writer's counter.
+async function latestFor($: EngineInterface, sid: string): Promise<{ text: string; root: string } | null | 'forgotten'> {
+  const k = writeKey(sid, 'snap')
+  const w = await readWriter($)
+  if (w.forgotten[sid] !== undefined) return 'forgotten'
+  const mine = w.pending[k]?.text ?? w.lastText[k]
+  if (mine !== undefined) return { text: mine, root: w.pending[k]?.root ?? w.rootBy[sid] ?? '' }
+  const base = await baseDir($)
+  if (base === undefined) return null
+  const a = parseSlot(await readText($, `${base}/sessions/${sid}.a.json`), sid)
+  const b = parseSlot(await readText($, `${base}/sessions/${sid}.b.json`), sid)
+  const top = Math.max(a?.seq ?? 0, b?.seq ?? 0)
+  if (top > 0) await changeWriter($, cur => ({ ...cur, seqBy: withKey(cur.seqBy, k, Math.max(top, cur.seqBy[k] ?? 0)) }))
+  const best = pickSlot(a, b)
+  return best === null ? null : { text: JSON.stringify(best.ledger), root: best.root }
+}
+
+// --- the owning session ---
+
+async function isPaneShown($: EngineInterface): Promise<boolean> {
+  try {
+    return (await $.ui.panes()).some(p => p.id === PANE_ID)
+  } catch {
+    return false
+  }
+}
+
+// Points the docket at session `sid`: nothing if it already is; adopts a live v0.1 value; otherwise
+// saves the session being left and loads sid's snapshot (or starts fresh).
+async function rehome($: EngineInterface, sid: string, isClassic: boolean): Promise<void> {
+  if (!isSafeSid(sid)) {
+    $.ui.log(`docket: refused an unsafe session id`, { to: 'debug' })
+    return
+  }
+  const proc = await readProc($)
+  if (!isClassic && proc.endingSid === sid && (await $.session.id()) === sid) return
+  if ((await readSession($)).sid === sid) return
+  await changeWriter($, w => (w.closed[sid] === true ? { ...w, closed: withoutKey(w.closed, sid) } : w))
+  const latest = await latestFor($, sid)
+  const restored = latest === null || latest === 'forgotten' ? null : parseSlot(envelope(sid, latest.root, 1, await $.clock.now(), latest.text), sid)
+  const root = restored?.root || (await $.session.root())
+  const isUp = await isPaneShown($)
+  // What is on disk is what the restore will hold: seed the dedupe, so landing writes nothing new.
+  if (restored !== null) {
+    const k = writeKey(sid, 'snap')
+    const text = ledgerText(restore(restored.ledger, sid, restored.root || root))
+    await changeWriter($, w => (w.pending[k] === undefined ? { ...w, lastText: withKey(w.lastText, k, text), rootBy: withKey(w.rootBy, sid, restored.root || root) } : w))
+  }
+  const old = await transact($, cur => {
+    if (cur.sid === sid) return { session: cur, out: null }
+    if (cur.sid === '') return { session: { ...cur, sid, root, restored: true }, out: null }
+    const base = restored === null ? { ...freshSession(), sid, root } : restore(restored.ledger, sid, restored.root || root)
+    return { session: { ...base, view: { ...freshSession().view, isPaneUp: isUp } }, out: cur }
+  })
+  if (old !== null && isRealSid(old.sid)) await switchAway($, old)
+  redraw($)
+}
+
+// The one place a session is left: its check is dropped, and its final snapshot is queued.
+async function switchAway($: EngineInterface, old: DocketSession): Promise<void> {
+  await changeProc($, p => ({ ...p, epoch: p.epoch + 1 }))
+  controller?.abort()
+  resolveDue = false
+  fullDue = false
+  turnStartLen = undefined
+  midTurn = new Set()
+  await queueSave($, old, true)
+  await changeWriter($, w => ({ ...w, closed: withKey(w.closed, old.sid, true as const) }))
+}
+
+// Prompts, turns and commands land on the right session even when nothing told Docket of a switch.
+// Not before session.start: until then $.session.id() can be a provisional id (probe, --continue).
+async function lazyRehome($: EngineInterface): Promise<void> {
+  const proc = await readProc($)
+  if (proc.isInteractive === null) return
+  const sid = await $.session.id()
+  const cur = (await readSession($)).sid
+  if (cur === sid) {
+    // $.session.id() has caught up with a classic landing: the guard has done its job.
+    if (proc.classicSid !== null) await changeProc($, p => ({ ...p, classicSid: null, classicFrom: null }))
+    return
+  }
+  // The classic hook landed the docket on its session first, and $.session.id() still reads the
+  // session it came from: wait. An id that has moved to a third session is followed.
+  if (cur === proc.classicSid && sid === proc.classicFrom) return
+  await rehome($, sid, false)
+}
+
+async function forget($: EngineInterface): Promise<string> {
+  const s = await readSession($)
+  if (!isRealSid(s.sid)) return 'Docket: nothing saved for this session yet.'
+  const base = await baseDir($)
+  if (base === undefined) return 'Docket: no folder to forget from.'
+  const k = writeKey(s.sid, 'snap')
+  const now = await $.clock.now()
+  await changeWriter($, w => ({ ...w, pending: withoutKey(w.pending, k), forgotten: withKey(w.forgotten, s.sid, now), lastText: withKey(w.lastText, k, tombstone(s.sid)) }))
+  const erase = saveChain.then(async () => {
+    for (const slot of ['a', 'b']) await $.fs.write(`${base}/sessions/${s.sid}.${slot}.json`, tombstone(s.sid))
+  })
+  // The chain must never stay rejected: later saves (and session.end's finals) run after it.
+  saveChain = erase.catch(err => fail($, 'forget', err))
+  try {
+    await erase
+  } catch (err) {
+    return `Docket: couldn't erase the saved copy (${clip(err instanceof Error ? err.message : String(err), 80)}); saving stays off for this session until a new item.`
+  }
+  return 'Docket: forgot the saved copy of this session\'s docket. The pane is unchanged; a new item starts saving again.'
+}
+
+// Best effort: snapshots untouched for 30 days become tombstones (nothing can be deleted).
+async function prune($: EngineInterface): Promise<void> {
+  const base = await baseDir($)
+  if (base === undefined) return
+  const keep = new Set([await $.session.id(), (await readSession($)).sid])
+  const now = await $.clock.now()
+  let entries: Awaited<ReturnType<EngineInterface['fs']['list']>> = []
+  try {
+    entries = await $.fs.list(`${base}/sessions`)
+  } catch {
+    return
+  }
+  for (const e of entries) {
+    const m = /^(.+)\.(a|b)\.json$/.exec(e.name)
+    if (m === null || e.kind !== 'file' || e.isLink || !isSafeSid(m[1]) || keep.has(m[1] as string)) continue
+    if (now - e.mtimeMs < RETAIN_MS) continue
+    const text = await readText($, `${base}/sessions/${e.name}`)
+    if (text !== undefined && text.includes('"gone":true')) continue
+    // Accepted: a second window resuming this sid between the mtime check and this write would lose
+    // that one save (a 30-day-idle session reopened in the same second).
+    saveChain = saveChain
+      .then(() => $.fs.write(`${base}/sessions/${e.name}`, tombstone(m[1] as string)))
+      .catch(err => $.ui.log(`docket: prune write failed: ${err instanceof Error ? err.message : String(err)}`, { to: 'debug' }))
+  }
+  await saveChain.catch(() => undefined)
 }
 
 async function change($: EngineInterface, fn: (s: DocketSession) => DocketSession): Promise<DocketSession> {
@@ -63,9 +331,10 @@ async function readSession($: EngineInterface): Promise<DocketSession> {
 // Counts and timestamps only: never item text or model output.
 async function writeHealth($: EngineInterface, error?: string): Promise<void> {
   try {
-    const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME'))
-    if (home === undefined || home === '') return
+    const base = await baseDir($)
+    if (base === undefined) return
     const sessionId = await $.session.id()
+    if (!isSafeSid(sessionId)) return
     const now = await $.clock.now()
     if (loadedAt === 0) loadedAt = now
     const s = await readSession($)
@@ -75,7 +344,7 @@ async function writeHealth($: EngineInterface, error?: string): Promise<void> {
       checkedTurns: s.lastCheck.checkedTurns,
       lastError: error === undefined ? null : { ts: now, message: clip(error, 200) },
     }
-    await $.fs.write(`${home.replace(/\\/g, '/')}/.claude/state/mods/docket/${sessionId}.json`, JSON.stringify(body))
+    await $.fs.write(`${base}/${sessionId}.json`, JSON.stringify(body))
     heartbeatFor = sessionId
   } catch {
     // Best effort.
@@ -179,9 +448,10 @@ async function recordFailure($: EngineInterface, reason: string): Promise<void> 
 }
 
 async function runCheck($: EngineInterface, mode: Mode, model: string): Promise<void> {
-  const myEpoch = epoch
-  const sid = await $.session.id()
+  const myEpoch = (await readProc($)).epoch
   const s = await readSession($)
+  const sid = s.sid
+  if (!isRealSid(sid) && sid !== '') return
   const open = openItems(s)
   if (mode === 'resolve' && (open.length === 0 || s.pendingUser.length === 0)) return
   if (mode === 'full' && s.claude.length === 0 && s.tools.length === 0 && s.pendingUser.length === 0) return
@@ -195,14 +465,14 @@ async function runCheck($: EngineInterface, mode: Mode, model: string): Promise<
       { signal: mine.signal },
     )
   } catch (err) {
-    if (myEpoch !== epoch) return
+    if (myEpoch !== (await readProc($)).epoch) return
     await recordFailure($, `rejected: ${err instanceof Error ? clip(err.message, 80) : 'unknown'}`)
     return
   } finally {
     if (controller === mine) controller = undefined
   }
-  // A /clear or /resume while it ran: the verdict belongs to a conversation that is gone.
-  if (myEpoch !== epoch || (await $.session.id()) !== sid) return
+  // A /clear, /resume or reload while it ran: the verdict belongs to a conversation that is gone.
+  if (myEpoch !== (await readProc($)).epoch || (await readSession($)).sid !== sid) return
   if (!r.isAnswered) {
     if (r.reason === 'aborted' && mine.signal.aborted) return
     await recordFailure($, r.reason === 'api-error' ? `api-error ${r.status ?? ''}`.trim() : r.reason)
@@ -221,7 +491,7 @@ async function runCheck($: EngineInterface, mode: Mode, model: string): Promise<
   const result = await transact($, cur => {
     // Checked again here, at the write: a /clear landing in the awaits above must not get the old
     // conversation's verdict written into the fresh session.
-    if (myEpoch !== epoch) return { session: cur, out: undefined }
+    if (cur.sid !== sid) return { session: cur, out: undefined }
     const a = applyVerdict(cur, parsed.verdict, built.snapshot, now)
     const checkedTurns = cur.lastCheck.checkedTurns + (mode === 'full' ? 1 : 0)
     return { session: { ...a.session, lastCheck: { ok: true, at: now, reason: '', streak: 0, checkedTurns } }, out: a }
@@ -309,8 +579,16 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     try {
-      await $.command.register({ name: 'docket', description: 'Docket: open or close the pane of what Claude left for you to decide or do (add <text>, clear)', immediate: true })
+      await $.command.register({ name: 'docket', description: 'Docket: open or close the pane of what Claude left for you to decide or do (add <text>, clear, forget)', immediate: true })
       loadedAt = await $.clock.now()
+      // A reload: any check the old module started is now stale.
+      await changeProc($, p => ({ ...p, isInteractive: e.isInteractive, epoch: p.epoch + 1 }))
+      await rehome($, await $.session.id(), false)
+      // Timers died with the old module: re-run the queue, and re-queue the current state (free when
+      // nothing was lost, by the dedupe).
+      await queueSave($, await readSession($), false)
+      kickSave($)
+      $.clock.after(RETENTION_DELAY_MS, () => void guard($, 'prune', prune($)))
       // A hot reload keeps $.state but drops timers: clear a stranded key pause. The pane opens only
       // when the user asks (/docket toggles it); the band carries the count while it is closed.
       // An earlier build pinned a status line under the prompt; a pinned line outlives a reload, so clear
@@ -325,33 +603,73 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
+  // The settings hook's session start: it knows the source and the real id first (before session.start,
+  // and on an in-process /clear or /resume). Observe only; the rehome runs in its own dispatch.
+  on('classic.SessionStart', async ($, e, next) => {
+    const sid = e.session_id
+    // What the docket was on when this call fired. If, by the deferred run, it has landed on some
+    // other real session, a later switch overtook this call: it is stale and changes nothing. Never
+    // compared with $.session.id(), which can be provisional here (probe results, --continue).
+    const at = (await readSession($)).sid
+    $.clock.after(0, () =>
+      void guard(
+        $,
+        'classic',
+        (async () => {
+          const cur = (await readSession($)).sid
+          if (cur !== at && isRealSid(cur) && cur !== sid) return
+          const from = await $.session.id()
+          await changeProc($, p => ({ ...p, classicSid: sid, classicFrom: from === sid ? null : from }))
+          await rehome($, sid, true)
+        })(),
+      ),
+    )
+    return next(e)
+  }).catch(async ($, e, next) => {
+    await fail($, 'classic.SessionStart', next.error.message ?? next.error.kind)
+    return next(e)
+  })
+
+  // The conversation ends: on /clear or /resume its docket is saved and the state starts over for the
+  // next; on exit its final snapshot is written. Both drain the queue inside the hook's short bound.
   on('session.end', async ($, e, next) => {
-    if (e.reason === 'clear' || e.reason === 'resume') {
+    try {
+      await changeProc($, p => ({ ...p, endingSid: e.sessionId }))
+      if (e.reason === 'clear' || e.reason === 'resume') {
+        const old = await transact($, cur => (cur.sid === e.sessionId ? { session: freshSession(), out: cur } : { session: cur, out: null }))
+        if (old !== null) await switchAway($, old)
+      } else {
+        const s = await readSession($)
+        if (s.sid === e.sessionId) await queueSave($, s, true)
+      }
+      // Every drain on the chain (one already running too) stops starting writes near the bound, and the
+      // hook stops waiting there: a write still in flight costs only that save (the A/B slots).
+      endBudget = () => next.budget.remainingMs > END_MARGIN_MS
+      const drained = saveChain.then(() => drainSaves($, () => true))
+      saveChain = drained.catch(() => undefined)
+      // The documented bound is 1.5 s; never wait longer, whatever remainingMs reads.
+      const wait = Math.max(0, Math.min(END_BOUND_MS, next.budget.remainingMs) - END_MARGIN_MS)
+      await Promise.race([drained, new Promise<void>(r => $.clock.after(wait, () => r()))])
+    } catch (err) {
+      await fail($, 'session.end', err)
+    } finally {
+      endBudget = null
+    }
+    try {
+      return await next(e)
+    } finally {
+      // Cleared only once the id has moved on; until then rehome's own check holds the old id off.
       try {
-        epoch += 1
-        controller?.abort()
-        resolveDue = false
-        fullDue = false
-        turnStartLen = undefined
-        midTurn = new Set()
-        const dropped = await transact($, s => ({ session: freshSession(), out: openItems(s).map(i => i.text) }))
-        if (dropped.length > 0) {
-          const word = e.reason === 'clear' ? '/clear' : '/resume'
-          droppedNotice = clip(`Docket: dropped ${dropped.length} open item${dropped.length === 1 ? '' : 's'} from before ${word}: ${dropped.join('; ')}`, 260)
-        }
-      } catch (err) {
-        await fail($, 'session.end', err)
+        if ((await $.session.id()) !== e.sessionId) await changeProc($, p => (p.endingSid === e.sessionId ? { ...p, endingSid: null } : p))
+      } catch {
+        // Best effort: the block lifts by itself once the id changes.
       }
     }
-    return next(e)
   })
 
   on('prompt.submit', async ($, e, next) => {
     try {
-      if (droppedNotice !== undefined && e.origin.kind === 'composer') {
-        $.ui.log(droppedNotice)
-        droppedNotice = undefined
-      }
+      await lazyRehome($)
       const isUser = (e.origin.kind === 'composer' || e.origin.kind === 'bridge') && e.isMeta !== true && e.command === undefined
       if (isUser && e.text.trim() !== '') {
         if (e.turnId !== undefined) midTurn.add(e.text.trim())
@@ -376,6 +694,7 @@ export const register: Register = (on, options) => {
     const r = await next(e)
     if (e.agentId !== undefined) return r
     try {
+      await lazyRehome($)
       const text = e.message.content.map(b => ((b as { type: string }).type === 'text' ? (b as unknown as { text: string }).text : '')).join('')
       const cmd = bashInput(text)
       if (cmd !== undefined) {
@@ -397,6 +716,7 @@ export const register: Register = (on, options) => {
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
       try {
+        await lazyRehome($)
         midTurn = new Set()
         turnStartLen = { turnId: e.turnId, len: (await $.session.messages()).length, opener: e.text.trim() }
         if (heartbeatFor !== (await $.session.id())) void guard($, 'heartbeat', writeHealth($))
@@ -451,6 +771,8 @@ export const register: Register = (on, options) => {
     try {
       if (e.props.hasSurvey) return below
       const s = await readSession($)
+      // The session isn't known yet (a new process, between a /clear and its landing): draw nothing.
+      if (s.sid === 'pending') return below
       const label = indicatorText(openItems(s).length, s, s.view.isPaneUp)
       if (label === undefined) return below
       return indicatorTree($.ui.resolve(e), below, label, () => void guard($, 'indicator', togglePane($).then(() => undefined)))
@@ -493,20 +815,23 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: 'docket' }, async ($, e, next) => {
     try {
+      await lazyRehome($)
       const args = e.args.trim()
       if (args === 'add' || args.startsWith('add ')) {
         const text = args.slice(3).trim()
         if (text === '') return { text: 'Docket: /docket add <what you need to decide or do>' }
-        await change($, s => addManual(s, text))
+        const now = await $.clock.now()
+        await change($, s => addManual(s, text, now))
         return { text: 'Docket: added.' }
       }
+      if (args === 'forget') return { text: await forget($) }
       if (args === 'clear') {
         const now = await $.clock.now()
         const before = openItems(await readSession($)).length
         await change($, s => clearAll(s, now))
         return { text: before === 0 ? 'Docket: nothing open.' : `Docket: dismissed ${before}; Reopen all in the pane brings them back.` }
       }
-      if (args !== '') return { text: 'Docket: /docket opens or closes the pane; /docket add <text>; /docket clear.' }
+      if (args !== '') return { text: 'Docket: /docket opens or closes the pane; /docket add <text>; /docket clear; /docket forget (erase the saved copy).' }
       return { text: await togglePane($) }
     } catch (err) {
       await fail($, 'command', err)

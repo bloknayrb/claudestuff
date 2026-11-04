@@ -1,7 +1,10 @@
 // Pure: what the judge model is sent, and how its reply is checked. Nothing here takes $.
 
 import type { ClaudeEntry, Item, ItemKind, ToolLine, UserEntry } from '../types'
-import { clip, normalise, occursIn } from './text'
+import { clip, normalise, occursIn, redact } from './text'
+
+// redact moved to text.ts (ledger entry points and persist.ts use it too); re-exported for callers.
+export { redact }
 
 export type Mode = 'full' | 'resolve'
 
@@ -44,23 +47,6 @@ Reply with exactly this shape, where "id" is the item's number from <open_items>
 Empty arrays when there is nothing.`
 
 export const RESOLVE_NOTE = 'This is a resolve-only check: return "add": [] and only resolves. <claude_latest> is Claude\'s most recent message, for reading what a short or numbered reply answers.'
-
-// Token shapes replaced before anything is sent. Word-bounded and length-floored, so "task-list" or
-// "desk-lamp" stay as they are.
-const SECRETS: RegExp[] = [
-  /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}\b/g,
-  /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g,
-  // sk- (Anthropic, OpenAI) and sk_ (Stripe-style live/test keys; the eval found one).
-  /\bsk[-_][A-Za-z0-9_-]{20,}/g,
-  /\bAKIA[0-9A-Z]{16}\b/g,
-  /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
-  /\bBearer\s+[A-Za-z0-9._~+/=-]{16,}/g,
-  /-----BEGIN [A-Z ]*KEY-----[\s\S]*?(?:-----END [A-Z ]*KEY-----|$)/g,
-]
-
-export function redact(text: string): string {
-  return SECRETS.reduce((t, re) => t.replace(re, '[redacted]'), text)
-}
 
 export type JudgeInput = {
   mode: Mode

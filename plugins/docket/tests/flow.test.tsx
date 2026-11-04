@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { BAND_PROPS, command, mountBand, mountPane, openIds, say, start, SURFACES, turn, verdict, world } from './world'
+import { BAND_PROPS, command, mountBand, mountPane, openIds, say, slotPath, start, SURFACES, turn, verdict, world } from './world'
 
 const ASK = 'Your call: SQLite or Postgres for the cache?'
 const ADD_ASK = verdict({ add: [{ kind: 'decide', text: 'Choose SQLite or Postgres for the cache', quote: ASK, singleRec: false }] })
@@ -70,16 +70,18 @@ for (const isCleared of [true, false]) {
   })
 }
 
-test('the /clear notice waits for the next typed prompt', async ($, on) => {
+// v0.2: /clear no longer drops the docket with a notice. It is saved, and /resume brings it back.
+test('/clear saves the old docket and starts empty; no "dropped" notice', async ($, on) => {
   const w = world(on)
   await start($)
   w.replies.push(ADD_ASK)
   await turn($, w, 't1', [ASK])
   await $.session.end({ reason: 'clear', sessionId: 'sess-1' } as Parameters<typeof $.session.end>[0])
-  expect(w.logs.some(l => l.startsWith('transcript: Docket: dropped'))).toBe(false)
+  w.sessionId = 'sess-2'
   await say($, w, 'hello again')
-  expect(w.logs.some(l => l.startsWith('transcript: Docket: dropped 1 open item from before /clear: Choose SQLite'))).toBe(true)
+  expect(w.logs.some(l => l.includes('Docket: dropped'))).toBe(false)
   expect(await openIds($)).toEqual([])
+  expect(w.files.has(slotPath('sess-1', 'a')) || w.files.has(slotPath('sess-1', 'b'))).toBe(true)
 })
 
 test('a full check due during a resolve check runs after it, never mid-turn', async ($, on) => {
@@ -328,7 +330,7 @@ test('an empty pane says so; the heartbeat holds counts, not item text', async (
   await ui.unmount()
   await command($, 'add Secret plan text')
   await turn($, w, 't1', ['ok'])
-  const beats = w.writes.filter(x => x.path.replace(/\\/g, '/').includes('/.claude/state/mods/docket/'))
+  const beats = w.writes.filter(x => /\/\.claude\/state\/mods\/docket\/[^/]+\.json$/.test(x.path.replace(/\\/g, '/')))
   expect(beats.length > 0).toBe(true)
   expect(beats.some(b => b.text.includes('Secret plan'))).toBe(false)
 })

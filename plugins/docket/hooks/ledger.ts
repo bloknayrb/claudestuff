@@ -2,7 +2,10 @@
 
 import type { ClaudeEntry, DocketSession, Item, ToolLine, UserEntry } from '../types'
 import type { CheckedResolve, Snapshot, Verdict } from './judge'
-import { clip, isBare, normalise, occursIn, sanitise } from './text'
+import { clip, isBare, normalise, occursIn, redact, sanitise } from './text'
+
+// Entry redaction: the pane, the judge and the disk all see the same text.
+const clean = (text: string, max: number): string => sanitise(redact(text), max)
 
 // Closes kept for "Recently closed" and for the judge's do-not-re-add list. A clear batch counts once.
 export const KEEP_CLOSES = 15
@@ -27,16 +30,25 @@ export function freshSession(): DocketSession {
     lastFinal: '',
     lastCheck: { ok: true, at: 0, reason: '', streak: 0, checkedTurns: 0 },
     view: { isPaneUp: false, keysPausedUntil: null, showAllClosed: false, focusedId: null },
+    sid: 'pending',
+    root: '',
+    everHadItem: false,
+    carry: { on: false, gen: 0 },
+    restored: false,
   }
 }
 
-// Fills what a value written by an older build lacks (a hot reload keeps $.state).
+// Fills what a value written by an older build lacks (a hot reload keeps $.state). A value with no
+// sid key is a live v0.1 docket from before the upgrade: marked '' so the first landing adopts it.
 export function normalize(value: Partial<DocketSession> | undefined): DocketSession {
   const fresh = freshSession()
   if (value === undefined) return fresh
   return {
     ...fresh,
     ...value,
+    sid: value.sid ?? '',
+    carry: { ...fresh.carry, ...(value.carry ?? {}) },
+    everHadItem: (value.everHadItem ?? false) || (value.items?.length ?? 0) > 0,
     lastCheck: { ...fresh.lastCheck, ...(value.lastCheck ?? {}) },
     view: { ...fresh.view, ...(value.view ?? {}) },
   }
@@ -120,7 +132,7 @@ export function applyVerdict(s: DocketSession, v: Verdict, snap: Snapshot, now: 
   }
   let next = s
   for (const r of ok) {
-    next = close(next, [r.id], r.by, new Map([[r.id, sanitise(r.note, 80)]]), now)
+    next = close(next, [r.id], r.by, new Map([[r.id, clean(r.note, 80)]]), now)
   }
   // Adds: never a duplicate of an item the session still holds, open or closed.
   const known = next.items.map(i => normalise(i.text).toLowerCase())
@@ -128,14 +140,14 @@ export function applyVerdict(s: DocketSession, v: Verdict, snap: Snapshot, now: 
   const items = [...next.items]
   let nextId = next.nextId
   for (const a of v.adds) {
-    const text = sanitise(a.text, 120)
+    const text = clean(a.text, 120)
     if (text === '' || known.includes(normalise(text).toLowerCase())) continue
     known.push(normalise(text).toLowerCase())
-    items.push({ id: nextId, kind: a.kind, text, quote: sanitise(a.quote, 200), singleRec: a.singleRec, source: 'judge', openedTurn: a.turn, status: 'open' })
+    items.push({ id: nextId, kind: a.kind, text, quote: clean(a.quote, 200), singleRec: a.singleRec, source: 'judge', openedTurn: a.turn, status: 'open', firstSeenAt: now })
     nextId += 1
     added += 1
   }
-  next = { ...next, items, nextId }
+  next = { ...next, items, nextId, everHadItem: next.everHadItem || added > 0 }
   if (snap.mode === 'full') {
     // An item cannot be resolved in the verdict that adds it, so the user's words written after its
     // turn ended are kept for the resolve check that follows (applied.keptForNew); else an answer that
@@ -183,11 +195,11 @@ export function reopen(s: DocketSession, closeSeq: number): DocketSession {
   return { ...s, items }
 }
 
-export function addManual(s: DocketSession, text: string): DocketSession {
-  const clean = sanitise(text, 120)
-  if (clean === '') return s
-  const item: Item = { id: s.nextId, kind: 'do', text: clean, quote: '', singleRec: false, source: 'manual', openedTurn: s.turn, status: 'open' }
-  return { ...s, items: [...s.items, item], nextId: s.nextId + 1 }
+export function addManual(s: DocketSession, text: string, now = 0): DocketSession {
+  const t = clean(text, 120)
+  if (t === '') return s
+  const item: Item = { id: s.nextId, kind: 'do', text: t, quote: '', singleRec: false, source: 'manual', openedTurn: s.turn, status: 'open', firstSeenAt: now }
+  return { ...s, items: [...s.items, item], nextId: s.nextId + 1, everHadItem: true }
 }
 
 export function addUser(s: DocketSession, text: string): DocketSession {
@@ -202,5 +214,5 @@ export function addTurn(s: DocketSession, claude: readonly ClaudeEntry[], tools:
 
 export function addToolAsked(s: DocketSession, questions: readonly string[]): DocketSession {
   if (questions.length === 0) return s
-  return { ...s, toolAsked: [...s.toolAsked, ...questions.map(q => clip(q, 200))].slice(-KEEP_TOOL_ASKED) }
+  return { ...s, toolAsked: [...s.toolAsked, ...questions.map(q => clip(redact(q), 200))].slice(-KEEP_TOOL_ASKED) }
 }

@@ -21,7 +21,10 @@ Requires Claude Code 2.1.317 or newer (function-hook mods).
   click to show` sits above the prompt. Clicking it opens or closes the panel. It is hidden when
   nothing is open, and it makes room for a survey.
 - **`/docket`** opens or closes the panel too. `/docket add <text>` adds an item Docket missed;
-  `/docket clear` dismisses everything (one "Reopen all" brings it back).
+  `/docket clear` dismisses everything (one "Reopen all" brings it back). `/docket forget` erases the
+  saved copy of this conversation's docket (see Files).
+- **Your docket survives quitting.** Come back with `claude --resume`, `--continue` or `/resume` and
+  the list is as you left it.
 - **The panel** lists open items under **Decide** and **Do**, each with its age in turns (`now`,
   `2t`). Each item has three buttons:
   - **Reply** puts `Re: <item> — ` in your prompt box (after anything you have typed) so your answer
@@ -72,8 +75,13 @@ they can any plugin's model call.
 
 ## Limits
 
-- **Session only.** `/clear` and `/resume` empty the list. If items were open, your next prompt shows
-  a line naming what was dropped.
+- **One docket per conversation.** `/clear` starts a new conversation with an empty docket; the old
+  one is saved, and `/resume` (or `claude --resume` / `--continue`) brings it back. Between leaving a
+  conversation and landing on the next, the button draws nothing for a moment.
+- **One conversation open in two terminals at once** (the same `--resume` twice) gives two writers on
+  the same save files; whichever wrote last is what comes back.
+- **The last moments before a crash** can be lost: each change is saved straight after it happens,
+  and the turn whose check was still running when the process died is not saved.
 - **Main conversation only.** Subagents' text is not read; Claude relays what a subagent needs from
   you in its own words, which Docket does see.
 - **Things you do outside the chat** close an item only if Claude's later text or a tool line shows
@@ -89,8 +97,27 @@ they can any plugin's model call.
 
 ## Files
 
-A heartbeat at `~/.claude/state/mods/docket/<session-id>.json`: counts and timestamps, and
-`lastError` after a hook failure. It never holds item text or model output.
+Everything lives under `<config>/state/mods/docket/`, where `<config>` is `CLAUDE_CONFIG_DIR` if set,
+else `~/.claude`:
+
+- **`sessions/<session-id>.a.json` and `.b.json`**: the saved docket for each conversation that had
+  an item, written in turn so a write cut off halfway costs one save, never the docket. They hold the
+  item text, the words of Claude's each item came from, your `/docket add` text and the
+  AskUserQuestion questions Docket keeps out of the list, Claude's last message, and the
+  conversation's project folder path. Only token-shaped strings (GitHub tokens, `sk-` keys, AWS key
+  ids, JWTs, `Bearer` values, PEM keys) are replaced by `[redacted]`; a password or connection string
+  in one of those texts is saved as written. They don't hold what you typed, Claude's earlier turn
+  text, or tool lines. A closed item's note is dropped.
+- **`<session-id>.json`**: a heartbeat with counts, timestamps and `lastError` after a failure. Never
+  item text or model output.
+
+A file read back is checked field by field; anything malformed is ignored whole. Saved dockets not
+touched for 30 days are overwritten with a small `"gone"` stub (a mod can't delete files), so the
+folder only grows by stubs and heartbeats. Deleting the whole folder (`rm -r`) is safe: Docket starts
+empty. `/docket forget` erases this conversation's saved copy (the panel is unchanged) and stops
+saving until a new item arrives. The files get your account's default permissions, like Claude
+Code's transcripts, and other installed mods that hook `fs.*` see the writes. Docket keeps these files
+rather than using the mod `$.store`, whose behaviour with two Claude windows open isn't documented.
 
 ## Development
 
