@@ -1,6 +1,7 @@
 import type { Elements } from 'claude-code'
 
 import type { DocketSession, Item } from '../types'
+import { folderName, wallAge } from './carry'
 import type { CloseGroup } from './ledger'
 import { clip } from './text'
 
@@ -21,10 +22,11 @@ export type Actions = {
   dismiss: (id: number) => void
   reopen: (closeSeq: number) => void
   toggleClosed: () => void
+  toggleCarry: () => void
 }
 
 // What the drawing knows beyond the session value (module state, the clock).
-export type Live = { isChecking: boolean; isResolving: boolean; isFocused: boolean }
+export type Live = { isChecking: boolean; isResolving: boolean; isFocused: boolean; now: number }
 
 // Short ages: "now", then turns ("2t").
 function age(turns: number): string {
@@ -39,10 +41,14 @@ export function ordered(open: readonly Item[]): Item[] {
 // The band button's label, or undefined to draw nothing: shown while anything is open or a check
 // failed. It names what a click does.
 export function indicatorText(open: number, s: DocketSession, isPaneUp: boolean): string | undefined {
+  const click = isPaneUp ? 'click to hide' : 'click to show'
+  // Just carried in: say where they came from, until the next prompt or the pane opens.
+  if (s.carriedNotice !== null && !s.carriedNotice.isSeen && open > 0) return `◇ ${s.carriedNotice.count} carried from your previous session here · ${click}`
   const failed = s.lastCheck.ok ? '' : ' · last check failed'
   if (open === 0 && failed === '') return undefined
   const count = open === 0 ? '◇ Docket' : `◇ ${open} for you to decide or do`
-  return `${count}${failed} · ${isPaneUp ? 'click to hide' : 'click to show'}`
+  const carrying = s.carry.on && !s.carryTaken && open > 0 ? ' · ↪ next session' : ''
+  return `${count}${carrying}${failed} · ${click}`
 }
 
 // Amber (the theme's warning color, as Quartermaster's line) so it is noticed; the Text child carries
@@ -59,10 +65,12 @@ export function indicatorTree(els: Pick<Els, 'Box' | 'Button' | 'Text'>, below: 
   )
 }
 
-function row(els: Els, item: Item, n: number, turn: number, act: Actions, isFocusedItem: boolean, isResolving: boolean) {
+function row(els: Els, item: Item, n: number, turn: number, act: Actions, isFocusedItem: boolean, isResolving: boolean, now: number) {
   const { Box, Text, Button } = els
   const isKeyed = n < 9
   const pos = isKeyed ? String(n + 1) : '·'
+  // A carried item's age is wall-clock from when it first appeared, wherever it was raised.
+  const ageLabel = item.carriedAt !== undefined ? `↪ ${wallAge(now - (item.firstSeenAt ?? item.carriedAt))}` : age(turn - item.openedTurn)
   return (
     <Box key={`item-${item.id}`} flexDirection="column" marginBottom={1}>
       <Box flexDirection="row" gap={1}>
@@ -70,7 +78,7 @@ function row(els: Els, item: Item, n: number, turn: number, act: Actions, isFocu
         <Box flexGrow={1}>
           <Text key={`text-${item.id}`}>{item.text}</Text>
         </Box>
-        <Text dimColor>{age(turn - item.openedTurn)}</Text>
+        <Text dimColor>{ageLabel}</Text>
       </Box>
       <Box flexDirection="row" gap={2} paddingLeft={2}>
         <Button key={`reply-${item.id}`} plain label="Reply" onPress={() => act.reply(item.id)} />
@@ -80,6 +88,11 @@ function row(els: Els, item: Item, n: number, turn: number, act: Actions, isFocu
       {isFocusedItem && item.quote !== '' && (
         <Box paddingLeft={2}>
           <Text key={`quote-${item.id}`} dimColor>{`↳ Claude: "${clip(item.quote, 160)}"`}</Text>
+        </Box>
+      )}
+      {isFocusedItem && item.carriedAt !== undefined && (
+        <Box paddingLeft={2}>
+          <Text dimColor>{`↳ from the ${new Date(item.firstSeenAt ?? item.carriedAt).toISOString().slice(0, 10)} session`}</Text>
         </Box>
       )}
       {isFocusedItem && item.source === 'manual' && (
@@ -123,7 +136,26 @@ function section(els: Els, title: string, items: readonly Item[], offset: number
   return (
     <Box key={`section-${title}`} flexDirection="column" marginTop={1}>
       <Text bold color="warning">{title}</Text>
-      {items.map((item, i) => row(els, item, offset + i, s.turn, act, s.view.focusedId === item.id, live.isResolving))}
+      {items.map((item, i) => row(els, item, offset + i, s.turn, act, s.view.focusedId === item.id, live.isResolving, live.now))}
+    </Box>
+  )
+}
+
+// The carry switch, below the list: a setting sits under the content it is about.
+function carryRow(els: Els, s: DocketSession, act: Actions) {
+  const { Box, Text, Button } = els
+  const where = folderName(s.root)
+  const state = !s.carry.on
+    ? 'off'
+    : s.carryTaken
+      ? 'on · taken by a later session · turn off and on to carry again'
+      : s.carrySaveFailed
+        ? 'on · last save failed'
+        : 'on'
+  return (
+    <Box key="docket-carry" flexDirection="row" gap={1} marginTop={1}>
+      <Text dimColor>{`Carry to the next session in ${where}: ${state} ·`}</Text>
+      <Button key="docket-carry-toggle" plain label={s.carry.on ? 'turn off' : 'turn on'} onPress={() => act.toggleCarry()} />
     </Box>
   )
 }
@@ -164,6 +196,7 @@ export function paneTree(els: Els, s: DocketSession, open: readonly Item[], grou
           {s.view.showAllClosed && groups.map(g => closedRow(els, g, act))}
         </Box>
       )}
+      {carryRow(els, s, act)}
       {footer !== '' && <Text key="docket-footer" dimColor>{footer}</Text>}
     </Box>
   )

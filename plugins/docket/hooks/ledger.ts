@@ -35,6 +35,10 @@ export function freshSession(): DocketSession {
     everHadItem: false,
     carry: { on: false, gen: 0 },
     restored: false,
+    carryTaken: false,
+    carrySaveFailed: false,
+    carriedNotice: null,
+    pendingClaim: null,
   }
 }
 

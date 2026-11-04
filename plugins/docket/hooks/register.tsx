@@ -1,8 +1,10 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { DocketProc, DocketSession, DocketWriter, PendingWrite } from '../types'
+import type { CarrySource, ClearCapture, DocketProc, DocketSession, DocketWriter, Item, PendingWrite, WriteKind } from '../types'
 import { bashInput, material, turnSlice } from './capture'
+import { CARRY_MAX_AGE_MS, carryEnvelope, carryText, claimers, claimText, folderName, MAX_HOPS, normRoot, parseCarry, pickCarry, rootKey, takeInto } from './carry'
+import type { CarryFile } from './carry'
 import { buildPrompt, parseVerdict, RULES } from './judge'
 import type { Mode } from './judge'
 import { addManual, addToolAsked, addTurn, addUser, applyVerdict, clearAll, closedForJudge, closeGroups, dismiss, freshSession, markDone, normalize, openItems, reopen } from './ledger'
@@ -48,6 +50,14 @@ let midTurn = new Set<string>()
 let isUsageLogged = false
 let loadedAt = 0
 let heartbeatFor = ''
+// Carry takes in flight (a reload clears these; a re-run take dedupes by origin and pendingClaim).
+let isStartupTaking = false
+let captureTaking: number | null = null
+// When each sid's claims were last listed for a source notice (throttled to once per 30 s).
+const noticeCheckedAt = new Map<string, number>()
+const NOTICE_EVERY_MS = 30000
+// roots/<key> folders whose real path was checked to sit under the base.
+const safeRoots = new Set<string>()
 
 // Every session change goes through here, and queues a save of what it wrote.
 async function transact<T>($: EngineInterface, change: (s: DocketSession) => { session: DocketSession; out: T }): Promise<T> {
@@ -106,12 +116,17 @@ async function readText($: EngineInterface, path: string): Promise<string | unde
 
 // --- the writer ---
 
-// Queues the session's snapshot. A final (the session is being left) is written even for a closed sid.
+// Queues the session's snapshot and, while the switch has ever been on, its carry file. A final (the
+// session is being left) is written even for a closed sid.
 async function queueSave($: EngineInterface, s: DocketSession, isFinal: boolean): Promise<void> {
   if (!isRealSid(s.sid)) return
-  if (!(s.everHadItem || s.items.length > 0 || s.carry.gen > 0)) return
-  const text = ledgerText(s)
-  const k = writeKey(s.sid, 'snap')
+  const writes: { kind: WriteKind; text: string }[] = []
+  // A session that ever touched the switch persists it, turning it off included.
+  if (s.everHadItem || s.items.length > 0 || s.carry.gen > 0) writes.push({ kind: 'snap', text: ledgerText(s) })
+  // The carry: only an interactive session's, only once the switch was ever on (an untouched session
+  // writes no carry file, so it can't become a folder's newest), and not once a later session took it.
+  if (s.carry.gen > 0 && !s.carryTaken && s.root !== '' && (await readProc($)).isInteractive === true) writes.push({ kind: 'carry', text: carryText(s) })
+  if (writes.length === 0) return
   let isQueued = false
   await changeWriter($, w => {
     let next = w
@@ -122,12 +137,16 @@ async function queueSave($: EngineInterface, s: DocketSession, isFinal: boolean)
       next = { ...next, forgotten: withoutKey(next.forgotten, s.sid) }
     }
     if (next.closed[s.sid] === true && !isFinal) return w
-    const p = next.pending[k]
-    if (p === undefined && next.lastText[k] === text) return next
-    if (p !== undefined && p.text === text && (p.isFinal || !isFinal)) return next
-    isQueued = true
-    const entry: PendingWrite = { sid: s.sid, root: s.root, kind: 'snap', text, isFinal: isFinal || (p?.isFinal ?? false) }
-    return { ...next, pending: withKey(next.pending, k, entry) }
+    for (const { kind, text } of writes) {
+      const k = writeKey(s.sid, kind)
+      const p = next.pending[k]
+      if (p === undefined && next.lastText[k] === text) continue
+      if (p !== undefined && p.text === text && (p.isFinal || !isFinal)) continue
+      isQueued = true
+      const entry: PendingWrite = { sid: s.sid, root: s.root, kind, text, isFinal: isFinal || (p?.isFinal ?? false) }
+      next = { ...next, pending: withKey(next.pending, k, entry) }
+    }
+    return next
   })
   if (isQueued) kickSave($)
 }
@@ -139,12 +158,14 @@ function kickSave($: EngineInterface): void {
   })
 }
 
-// Writes every pending entry once (a failed one waits for the next queue or session.start).
+// Writes every pending entry once (a failed one waits for the next queue or session.start). Carry
+// files first: when a tab closes, the handoff matters more than the snapshot.
 async function drainSaves($: EngineInterface, mayStart: () => boolean): Promise<void> {
   const tried = new Set<string>()
   for (;;) {
     const w = await readWriter($)
-    const k = Object.keys(w.pending).find(x => !tried.has(x))
+    const keys = Object.keys(w.pending).filter(x => !tried.has(x))
+    const k = keys.find(x => x.endsWith('|carry')) ?? keys[0]
     if (k === undefined || !mayStart() || (endBudget !== null && !endBudget())) return
     tried.add(k)
     const p = w.pending[k]
@@ -156,12 +177,25 @@ async function writeOne($: EngineInterface, k: string, p: PendingWrite, w: Docke
   const base = await baseDir($)
   if (base === undefined || !isSafeSid(p.sid)) return
   const seq = (w.seqBy[k] ?? 0) + 1
+  let path = `${base}/sessions/${p.sid}.${slotName(seq)}.json`
+  let body = ''
+  if (p.kind === 'carry') {
+    const dir = await rootDir($, base, p.root)
+    if (dir === undefined) return dropPending($, k, p)
+    // A later session already took this gen: stop writing it (never in session.end, which lists nothing).
+    if (endBudget === null && (await isOwnCarryTaken($, dir, p.sid, JSON.parse(p.text).gen as number))) return dropPending($, k, p)
+    path = `${dir}/carry/${p.sid}.${slotName(seq)}.json`
+    body = carryEnvelope(p.sid, p.root, seq, await $.clock.now(), p.text)
+  } else {
+    body = envelope(p.sid, p.root, seq, await $.clock.now(), p.text)
+  }
   try {
-    await $.fs.write(`${base}/sessions/${p.sid}.${slotName(seq)}.json`, envelope(p.sid, p.root, seq, await $.clock.now(), p.text))
+    await $.fs.write(path, body)
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err)
     $.ui.log(`docket: save failed: ${reason}`, { to: 'debug' })
     await writeHealth($, `save: ${reason}`)
+    if (p.kind === 'carry') await markSession($, p.sid, s => (s.carrySaveFailed ? s : { ...s, carrySaveFailed: true }))
     const proc = await readProc($)
     if (!proc.saveToastShown) {
       await changeProc($, x => ({ ...x, saveToastShown: true }))
@@ -169,6 +203,7 @@ async function writeOne($: EngineInterface, k: string, p: PendingWrite, w: Docke
     }
     return
   }
+  if (p.kind === 'carry') await markSession($, p.sid, s => (s.carrySaveFailed ? { ...s, carrySaveFailed: false } : s))
   await changeWriter($, cur => ({
     ...cur,
     seqBy: withKey(cur.seqBy, k, Math.max(seq, cur.seqBy[k] ?? 0)),
@@ -177,6 +212,246 @@ async function writeOne($: EngineInterface, k: string, p: PendingWrite, w: Docke
     rootBy: withKey(cur.rootBy, p.sid, p.root),
     pending: cur.pending[k]?.text === p.text ? withoutKey(cur.pending, k) : cur.pending,
   }))
+}
+
+async function dropPending($: EngineInterface, k: string, p: PendingWrite): Promise<void> {
+  await changeWriter($, cur => (cur.pending[k]?.text === p.text ? { ...cur, pending: withoutKey(cur.pending, k) } : cur))
+}
+
+// A change to the current session's non-saved flags, only if the docket is still on that sid. Not
+// through transact: these flags never change what is saved, so no save is queued.
+async function markSession($: EngineInterface, sid: string, fn: (s: DocketSession) => DocketSession): Promise<void> {
+  await update($, SESSION, v => {
+    const s = normalize(v)
+    return s.sid === sid ? fn(s) : s
+  })
+}
+
+// --- carry folders ---
+
+// roots/<rootKey> for a root, once its real path is seen to sit under the base (a junction planted at
+// a folder must not redirect a write). A folder not there yet is fine: the write creates a real one.
+async function rootDir($: EngineInterface, base: string, root: string): Promise<string | undefined> {
+  if (root === '') return undefined
+  const key = rootKey(root)
+  const dir = `${base}/roots/${key}`
+  if (safeRoots.has(dir)) return dir
+  const lower = (p: string) => p.replace(/\\/g, '/').toLowerCase()
+  let real: string | undefined
+  try {
+    const st = await $.fs.stat(dir, { resolve: true })
+    if (st.isLink || st.kind !== 'dir' || st.realPath === undefined) {
+      $.ui.log(`docket: refused carry folder ${key} (not a plain folder)`, { to: 'debug' })
+      return undefined
+    }
+    real = st.realPath
+  } catch {
+    return dir
+  }
+  let baseReal = base
+  try {
+    baseReal = (await $.fs.stat(base, { resolve: true })).realPath ?? base
+  } catch {
+    // The base was just checked by its child; keep its own spelling.
+  }
+  if (!lower(real).startsWith(`${lower(baseReal).replace(/\/+$/, '')}/`)) {
+    $.ui.log(`docket: refused carry folder ${key} (resolves outside the base)`, { to: 'debug' })
+    return undefined
+  }
+  safeRoots.add(dir)
+  return dir
+}
+
+async function listClaims($: EngineInterface, dir: string, srcSid: string, gen: number): Promise<string[] | 'error'> {
+  try {
+    return claimers(await $.fs.list(`${dir}/claims/${srcSid}/${gen}`))
+  } catch {
+    // A folder that isn't there means nobody claimed it.
+    return (await $.fs.exists(`${dir}/claims/${srcSid}/${gen}`).catch(() => true)) ? 'error' : []
+  }
+}
+
+// Source notices: has another session claimed this session's carry gen? Throttled; sets carryTaken.
+async function isOwnCarryTaken($: EngineInterface, dir: string, sid: string, gen: number, isForced = false): Promise<boolean> {
+  const s = await readSession($)
+  if (s.sid === sid && s.carryTaken) return true
+  const now = await $.clock.now()
+  const last = noticeCheckedAt.get(sid)
+  if (!isForced && last !== undefined && now - last < NOTICE_EVERY_MS) return false
+  noticeCheckedAt.set(sid, now)
+  const who = await listClaims($, dir, sid, gen)
+  if (who === 'error' || !who.some(x => x !== sid)) return false
+  await markSession($, sid, cur => (cur.carry.gen === gen ? { ...cur, carryTaken: true } : cur))
+  redraw($)
+  return true
+}
+
+// --- taking a carry ---
+
+// Writes this session's claim on a take that applied; cleared only if the docket still holds that take.
+async function writeClaim($: EngineInterface, src: CarrySource, by: string): Promise<void> {
+  const base = await baseDir($)
+  if (base === undefined || !isSafeSid(src.srcSid) || !isSafeSid(by)) return
+  const dir = await rootDir($, base, src.srcRoot)
+  if (dir === undefined) return
+  try {
+    await $.fs.write(`${dir}/claims/${src.srcSid}/${src.gen}/${by}.json`, claimText(src.srcSid, src.gen, by, await $.clock.now()))
+  } catch (err) {
+    $.ui.log(`docket: claim write failed: ${err instanceof Error ? err.message : String(err)}`, { to: 'debug' })
+    return
+  }
+  await transact($, cur => {
+    const p = cur.pendingClaim
+    const isSame = cur.sid === by && p !== null && p.srcSid === src.srcSid && p.gen === src.gen
+    return isSame ? { session: { ...cur, pendingClaim: null }, out: undefined } : { session: cur, out: undefined }
+  })
+}
+
+async function retryClaim($: EngineInterface): Promise<void> {
+  const s = await readSession($)
+  if (isRealSid(s.sid) && s.pendingClaim !== null) await writeClaim($, s.pendingClaim, s.sid)
+}
+
+// The take: refuse a claimed gen; apply only if the docket is still on `target`; then claim.
+// Take-then-claim: a crash in between can duplicate later, never lose.
+async function takeCarry($: EngineInterface, src: CarrySource, items: readonly Item[], target: string): Promise<'taken' | 'claimed' | 'moved' | 'error'> {
+  const base = await baseDir($)
+  if (base === undefined) return 'error'
+  const dir = await rootDir($, base, src.srcRoot)
+  if (dir === undefined) return 'error'
+  const who = await listClaims($, dir, src.srcSid, src.gen)
+  if (who === 'error') return 'error'
+  if (who.some(x => x !== target)) return 'claimed'
+  const now = await $.clock.now()
+  const folder = folderName(src.srcRoot)
+  const applied = await transact($, cur => {
+    if (cur.sid !== target) return { session: cur, out: false }
+    const r = takeInto(cur, items, now, folder)
+    return { session: { ...r.session, pendingClaim: src }, out: true }
+  })
+  if (!applied) return 'moved'
+  await writeClaim($, src, target)
+  redraw($)
+  return 'taken'
+}
+
+// The carry a fresh process takes: the folder's newest carry, followed along its claims to where its
+// items went (at most MAX_HOPS); never an unrelated older one.
+async function findCarry($: EngineInterface, root: string, self: string): Promise<{ file: CarryFile } | { why: string } | null> {
+  const base = await baseDir($)
+  if (base === undefined) return null
+  const dir = await rootDir($, base, root)
+  if (dir === undefined) return null
+  let entries: Awaited<ReturnType<EngineInterface['fs']['list']>> = []
+  try {
+    entries = await $.fs.list(`${dir}/carry`)
+  } catch {
+    return null
+  }
+  const newest = new Map<string, number>()
+  for (const e of entries) {
+    const m = /^(.+)\.(a|b)\.json$/.exec(e.name)
+    if (m === null || e.kind !== 'file' || e.isLink || !isSafeSid(m[1])) continue
+    newest.set(m[1] as string, Math.max(newest.get(m[1] as string) ?? 0, e.mtimeMs))
+  }
+  const readFile = async (sid: string) =>
+    pickCarry(parseCarry(await readText($, `${dir}/carry/${sid}.a.json`), sid), parseCarry(await readText($, `${dir}/carry/${sid}.b.json`), sid))
+  let sid = [...newest.entries()].sort((a, b) => b[1] - a[1])[0]?.[0]
+  for (let hop = 0; sid !== undefined && hop <= MAX_HOPS; hop += 1) {
+    if (sid === self) return null
+    const file = await readFile(sid)
+    if (file === null) return { why: 'it could not be read' }
+    if (!file.on) return null
+    const who = await listClaims($, dir, sid, file.gen)
+    if (who === 'error') return null
+    const others = who.filter(x => x !== self)
+    if (others.length === 0) {
+      const now = await $.clock.now()
+      if (now - file.savedAt > CARRY_MAX_AGE_MS) return { why: 'it is more than 14 days old' }
+      // Same folder key is not enough (a hash): the stored root must match exactly, normalised.
+      if (normRoot(file.root) !== normRoot(root)) return null
+      return { file }
+    }
+    // Follow the claimer whose own carry is newest.
+    const next = others.filter(x => newest.has(x)).sort((a, b) => (newest.get(b) ?? 0) - (newest.get(a) ?? 0))[0]
+    if (next === undefined) return { why: 'another session already took it' }
+    sid = next
+  }
+  return null
+}
+
+const CARRIED_LINE = (n: number, folder: string) =>
+  `Docket: carried in ${n} item${n === 1 ? '' : 's'} from your previous session in ${folder}. /docket carry off stops carrying; /docket clear empties the docket.`
+
+// A fresh process takes the folder's carry once: evaluated after every landing, acting once.
+async function maybeStartupTake($: EngineInterface): Promise<void> {
+  if (isStartupTaking) return
+  const proc = await readProc($)
+  const s = await readSession($)
+  if (proc.startupDecided || proc.isInteractive !== true || proc.startupSid === null || s.sid !== proc.startupSid) return
+  if (s.restored || s.everHadItem || s.carry.gen !== 0) return
+  // Probe (g): mods are fed classic.SessionStart startup, before session.start. --continue/--resume
+  // arrive as source resume, so they never take.
+  if (proc.classicStartupSeenFor !== s.sid) return
+  isStartupTaking = true
+  $.clock.after(0, () =>
+    void guard(
+      $,
+      'carry',
+      (async () => {
+        try {
+          const target = s.sid
+          const found = await findCarry($, s.root, target)
+          if (found !== null && 'why' in found) {
+            $.ui.log(`Docket: found a carry from your previous session here but didn't use it (${found.why}).`)
+          } else if (found !== null) {
+            const r = await takeCarry($, { srcSid: found.file.sid, gen: found.file.gen, srcRoot: found.file.root }, found.file.items, target)
+            if (r === 'claimed') $.ui.log("Docket: found a carry from your previous session here but didn't use it (another session already took it).")
+          }
+          await changeProc($, p => (p.startupSid === target ? { ...p, startupDecided: true } : p))
+        } finally {
+          isStartupTaking = false
+        }
+      })(),
+    ),
+  )
+}
+
+// The /clear carry: taken by the landing it was left for, decided at once (see the plan's v11 note).
+async function decideCapture($: EngineInterface, sid: string, source: string | undefined, restored: boolean): Promise<void> {
+  const proc = await readProc($)
+  const cap = proc.clearCapture
+  if (cap === null) return
+  if (cap.target === null) {
+    await changeProc($, p => (p.clearCapture?.id === cap.id ? { ...p, clearCapture: { ...cap, target: sid } } : p))
+  } else if (cap.target !== sid) {
+    return
+  }
+  if (captureTaking === cap.id) return
+  const clearIt = () => changeProc($, p => (p.clearCapture?.id === cap.id ? { ...p, clearCapture: null } : p))
+  const isKnownOther = source !== undefined && source !== 'clear'
+  if (restored || !cap.on || cap.taken || proc.isInteractive !== true || isKnownOther) {
+    await clearIt()
+    return
+  }
+  captureTaking = cap.id
+  try {
+    await takeCarry($, { srcSid: cap.srcSid, gen: cap.gen, srcRoot: cap.srcRoot }, cap.items, sid)
+  } catch (err) {
+    await fail($, 'carry', err)
+  } finally {
+    captureTaking = null
+    await clearIt()
+  }
+}
+
+// What every rehome ends with, no-op or not: the carry decisions, and a pending claim retried.
+async function afterLanding($: EngineInterface, sid: string, source: string | undefined): Promise<void> {
+  const s = await readSession($)
+  if (s.sid !== sid) return
+  await decideCapture($, sid, source, s.restored)
+  await retryClaim($)
+  await maybeStartupTake($)
 }
 
 // The latest saved ledger for a sid: the writer's own text first (a final may still be queued), else
@@ -209,13 +484,18 @@ async function isPaneShown($: EngineInterface): Promise<boolean> {
 
 // Points the docket at session `sid`: nothing if it already is; adopts a live v0.1 value; otherwise
 // saves the session being left and loads sid's snapshot (or starts fresh).
-async function rehome($: EngineInterface, sid: string, isClassic: boolean): Promise<void> {
+async function rehome($: EngineInterface, sid: string, isClassic: boolean, source?: string): Promise<void> {
   if (!isSafeSid(sid)) {
     $.ui.log(`docket: refused an unsafe session id`, { to: 'debug' })
     return
   }
   const proc = await readProc($)
   if (!isClassic && proc.endingSid === sid && (await $.session.id()) === sid) return
+  await rehomeCore($, sid)
+  await afterLanding($, sid, source)
+}
+
+async function rehomeCore($: EngineInterface, sid: string): Promise<void> {
   if ((await readSession($)).sid === sid) return
   await changeWriter($, w => (w.closed[sid] === true ? { ...w, closed: withoutKey(w.closed, sid) } : w))
   const latest = await latestFor($, sid)
@@ -235,12 +515,34 @@ async function rehome($: EngineInterface, sid: string, isClassic: boolean): Prom
     return { session: { ...base, view: { ...freshSession().view, isPaneUp: isUp } }, out: cur }
   })
   if (old !== null && isRealSid(old.sid)) await switchAway($, old)
+  // Source notices on restore: a later session may have taken this carry while it was away.
+  const now = await readSession($)
+  if (now.sid === sid && now.restored && now.carry.gen > 0) {
+    const base = await baseDir($)
+    const dir = base === undefined ? undefined : await rootDir($, base, now.root)
+    if (dir !== undefined) await isOwnCarryTaken($, dir, sid, now.carry.gen, true)
+  }
   redraw($)
 }
 
-// The one place a session is left: its check is dropped, and its final snapshot is queued.
+// The one place a session is left: its check is dropped, its finals are queued, and (for a /clear) its
+// open items are left for the next landing to take.
 async function switchAway($: EngineInterface, old: DocketSession): Promise<void> {
-  await changeProc($, p => ({ ...p, epoch: p.epoch + 1 }))
+  const proc = await readProc($)
+  await changeProc($, p => {
+    const capture: ClearCapture = {
+      id: p.captureSeq + 1,
+      srcSid: old.sid,
+      gen: old.carry.gen,
+      srcRoot: old.root,
+      on: old.carry.on,
+      taken: old.carryTaken,
+      // Live items carry no origin until saved; the take dedupes on it, so stamp it here.
+      items: openItems(old).map(i => ({ ...i, origin: i.origin ?? `${old.sid}:${i.id}` })),
+      target: null,
+    }
+    return { ...p, epoch: p.epoch + 1, captureSeq: p.captureSeq + 1, clearCapture: capture }
+  })
   controller?.abort()
   resolveDue = false
   fullDue = false
@@ -248,6 +550,26 @@ async function switchAway($: EngineInterface, old: DocketSession): Promise<void>
   midTurn = new Set()
   await queueSave($, old, true)
   await changeWriter($, w => ({ ...w, closed: withKey(w.closed, old.sid, true as const) }))
+  // A claim the old session still owed: written now if the bound allows (it is saved, so a restore
+  // retries it otherwise).
+  if (old.pendingClaim !== null && proc.endingSid !== old.sid) {
+    const src = old.pendingClaim
+    await writeClaimFor($, src, old)
+  }
+}
+
+// switchAway's claim retry: written for the old session, then its snapshot re-queued without the claim.
+async function writeClaimFor($: EngineInterface, src: CarrySource, old: DocketSession): Promise<void> {
+  const base = await baseDir($)
+  if (base === undefined) return
+  const dir = await rootDir($, base, src.srcRoot)
+  if (dir === undefined) return
+  try {
+    await $.fs.write(`${dir}/claims/${src.srcSid}/${src.gen}/${old.sid}.json`, claimText(src.srcSid, src.gen, old.sid, await $.clock.now()))
+  } catch {
+    return
+  }
+  await queueSave($, { ...old, pendingClaim: null }, true)
 }
 
 // Prompts, turns and commands land on the right session even when nothing told Docket of a switch.
@@ -268,7 +590,42 @@ async function lazyRehome($: EngineInterface): Promise<void> {
   await rehome($, sid, false)
 }
 
+// The switch. On bumps gen (a fresh handoff, so a taken one can be re-carried) and clears carryTaken;
+// off keeps gen, so the writer's off record replaces the file.
+async function setCarry($: EngineInterface, on: boolean): Promise<DocketSession> {
+  const s = await readSession($)
+  if (on) await changeWriter($, w => ({ ...w, forgotten: withoutKey(w.forgotten, s.sid) }))
+  return change($, cur => {
+    if (on) return cur.carry.on && !cur.carryTaken ? cur : { ...cur, carry: { on: true, gen: cur.carry.gen + 1 }, carryTaken: false, carrySaveFailed: false }
+    return cur.carry.on ? { ...cur, carry: { ...cur.carry, on: false } } : cur
+  })
+}
+
+async function carryCommand($: EngineInterface, arg: string): Promise<string> {
+  const s0 = await readSession($)
+  if (!isRealSid(s0.sid)) return 'Docket: the session isn\'t known yet; try again in a moment.'
+  if ((await readProc($)).isInteractive !== true) return 'Docket: carry works only in an interactive session.'
+  if (arg === 'on') {
+    const s = await setCarry($, true)
+    return `Docket: carry is on. Whatever is open when you leave goes to the next session in ${folderName(s.root)}, and on from there.`
+  }
+  if (arg === 'off') {
+    await setCarry($, false)
+    return 'Docket: carry is off.'
+  }
+  if (arg !== '') return 'Docket: /docket carry on, /docket carry off, or /docket carry to see which.'
+  if (!s0.carry.on) return 'Docket: carry is off.'
+  return s0.carryTaken ? 'Docket: carry is on, but a later session already took these items. /docket carry off then on to carry again.' : 'Docket: carry is on.'
+}
+
 async function forget($: EngineInterface): Promise<string> {
+  // The carry goes off first, and its off record is written, before saving stops for this session.
+  if ((await readSession($)).carry.on) {
+    await setCarry($, false)
+    const drained = saveChain.then(() => drainSaves($, () => true))
+    saveChain = drained.catch(() => undefined)
+    await drained.catch(() => undefined)
+  }
   const s = await readSession($)
   if (!isRealSid(s.sid)) return 'Docket: nothing saved for this session yet.'
   const base = await baseDir($)
@@ -511,7 +868,10 @@ async function runCheck($: EngineInterface, mode: Mode, model: string): Promise<
 async function replyTo($: EngineInterface, id: number): Promise<void> {
   const item = (await readSession($)).items.find(i => i.id === id && i.status === 'open')
   if (item === undefined) return
-  const lead = `Re: ${item.text} — `
+  // The new conversation knows nothing of a carried item: the reply brings Claude's words with it.
+  const lead = item.carriedAt !== undefined && item.quote !== ''
+    ? `Re: ${item.text} (from an earlier session; Claude had said "${clip(item.quote, 160)}") — `
+    : `Re: ${item.text} — `
   const box = await $.prompt.read()
   const filled = box.text.trim() === '' ? await $.prompt.fill({ text: lead }) : await $.prompt.fill({ text: `\n${lead}`, mode: 'append' })
   if (!filled.isFilled) $.ui.toast('Docket: the prompt box is not taking text right now.')
@@ -551,6 +911,16 @@ function actions($: EngineInterface): Actions {
         })(),
       ),
     toggleClosed: () => void guard($, 'toggle', change($, s => ({ ...s, view: { ...s.view, showAllClosed: !s.view.showAllClosed } })).then(() => undefined)),
+    toggleCarry: () =>
+      void guard(
+        $,
+        'carry',
+        (async () => {
+          const s = await readSession($)
+          const reply = await carryCommand($, s.carry.on && !s.carryTaken ? 'off' : 'on')
+          $.ui.toast(reply)
+        })(),
+      ),
   }
 }
 
@@ -568,6 +938,12 @@ async function togglePane($: EngineInterface): Promise<string> {
     return 'Docket: pane closed; the ◇ button above the prompt shows the count.'
   }
   const opened = await $.ui.open({ id: PANE_ID, title: PANE_TITLE, focus: true, columns: PANE_COLUMNS })
+  // The pane shows where carried items came from: the band's banner has done its job (the transcript
+  // line still comes at the next prompt).
+  const shown = await readSession($)
+  if (shown.carriedNotice !== null && !shown.carriedNotice.isSeen) {
+    await markSession($, shown.sid, x => (x.carriedNotice === null ? x : { ...x, carriedNotice: { ...x.carriedNotice, isSeen: true } }))
+  }
   await setPaneUp($, opened.isPlaced)
   if (!opened.isPlaced) return `Docket: the pane could not be placed (${opened.reason}).`
   const count = openItems(await readSession($)).length
@@ -579,11 +955,12 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     try {
-      await $.command.register({ name: 'docket', description: 'Docket: open or close the pane of what Claude left for you to decide or do (add <text>, clear, forget)', immediate: true })
+      await $.command.register({ name: 'docket', description: 'Docket: open or close the pane of what Claude left for you to decide or do (add <text>, clear, carry on|off, forget)', immediate: true })
       loadedAt = await $.clock.now()
+      const sid = await $.session.id()
       // A reload: any check the old module started is now stale.
-      await changeProc($, p => ({ ...p, isInteractive: e.isInteractive, epoch: p.epoch + 1 }))
-      await rehome($, await $.session.id(), false)
+      await changeProc($, p => ({ ...p, isInteractive: e.isInteractive, epoch: p.epoch + 1, startupSid: p.startupSid ?? (isSafeSid(sid) ? sid : null) }))
+      await rehome($, sid, false)
       // Timers died with the old module: re-run the queue, and re-queue the current state (free when
       // nothing was lost, by the dedupe).
       await queueSave($, await readSession($), false)
@@ -619,8 +996,15 @@ export const register: Register = (on, options) => {
           const cur = (await readSession($)).sid
           if (cur !== at && isRealSid(cur) && cur !== sid) return
           const from = await $.session.id()
-          await changeProc($, p => ({ ...p, classicSid: sid, classicFrom: from === sid ? null : from }))
-          await rehome($, sid, true)
+          const isStartup = e.source === 'startup' && isSafeSid(sid)
+          await changeProc($, p => ({
+            ...p,
+            classicSid: sid,
+            classicFrom: from === sid ? null : from,
+            // Probe (g): a fresh process's classic startup comes first; it names the startup session.
+            ...(isStartup ? { startupSid: p.startupSid ?? sid, classicStartupSeenFor: sid } : {}),
+          }))
+          await rehome($, sid, true, e.source)
         })(),
       ),
     )
@@ -670,6 +1054,14 @@ export const register: Register = (on, options) => {
   on('prompt.submit', async ($, e, next) => {
     try {
       await lazyRehome($)
+      // Items carried in: said once, at the first prompt after the take (or this one, if its own
+      // landing just took them).
+      const n0 = (await readSession($)).carriedNotice
+      if (n0 !== null && e.origin.kind === 'composer') {
+        $.ui.log(CARRIED_LINE(n0.count, n0.folder))
+        const sid0 = (await readSession($)).sid
+        await markSession($, sid0, s => ({ ...s, carriedNotice: null }))
+      }
       const isUser = (e.origin.kind === 'composer' || e.origin.kind === 'bridge') && e.isMeta !== true && e.command === undefined
       if (isUser && e.text.trim() !== '') {
         if (e.turnId !== undefined) midTurn.add(e.text.trim())
@@ -755,7 +1147,7 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'Pane', requestId: 'docket' }, async ($, e, next) => {
     try {
       const s = await readSession($)
-      const live = { isChecking: inFlight, isResolving, isFocused: e.props.isFocused }
+      const live = { isChecking: inFlight, isResolving, isFocused: e.props.isFocused, now: await $.clock.now() }
       return paneTree($.ui.resolve(e), s, openItems(s), closeGroups(s), live, actions($))
     } catch (err) {
       void fail($, 'pane', err)
@@ -825,13 +1217,14 @@ export const register: Register = (on, options) => {
         return { text: 'Docket: added.' }
       }
       if (args === 'forget') return { text: await forget($) }
+      if (args === 'carry' || args.startsWith('carry ')) return { text: await carryCommand($, args.slice(5).trim()) }
       if (args === 'clear') {
         const now = await $.clock.now()
         const before = openItems(await readSession($)).length
         await change($, s => clearAll(s, now))
         return { text: before === 0 ? 'Docket: nothing open.' : `Docket: dismissed ${before}; Reopen all in the pane brings them back.` }
       }
-      if (args !== '') return { text: 'Docket: /docket opens or closes the pane; /docket add <text>; /docket clear; /docket forget (erase the saved copy).' }
+      if (args !== '') return { text: 'Docket: /docket opens or closes the pane; /docket add <text>; /docket clear; /docket carry on|off (send what is open to the next session here); /docket forget (erase the saved copy).' }
       return { text: await togglePane($) }
     } catch (err) {
       await fail($, 'command', err)

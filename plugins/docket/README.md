@@ -21,8 +21,9 @@ Requires Claude Code 2.1.317 or newer (function-hook mods).
   click to show` sits above the prompt. Clicking it opens or closes the panel. It is hidden when
   nothing is open, and it makes room for a survey.
 - **`/docket`** opens or closes the panel too. `/docket add <text>` adds an item Docket missed;
-  `/docket clear` dismisses everything (one "Reopen all" brings it back). `/docket forget` erases the
-  saved copy of this conversation's docket (see Files).
+  `/docket clear` dismisses everything (one "Reopen all" brings it back). `/docket carry on|off`
+  sends the docket on to the next session here (below). `/docket forget` erases the saved copy of
+  this conversation's docket and turns carry off (see Files).
 - **Your docket survives quitting.** Come back with `claude --resume`, `--continue` or `/resume` and
   the list is as you left it.
 - **The panel** lists open items under **Decide** and **Do**, each with its age in turns (`now`,
@@ -37,6 +38,27 @@ Requires Claude Code 2.1.317 or newer (function-hook mods).
   a Reopen button each. Reopen is the undo for a wrong close.
 - After any change to the list the digit keys pause for 1.1 s, and each press during the pause
   restarts it, so a list that just reordered cannot turn a press into the wrong dismiss.
+
+## Carrying the docket to the next session
+
+`/docket carry on` (or **turn on** in the panel's bottom row) sends whatever is open when you leave
+to the next session in the same folder: a fresh `claude`, or a `/clear`. It stays on: the session
+that receives the items starts with carry on too, so the docket follows you until you turn it off.
+
+- **`/docket carry`** says whether it's on; **`/docket carry off`** stops it.
+- **While it's on**, the button reads `◇ 2 for you to decide or do · ↪ next session`, and the
+  handoff is rewritten with every change, so closing the terminal tab doesn't lose it. Items you
+  close before leaving don't travel.
+- **The next session** starts with them and says `◇ 2 carried from your previous session here` above
+  the prompt; your first prompt there gets one line saying so. Carried items show `↪ 2d`: their age
+  since they first appeared, however many sessions they have crossed. Reply on one includes what
+  Claude originally said, since the new conversation doesn't know it, and a bare "yes" can't close
+  one.
+- **Each handoff is taken once.** The session that takes it leaves a small claim; a session still
+  open that was carried from shows `taken by a later session` in its row. `/docket carry off` then
+  `on` there makes a fresh handoff.
+- Only interactive sessions carry: a scripted `claude -p` run never writes or takes one. Resuming a
+  conversation (`--resume`, `--continue`, `/resume`) brings back its own docket, not a carry.
 
 ## How it decides
 
@@ -80,6 +102,18 @@ they can any plugin's model call.
   conversation and landing on the next, the button draws nothing for a moment.
 - **One conversation open in two terminals at once** (the same `--resume` twice) gives two writers on
   the same save files; whichever wrote last is what comes back.
+- **Carry limits:**
+  - Two fresh sessions started in one folder within the same split second can both take the
+    handoff, so both get the items.
+  - A session still open in another terminal hands its items to a new session started in that
+    folder; the old one then shows "taken by a later session". The items live on in both until each
+    is closed.
+  - Resuming a session whose items were carried on still shows them open there.
+  - If you type before Claude Code finishes switching conversations, a fork, or a `/resume` onto a
+    conversation that never had items, can receive the handoff as a `/clear` would.
+  - A `/clear` straight after launch can leave the handoff for the next fresh session instead of
+    this one; nothing is lost.
+  - A handoff older than 14 days is left alone, and a line says so.
 - **The last moments before a crash** can be lost: each change is saved straight after it happens,
   and the turn whose check was still running when the process died is not saved.
 - **Main conversation only.** Subagents' text is not read; Claude relays what a subagent needs from
@@ -108,12 +142,18 @@ else `~/.claude`:
   ids, JWTs, `Bearer` values, PEM keys) are replaced by `[redacted]`; a password or connection string
   in one of those texts is saved as written. They don't hold what you typed, Claude's earlier turn
   text, or tool lines. A closed item's note is dropped.
+- **`roots/<folder-key>/carry/<session-id>.a.json` and `.b.json`** (carry on only): the handoff for
+  the next session in that folder: the open items, with the same fields and redaction as above, and
+  the folder path. `<folder-key>` is a short hash of the folder path.
+- **`roots/<folder-key>/claims/<session-id>/<n>/<taker-id>.json`**: which session took a handoff.
+  Ids and a timestamp only.
 - **`<session-id>.json`**: a heartbeat with counts, timestamps and `lastError` after a failure. Never
   item text or model output.
 
 A file read back is checked field by field; anything malformed is ignored whole. Saved dockets not
 touched for 30 days are overwritten with a small `"gone"` stub (a mod can't delete files), so the
-folder only grows by stubs and heartbeats. Deleting the whole folder (`rm -r`) is safe: Docket starts
+folder only grows by stubs, heartbeats and claims. Handoffs and claims are never stubbed (a handoff
+past 14 days is ignored anyway). Deleting the whole folder (`rm -r`) is safe: Docket starts
 empty. `/docket forget` erases this conversation's saved copy (the panel is unchanged) and stops
 saving until a new item arrives. The files get your account's default permissions, like Claude
 Code's transcripts, and other installed mods that hook `fs.*` see the writes. Docket keeps these files
