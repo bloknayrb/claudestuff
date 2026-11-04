@@ -1,4 +1,5 @@
 import { expect, test } from 'claude-code/testing'
+import type { Engine } from 'claude-code/testing'
 
 import { carryEnvelope, carryText, claimText, normRoot, parseCarry, rootKey, takeInto } from '../hooks/carry'
 import { addManual, freshSession } from '../hooks/ledger'
@@ -27,7 +28,7 @@ function seedCarry(w: World, s: DocketSession, opts: { mtime?: number; savedAt?:
 const carryOf = (w: World, sid: string) =>
   [carryPath(sid, 'a'), carryPath(sid, 'b')].map(p => parseCarry(w.files.get(p)?.text, sid)).filter(x => x !== null).sort((a, b) => b!.seq - a!.seq)[0] ?? null
 
-async function texts($: Parameters<Parameters<typeof test>[1]>[0]): Promise<string[]> {
+async function texts($: Engine): Promise<string[]> {
   const ui = await mountPane($, 'terminal')
   const ts = (await ui.findAll({ type: 'Text' })).map(t => t.text ?? '')
   await ui.unmount()
