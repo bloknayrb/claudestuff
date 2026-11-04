@@ -1,6 +1,7 @@
 import type { Elements } from 'claude-code'
 
 import type { DocketSession, Item } from '../types'
+import { folderName, wallAge } from './carry'
 import type { CloseGroup } from './ledger'
 import { clip } from './text'
 
@@ -21,28 +22,29 @@ export type Actions = {
   dismiss: (id: number) => void
   reopen: (closeSeq: number) => void
   toggleClosed: () => void
+  toggleCarry: () => void
 }
 
 // What the drawing knows beyond the session value (module state, the clock).
-export type Live = { isChecking: boolean; isResolving: boolean; isFocused: boolean }
+export type Live = { isChecking: boolean; isResolving: boolean; isFocused: boolean; now: number }
 
 // Short ages: "now", then turns ("2t").
 function age(turns: number): string {
   return turns <= 0 ? 'now' : `${turns}t`
 }
 
-// Display order, which the digit keys follow: decisions first, then actions, oldest first in each.
-export function ordered(open: readonly Item[]): Item[] {
-  return [...open.filter(i => i.kind === 'decide'), ...open.filter(i => i.kind === 'do')]
-}
 
 // The band button's label, or undefined to draw nothing: shown while anything is open or a check
 // failed. It names what a click does.
 export function indicatorText(open: number, s: DocketSession, isPaneUp: boolean): string | undefined {
+  const click = isPaneUp ? 'click to hide' : 'click to show'
+  // Just carried in: say where they came from, until the next prompt or the pane opens.
+  if (s.carriedNotice !== null && !s.carriedNotice.isSeen && open > 0) return `◇ ${s.carriedNotice.count} carried from your previous session here · ${click}`
   const failed = s.lastCheck.ok ? '' : ' · last check failed'
   if (open === 0 && failed === '') return undefined
   const count = open === 0 ? '◇ Docket' : `◇ ${open} for you to decide or do`
-  return `${count}${failed} · ${isPaneUp ? 'click to hide' : 'click to show'}`
+  const carrying = s.carry.on && !s.carryTaken && open > 0 ? ' · ↪ next session' : ''
+  return `${count}${carrying}${failed} · ${click}`
 }
 
 // Amber (the theme's warning color, as Quartermaster's line) so it is noticed; the Text child carries
@@ -59,10 +61,12 @@ export function indicatorTree(els: Pick<Els, 'Box' | 'Button' | 'Text'>, below: 
   )
 }
 
-function row(els: Els, item: Item, n: number, turn: number, act: Actions, isFocusedItem: boolean, isResolving: boolean) {
+function row(els: Els, item: Item, n: number, turn: number, act: Actions, isFocusedItem: boolean, isResolving: boolean, now: number) {
   const { Box, Text, Button } = els
   const isKeyed = n < 9
   const pos = isKeyed ? String(n + 1) : '·'
+  // A carried item's age is wall-clock from when it first appeared, wherever it was raised.
+  const ageLabel = item.carriedAt !== undefined ? `↪ ${wallAge(now - (item.firstSeenAt ?? item.carriedAt))}` : age(turn - item.openedTurn)
   return (
     <Box key={`item-${item.id}`} flexDirection="column" marginBottom={1}>
       <Box flexDirection="row" gap={1}>
@@ -70,7 +74,7 @@ function row(els: Els, item: Item, n: number, turn: number, act: Actions, isFocu
         <Box flexGrow={1}>
           <Text key={`text-${item.id}`}>{item.text}</Text>
         </Box>
-        <Text dimColor>{age(turn - item.openedTurn)}</Text>
+        <Text dimColor>{ageLabel}</Text>
       </Box>
       <Box flexDirection="row" gap={2} paddingLeft={2}>
         <Button key={`reply-${item.id}`} plain label="Reply" onPress={() => act.reply(item.id)} />
@@ -80,6 +84,11 @@ function row(els: Els, item: Item, n: number, turn: number, act: Actions, isFocu
       {isFocusedItem && item.quote !== '' && (
         <Box paddingLeft={2}>
           <Text key={`quote-${item.id}`} dimColor>{`↳ Claude: "${clip(item.quote, 160)}"`}</Text>
+        </Box>
+      )}
+      {isFocusedItem && item.carriedAt !== undefined && (
+        <Box paddingLeft={2}>
+          <Text dimColor>{`↳ from the ${dayLabel(item.firstSeenAt ?? item.carriedAt)} session`}</Text>
         </Box>
       )}
       {isFocusedItem && item.source === 'manual' && (
@@ -117,22 +126,97 @@ function closedRow(els: Els, g: CloseGroup, act: Actions) {
   )
 }
 
-function section(els: Els, title: string, items: readonly Item[], offset: number, s: DocketSession, live: Live, act: Actions) {
+// The pane's groups: items by the session they were first raised in (Bryan's pick: this session first,
+// then older sessions newest first, each split into Decide and Do). The digit keys follow this order.
+export type OriginGroup = { key: string; label: string | null; decide: Item[]; doItems: Item[] }
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+// Local time throughout, so a heading and a focused row agree near midnight.
+const dayLabel = (ms: number): string => {
+  const d = new Date(ms)
+  return `${MONTHS[d.getMonth()]} ${d.getDate()}`
+}
+const timeLabel = (ms: number): string => {
+  const d = new Date(ms)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+export function originGroups(open: readonly Item[], sid: string, now: number): OriginGroup[] {
+  const bySrc = new Map<string, Item[]>()
+  for (const i of open) {
+    const src = i.origin === undefined ? sid : i.origin.slice(0, Math.max(0, i.origin.lastIndexOf(':')))
+    const k = src === sid || src === '' ? '' : src
+    bySrc.set(k, [...(bySrc.get(k) ?? []), i])
+  }
+  const newest = (xs: Item[]) => Math.max(...xs.map(i => i.firstSeenAt ?? i.carriedAt ?? 0))
+  const oldest = (xs: Item[]) => Math.min(...xs.map(i => i.firstSeenAt ?? i.carriedAt ?? 0))
+  const older = [...bySrc.entries()].filter(([k]) => k !== '').sort((a, b) => newest(b[1]) - newest(a[1]))
+  const split = (xs: Item[]) => {
+    const sorted = [...xs].sort((a, b) => a.id - b.id)
+    return { decide: sorted.filter(i => i.kind === 'decide'), doItems: sorted.filter(i => i.kind === 'do') }
+  }
+  const mine = bySrc.get('') ?? []
+  // One group only (nothing carried): no session heading, as before.
+  const isSplit = older.length > 0
+  const groups: OriginGroup[] = []
+  if (mine.length > 0 || !isSplit) groups.push({ key: 'this', label: isSplit ? 'This session' : null, ...split(mine) })
+  // Two source sessions from the same day get the time too, so their headings differ.
+  const days = older.map(([, xs]) => dayLabel(oldest(xs)))
+  for (const [k, xs] of older) {
+    const first = oldest(xs)
+    const day = dayLabel(first)
+    const when = days.filter(d => d === day).length > 1 ? `${day}, ${timeLabel(first)}` : day
+    groups.push({ key: k, label: `From ${when} session (↪ ${wallAge(now - first)})`, ...split(xs) })
+  }
+  return groups
+}
+
+function section(els: Els, title: string, items: readonly Item[], offset: number, s: DocketSession, live: Live, act: Actions, groupKey = 'this') {
   const { Box, Text } = els
   if (items.length === 0) return null
   return (
-    <Box key={`section-${title}`} flexDirection="column" marginTop={1}>
+    <Box key={`section-${groupKey}-${title}`} flexDirection="column" marginTop={1}>
       <Text bold color="warning">{title}</Text>
-      {items.map((item, i) => row(els, item, offset + i, s.turn, act, s.view.focusedId === item.id, live.isResolving))}
+      {items.map((item, i) => row(els, item, offset + i, s.turn, act, s.view.focusedId === item.id, live.isResolving, live.now))}
+    </Box>
+  )
+}
+
+// The carry switch, below the list: a setting sits under the content it is about.
+function carryRow(els: Els, s: DocketSession, act: Actions) {
+  const { Box, Text, Button } = els
+  const where = folderName(s.root)
+  const state = !s.carry.on
+    ? 'off'
+    : s.carryTaken
+      ? 'on · taken by a later session'
+      : s.carrySaveFailed
+        ? 'on · last save failed'
+        : 'on'
+  return (
+    <Box key="docket-carry" flexDirection="row" gap={1} marginTop={1}>
+      <Text dimColor>{`Carry to the next session in ${where}: ${state} ·`}</Text>
+      <Button key="docket-carry-toggle" plain label={!s.carry.on ? 'turn on' : s.carryTaken ? 'carry again' : 'turn off'} onPress={() => act.toggleCarry()} />
     </Box>
   )
 }
 
 export function paneTree(els: Els, s: DocketSession, open: readonly Item[], groups: readonly CloseGroup[], live: Live, act: Actions) {
   const { Box, Text, Button } = els
-  const list = ordered(open)
-  const decide = list.filter(i => i.kind === 'decide')
-  const doItems = list.filter(i => i.kind === 'do')
+  const grouped = originGroups(open, s.sid, live.now)
+  const list = grouped.flatMap(g => [...g.decide, ...g.doItems])
+  let offset = 0
+  const body = grouped.map(g => {
+    const start = offset
+    offset += g.decide.length + g.doItems.length
+    return (
+      <Box key={`group-${g.key}`} flexDirection="column" marginTop={g.label === null ? 0 : 1}>
+        {g.label !== null && <Text bold>{g.label}</Text>}
+        {section(els, 'Decide', g.decide, start, s, live, act, g.key)}
+        {section(els, 'Do', g.doItems, start + g.decide.length, s, live, act, g.key)}
+      </Box>
+    )
+  })
   const isPaused = s.view.keysPausedUntil !== null
   const keys = !live.isFocused
     ? 'ctrl+x tab gives this pane the keys'
@@ -151,8 +235,7 @@ export function paneTree(els: Els, s: DocketSession, open: readonly Item[], grou
         <Text key="docket-count" bold>{`${list.length} for you to decide or do`}</Text>
       )}
       {keys !== '' && <Text dimColor>{keys}</Text>}
-      {section(els, 'Decide', decide, 0, s, live, act)}
-      {section(els, 'Do', doItems, decide.length, s, live, act)}
+      {body}
       {groups.length > 0 && (
         <Box key="docket-closed" flexDirection="column" marginTop={1}>
           <Button
@@ -164,6 +247,7 @@ export function paneTree(els: Els, s: DocketSession, open: readonly Item[], grou
           {s.view.showAllClosed && groups.map(g => closedRow(els, g, act))}
         </Box>
       )}
+      {carryRow(els, s, act)}
       {footer !== '' && <Text key="docket-footer" dimColor>{footer}</Text>}
     </Box>
   )

@@ -93,7 +93,23 @@ export type DocketSession = {
   carry: CarryState
   // Not saved: this landing loaded a snapshot or adopted a v0.1 value.
   restored: boolean
+  // Not saved (rebuilt on restore from the claims): a later session already took this carry gen.
+  carryTaken: boolean
+  // Not saved: the last carry write failed; the pane row says so until one succeeds.
+  carrySaveFailed: boolean
+  // Not saved: items just carried in, for the band and the first-prompt line.
+  // isSeen: the pane was opened, so the band's banner stops; the transcript line still comes.
+  carriedNotice: { count: number; folder: string; isSeen: boolean } | null
+  // Saved: a take applied whose claim isn't written yet; retried until it is.
+  pendingClaim: CarrySource | null
 }
+
+// Where a carry came from: its session, the switch generation it was taken at, and that session's root
+// (claims live under the source's folder).
+export type CarrySource = { srcSid: string; gen: number; srcRoot: string }
+
+// What a /clear leaves for the cleared conversation to take, recorded as the old session is left.
+export type ClearCapture = CarrySource & { id: number; on: boolean; taken: boolean; items: Item[]; target: string | null }
 
 // Process-scoped: survives a hot reload, and is never replaced by a /clear or /resume.
 export type DocketProc = {
@@ -109,10 +125,20 @@ export type DocketProc = {
   classicSid: string | null
   // What $.session.id() read when that classic call landed; the lazy guard holds only while it still does.
   classicFrom: string | null
+  // The first session this process landed on (from session.start or classic startup): the only one a
+  // startup take can go to.
+  startupSid: string | null
+  startupDecided: boolean
+  // The sid a classic.SessionStart with source startup named.
+  classicStartupSeenFor: string | null
+  clearCapture: ClearCapture | null
+  captureSeq: number
 }
 
+export type WriteKind = 'snap' | 'carry'
+
 // One write the writer still owes: the latest payload for (sid, kind).
-export type PendingWrite = { sid: string; root: string; kind: 'snap'; text: string; isFinal: boolean }
+export type PendingWrite = { sid: string; root: string; kind: WriteKind; text: string; isFinal: boolean }
 
 // Process-scoped writer bookkeeping, keyed "<sid>|<kind>" where per (sid, kind).
 export type DocketWriter = {

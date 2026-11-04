@@ -1,7 +1,7 @@
 // Pure: what a snapshot holds, how it is written and how a file read back is checked. Nothing here
 // takes $. A file on disk is untrusted: every field is rebuilt by hand, and any failure rejects it.
 
-import type { CarryState, ClosedBy, DocketProc, DocketSession, DocketWriter, Item, ItemKind, ItemStatus, LastCheck } from '../types'
+import type { CarrySource, CarryState, ClosedBy, DocketProc, DocketSession, DocketWriter, Item, ItemKind, ItemStatus, LastCheck, WriteKind } from '../types'
 import { freshSession, KEEP_TOOL_ASKED } from './ledger'
 import { clip, redact, sanitise } from './text'
 
@@ -20,12 +20,24 @@ export const isSafeSid = (sid: unknown): sid is string => typeof sid === 'string
 // A real session's id: not the v0.1 marker '' or the not-yet-known 'pending'.
 export const isRealSid = (sid: string): boolean => sid !== '' && sid !== 'pending' && isSafeSid(sid)
 
-export const freshProc = (): DocketProc => ({ isInteractive: null, endingSid: null, epoch: 0, saveToastShown: false, classicSid: null, classicFrom: null })
+export const freshProc = (): DocketProc => ({
+  isInteractive: null,
+  endingSid: null,
+  epoch: 0,
+  saveToastShown: false,
+  classicSid: null,
+  classicFrom: null,
+  startupSid: null,
+  startupDecided: false,
+  classicStartupSeenFor: null,
+  clearCapture: null,
+  captureSeq: 0,
+})
 export const freshWriter = (): DocketWriter => ({ seqBy: {}, lastText: {}, pending: {}, rootBy: {}, closed: {}, forgotten: {} })
 export const normProc = (v: Partial<DocketProc> | undefined): DocketProc => ({ ...freshProc(), ...(v ?? {}) })
 export const normWriter = (v: Partial<DocketWriter> | undefined): DocketWriter => ({ ...freshWriter(), ...(v ?? {}) })
 
-export const writeKey = (sid: string, kind: 'snap'): string => `${sid}|${kind}`
+export const writeKey = (sid: string, kind: WriteKind): string => `${sid}|${kind}`
 
 // Copies of a record with one key set or removed (state values are never mutated in place).
 export const withKey = <T>(rec: Record<string, T>, k: string, v: T): Record<string, T> => ({ ...rec, [k]: v })
@@ -46,6 +58,7 @@ export type Ledger = {
   lastCheck: LastCheck
   everHadItem: boolean
   carry: CarryState
+  pendingClaim: CarrySource | null
   lastFinal: string
 }
 
@@ -71,6 +84,7 @@ export function toLedger(s: DocketSession): Ledger {
     lastCheck: { ...s.lastCheck, reason: r(s.lastCheck.reason) },
     everHadItem: s.everHadItem || s.items.length > 0,
     carry: s.carry,
+    pendingClaim: s.pendingClaim,
     lastFinal: r(s.lastFinal).slice(-LAST_FINAL_CHARS),
   }
 }
@@ -142,6 +156,17 @@ export function readItem(v: unknown, sid: string, savedAt: number): Item {
   }
 }
 
+// A claim still owed. Malformed becomes null rather than rejecting the file: losing a retry costs at
+// most a duplicate later, never the docket. Its root decides where a claim is written, so it is held
+// to the same shape as a carry root.
+export function readClaim(v: unknown): CarrySource | null {
+  if (!isObj(v)) return null
+  const { srcSid, gen, srcRoot } = v
+  if (!isSafeSid(srcSid) || !Number.isInteger(gen) || (gen as number) < 1) return null
+  if (typeof srcRoot !== 'string' || srcRoot === '' || srcRoot.length > 1024) return null
+  return { srcSid, gen: gen as number, srcRoot }
+}
+
 function readLedger(v: unknown, sid: string, savedAt: number): Ledger {
   if (!isObj(v)) return fail('ledger')
   if (!Array.isArray(v.items)) return fail('items')
@@ -170,6 +195,7 @@ function readLedger(v: unknown, sid: string, savedAt: number): Ledger {
     lastCheck: { ok: bool(lc.ok), at: num(lc.at), reason: str(lc.reason, 200), streak: int(lc.streak), checkedTurns: int(lc.checkedTurns) },
     everHadItem: (opt(v, 'everHadItem', bool) ?? false) || items.length > 0,
     carry,
+    pendingClaim: readClaim(v.pendingClaim),
     lastFinal: typeof v.lastFinal === 'string' ? clip(v.lastFinal, LAST_FINAL_CHARS + 1).slice(-LAST_FINAL_CHARS) : fail('lastFinal'),
   }
 }

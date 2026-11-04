@@ -52,6 +52,15 @@ export type World = {
   fileClock: number
   failWrites: boolean
   reads: number
+  root: string
+  // Folder path -> where fs.stat says it really resolves (a junction).
+  links: Map<string, string>
+  // Set: an fs.list of a path containing `match` waits for `gate` (a slow claim listing).
+  listGate: { match: string; gate: Promise<void> } | null
+  // Set: an fs.write of a path containing this fails (a guard on one folder).
+  failWriteMatch: string | null
+  // Every folder fs.list was asked for, in order.
+  lists: string[]
   // Set: every fs.write waits for this (a slow disk).
   writeGate: Promise<void> | null
 }
@@ -79,6 +88,11 @@ export function world(on: On): World {
     fileClock: 1000,
     failWrites: false,
     reads: 0,
+    root: 'C:/work',
+    links: new Map(),
+    listGate: null,
+    failWriteMatch: null,
+    lists: [],
     writeGate: null,
   }
   mock.env(on, { USERPROFILE: 'C:\\Users\\tester' })
@@ -92,6 +106,7 @@ export function world(on: On): World {
   const norm = (p: string) => p.replace(/\\/g, '/')
   on('fs.write', async (_$, e) => {
     if (w.failWrites) throw new Error('blocked by a guard')
+    if (w.failWriteMatch !== null && norm(e.path).includes(w.failWriteMatch)) throw new Error('blocked by a guard')
     if (w.writeGate !== null) await w.writeGate
     w.writes.push({ path: norm(e.path), text: e.text })
     w.files.set(norm(e.path), { text: e.text, mtimeMs: w.fileClock })
@@ -104,14 +119,29 @@ export function world(on: On): World {
     return { value: f.text }
   })
   on('classic.SessionStart', () => ({}))
-  on('fs.list', (_$, e) => {
+  on('fs.list', async (_$, e) => {
     const dir = `${norm(e.path ?? '').replace(/\/+$/, '')}/`
+    w.lists.push(dir)
+    if (w.listGate !== null && dir.includes(w.listGate.match)) await w.listGate.gate
     const value = [...w.files.entries()]
       .filter(([p]) => p.startsWith(dir) && !p.slice(dir.length).includes('/'))
       .map(([p, f]) => ({ name: p.slice(dir.length), kind: 'file' as const, size: f.text.length, mtimeMs: f.mtimeMs, isLink: false }))
     return { value }
   })
-  on('session.root', () => ({ value: 'C:/work' }))
+  // A folder exists when some file sits under it; it resolves to itself (no links on the fake disk).
+  const isDir = (p: string) => [...w.files.keys()].some(k => k.startsWith(`${norm(p).replace(/\/+$/, '')}/`))
+  on('fs.stat', (_$, e) => {
+    const p = norm(e.path)
+    // A planted junction: the folder resolves somewhere else.
+    const link = w.links.get(p)
+    if (link !== undefined) return { value: { kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: false, realPath: link } }
+    const f = w.files.get(p)
+    if (f !== undefined) return { value: { kind: 'file' as const, size: f.text.length, mtimeMs: f.mtimeMs, isLink: false, realPath: p } }
+    if (isDir(p)) return { value: { kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: false, realPath: p } }
+    throw new Error(`no such path ${e.path}`)
+  })
+  on('fs.exists', (_$, e) => ({ value: w.files.has(norm(e.path)) || isDir(e.path) }))
+  on('session.root', () => ({ value: w.root }))
   on('ui.log', (_$, e) => {
     w.logs.push(`${e.to ?? 'transcript'}: ${e.text}`)
     return { value: undefined }
@@ -161,8 +191,22 @@ export function world(on: On): World {
   return w
 }
 
-export async function start($: Engine): Promise<void> {
-  await $.session.start({ cwd: 'C:/work', surface: 'terminal', isInteractive: true })
+export async function start($: Engine, isInteractive = true): Promise<void> {
+  await $.session.start({ cwd: 'C:/work', surface: 'terminal', isInteractive })
+}
+
+// The settings hook's session start, as the engine fires it (before session.start for a fresh process).
+export async function classic($: Engine, w: World, source: 'startup' | 'resume' | 'clear' | 'compact' | 'fork', sessionId: string): Promise<void> {
+  const fire = ($ as unknown as { classic: { SessionStart: (e: unknown) => Promise<unknown> } }).classic.SessionStart
+  await fire({ hook_event_name: 'SessionStart', source, session_id: sessionId, transcript_path: '', cwd: w.root })
+  await w.clock.settle()
+}
+
+// A fresh interactive process landing on w.sessionId: classic startup first, then session.start (probe g).
+export async function freshProcess($: Engine, w: World, isInteractive = true): Promise<void> {
+  await classic($, w, 'startup', w.sessionId)
+  await start($, isInteractive)
+  await w.clock.settle()
 }
 
 type Origin = 'composer' | 'channel' | 'plugin' | 'bridge'
