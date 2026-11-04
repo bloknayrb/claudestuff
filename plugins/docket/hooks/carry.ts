@@ -4,7 +4,7 @@
 import type { DocketSession, Item } from '../types'
 import { openItems } from './ledger'
 import { isSafeSid, readItem, SNAPSHOT_V } from './persist'
-import { clip, redact, sanitise } from './text'
+import { redact, sanitise } from './text'
 
 // A carry older than this is ignored (and logged), never taken.
 export const CARRY_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000
@@ -52,14 +52,16 @@ export function parseCarry(text: string | undefined, sid: string): CarryFile | n
   try {
     const v: unknown = JSON.parse(text)
     if (!isObj(v) || v.v !== SNAPSHOT_V || v.sid !== sid || !isSafeSid(sid)) return null
-    if (typeof v.root !== 'string' || typeof v.on !== 'boolean') return null
+    // A root is rejected, not clipped, past 1024 chars (as readClaim does): a clipped root could never
+    // match the folder again, and the handoff would be ignored without a word.
+    if (typeof v.root !== 'string' || v.root === '' || v.root.length > 1024 || typeof v.on !== 'boolean') return null
     if (!Number.isInteger(v.gen) || (v.gen as number) < 0 || !Number.isInteger(v.seq) || (v.seq as number) < 1) return null
     if (typeof v.savedAt !== 'number' || !Number.isFinite(v.savedAt)) return null
     if (!Array.isArray(v.items) || v.items.length > MAX_CARRY_ITEMS) return null
     const savedAt = v.savedAt
     const items = v.items.map(i => readItem(i, sid, savedAt))
     if (items.some(i => i.status !== 'open')) return null
-    return { sid, root: clip(v.root, 1024), gen: v.gen as number, on: v.on, seq: v.seq as number, savedAt, items }
+    return { sid, root: v.root, gen: v.gen as number, on: v.on, seq: v.seq as number, savedAt, items }
   } catch {
     return null
   }

@@ -636,7 +636,7 @@ async function carryCommand($: EngineInterface, arg: string): Promise<string> {
   if ((await readProc($)).isInteractive !== true) return 'Docket: carry works only in an interactive session.'
   if (arg === 'on') {
     const s = await setCarry($, true)
-    return `Docket: carry is on. Whatever is open when you leave goes to the next session in ${folderName(s.root)}, and on from there.`
+    return `Docket: carry is on. Whatever is open when you leave goes to the next session in ${folderName(s.root)}, and on from there. Running several Claude windows here? Keep carry on in only one: a new window takes these items.`
   }
   if (arg === 'off') {
     await setCarry($, false)
