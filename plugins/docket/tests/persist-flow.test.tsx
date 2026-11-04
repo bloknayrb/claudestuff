@@ -75,6 +75,101 @@ test('exit writes the final snapshot within the bound, and a cold restart reads 
   expect(slot?.ledger.items.map(i => i.text)).toEqual(['Renew the domain'])
 })
 
+test('a disk that never answers: session.end stops waiting at its bound, and the reset still happened', async ($, on) => {
+  const w = world(on)
+  await start($)
+  await command($, 'add Renew the domain')
+  await w.clock.settle()
+  // Every write from here on hangs.
+  w.writeGate = new Promise<void>(() => {})
+  await command($, 'add Second thing')
+  let isDone = false
+  const ending = $.session.end(endAs('clear', 'sess-1')).then(() => { isDone = true })
+  await w.clock.settle()
+  await w.clock.advance(5000)
+  await ending
+  expect(isDone).toBe(true)
+  w.writeGate = null
+  w.sessionId = 'sess-2'
+  await say($, w, 'hi')
+  expect(await openIds($)).toEqual([])
+})
+
+test('a classic call that arrives while the old id is still current still lands on the new session', async ($, on) => {
+  const w = world(on)
+  await start($)
+  await command($, 'add Renew the domain')
+  await w.clock.settle()
+  // $.session.id() still answers sess-1 when the classic hook names sess-2.
+  await ($ as unknown as { classic: { SessionStart: (e: unknown) => Promise<unknown> } }).classic.SessionStart({ hook_event_name: 'SessionStart', source: 'clear', session_id: 'sess-2', transcript_path: '', cwd: 'C:/work' })
+  await w.clock.settle()
+  await $.session.end(endAs('clear', 'sess-1'))
+  w.sessionId = 'sess-2'
+  await w.clock.settle()
+  expect(await openIds($)).toEqual([])
+  const saved = [slotPath('sess-1', 'a'), slotPath('sess-1', 'b')].map(p => parseSlot(w.files.get(p)?.text, 'sess-1')).filter(x => x !== null)
+  expect(saved[0]?.ledger.items.map(i => i.text)).toEqual(['Renew the domain'])
+})
+
+test('forget, /clear, /resume back: still forgotten, exit writes nothing; a new item saves again', async ($, on) => {
+  const w = world(on)
+  await start($)
+  for (const t of ['One', 'Two', 'Three', 'Four', 'Five']) await command($, `add ${t}`)
+  await w.clock.settle()
+  await command($, 'forget')
+  await $.session.end(endAs('clear', 'sess-1'))
+  w.sessionId = 'sess-2'
+  await say($, w, 'hi')
+  await $.session.end(endAs('resume', 'sess-2'))
+  w.sessionId = 'sess-1'
+  await say($, w, 'back')
+  const isGone = (sid: string) => [slotPath(sid, 'a'), slotPath(sid, 'b')].every(p => w.files.get(p) === undefined || w.files.get(p)!.text.includes('"gone":true'))
+  expect(isGone('sess-1')).toBe(true)
+  await w.clock.advance(10)
+  await command($, 'add A new one')
+  await $.session.end(endAs('prompt_input_exit', 'sess-1'))
+  const saved = [slotPath('sess-1', 'a'), slotPath('sess-1', 'b')].map(p => parseSlot(w.files.get(p)?.text, 'sess-1')).filter(x => x !== null)
+  expect(saved.some(s => s!.ledger.items.some(i => i.text === 'A new one'))).toBe(true)
+})
+
+test('a verdict in flight across a hot reload is thrown away', async ($, on) => {
+  const w = world(on)
+  await start($)
+  let release: () => void = () => {}
+  w.gate = new Promise<void>(r => { release = r })
+  w.replies.push(verdict({ add: [{ kind: 'decide', text: 'Choose SQLite or Postgres for the cache', quote: 'Your call: SQLite or Postgres for the cache?', singleRec: false }] }))
+  const ending = turn($, w, 't1', ['Your call: SQLite or Postgres for the cache?'])
+  await w.clock.settle()
+  await start($)
+  release()
+  w.gate = null
+  await ending
+  await w.clock.settle()
+  expect(await openIds($)).toEqual([])
+})
+
+test('after a reload, the next write takes the next seq and wins the read', async ($, on) => {
+  const w = world(on)
+  await start($)
+  await command($, 'add One')
+  await w.clock.settle()
+  await start($)
+  await command($, 'add Two')
+  await w.clock.settle()
+  const a = parseSlot(w.files.get(slotPath('sess-1', 'a'))?.text, 'sess-1')
+  const b = parseSlot(w.files.get(slotPath('sess-1', 'b'))?.text, 'sess-1')
+  const best = [a, b].filter(x => x !== null).sort((x, y) => y!.seq - x!.seq)[0]
+  expect(best?.ledger.items.map(i => i.text)).toEqual(['One', 'Two'])
+})
+
+test('a restore writes nothing new until something changes', async ($, on) => {
+  const w = world(on)
+  seed(w, 'sess-1', ['Renew the domain'])
+  await start($)
+  await w.clock.settle()
+  expect(snapWrites(w, 'sess-1').length).toBe(0)
+})
+
 test('a slow disk: session.end still resets for /clear and does not hang', async ($, on) => {
   const w = world(on)
   await start($)
@@ -159,9 +254,9 @@ test('a hot reload re-runs session.start without reading the file again, and kee
   await start($)
   await command($, 'add Renew the domain')
   await w.clock.settle()
-  const reads = w.files.size
+  const reads = w.reads
   await start($)
   await w.clock.settle()
   expect(await openIds($)).toEqual([1])
-  expect(w.files.size).toBe(reads)
+  expect(w.reads).toBe(reads)
 })

@@ -51,6 +51,7 @@ export type World = {
   files: Map<string, { text: string; mtimeMs: number }>
   fileClock: number
   failWrites: boolean
+  reads: number
   // Set: every fs.write waits for this (a slow disk).
   writeGate: Promise<void> | null
 }
@@ -77,6 +78,7 @@ export function world(on: On): World {
     files: new Map(),
     fileClock: 1000,
     failWrites: false,
+    reads: 0,
     writeGate: null,
   }
   mock.env(on, { USERPROFILE: 'C:\\Users\\tester' })
@@ -96,6 +98,7 @@ export function world(on: On): World {
     return { value: undefined }
   })
   on('fs.read', (_$, e) => {
+    w.reads += 1
     const f = w.files.get(norm(e.path))
     if (f === undefined) throw new Error(`no file ${e.path}`)
     return { value: f.text }

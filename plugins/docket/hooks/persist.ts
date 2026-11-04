@@ -7,6 +7,8 @@ import { clip, redact, sanitise } from './text'
 
 export const SNAPSHOT_V = 1
 export const MAX_OPEN = 100
+// Open plus kept closes; a clear batch can hold many, so the cap is loose but finite.
+export const MAX_ITEMS = 1000
 export const LAST_FINAL_CHARS = 6000
 export const RETAIN_MS = 30 * 24 * 60 * 60 * 1000
 
@@ -141,12 +143,17 @@ export function readItem(v: unknown, sid: string, savedAt: number): Item {
 function readLedger(v: unknown, sid: string, savedAt: number): Ledger {
   if (!isObj(v)) return fail('ledger')
   if (!Array.isArray(v.items)) return fail('items')
+  if (v.items.length > MAX_ITEMS) fail('too-many-items')
   const items = v.items.map(i => readItem(i, sid, savedAt))
   if (items.filter(i => i.status === 'open').length > MAX_OPEN) fail('too-many-open')
   const ids = items.map(i => i.id)
   if (new Set(ids).size !== ids.length) fail('dup-id')
   const nextId = int(v.nextId, 1)
-  if (ids.length > 0 && nextId <= Math.max(...ids)) fail('nextId')
+  const top = (xs: (number | undefined)[]) => xs.reduce<number>((m, x) => (x !== undefined && x > m ? x : m), 0)
+  if (nextId <= top(ids)) fail('nextId')
+  // Counters must stay ahead of what they number, or a Reopen could merge two closes.
+  if (int(v.nextCloseSeq, 1) <= top(items.map(i => i.closeSeq))) fail('nextCloseSeq')
+  if (int(v.nextBatch, 1) <= top(items.map(i => i.batch))) fail('nextBatch')
   if (!Array.isArray(v.toolAsked)) return fail('toolAsked')
   const lc = isObj(v.lastCheck) ? v.lastCheck : fail('lastCheck')
   const carry = v.carry === undefined ? { on: false, gen: 0 } : isObj(v.carry) ? { on: bool(v.carry.on), gen: int(v.carry.gen) } : fail('carry')

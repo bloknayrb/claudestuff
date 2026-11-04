@@ -25,6 +25,7 @@ const WRITER = atom({ plugin: 'docket', key: 'writer' } as const, freshWriter())
 const SAVE_TOAST = (reason: string) => `Docket: couldn't save the docket (${clip(reason, 80)}).`
 // A session.end drain stops starting writes when less than this is left of its shared bound.
 const END_MARGIN_MS = 250
+const END_BOUND_MS = 1500
 const RETENTION_DELAY_MS = 60000
 
 // Module state: lost on a hot reload, which is the point for the runner's flags (a reload must not
@@ -37,6 +38,9 @@ let isResolving = false
 let controller: AbortController | undefined
 // Writes run one after another on this chain, so no two share a slot.
 let saveChain: Promise<void> = Promise.resolve()
+// Set while session.end drains: every drain, including one already running, stops starting writes once
+// the hook's shared bound runs low.
+let endBudget: (() => boolean) | null = null
 // The message count and the opening prompt's text at turn.start: how turn.complete finds the turn.
 let turnStartLen: { turnId: string; len: number; opener: string } | undefined
 // Prompts typed into the running turn: user rows that do not open a turn (see capture.ts).
@@ -113,8 +117,8 @@ async function queueSave($: EngineInterface, s: DocketSession, isFinal: boolean)
     let next = w
     const forgotAt = w.forgotten[s.sid]
     if (forgotAt !== undefined) {
-      // Forgotten until a new item arrives.
-      if (s.nextId <= forgotAt) return w
+      // Forgotten until an item first seen after the forget arrives.
+      if (!s.items.some(i => (i.firstSeenAt ?? 0) > forgotAt)) return w
       next = { ...next, forgotten: withoutKey(next.forgotten, s.sid) }
     }
     if (next.closed[s.sid] === true && !isFinal) return w
@@ -141,7 +145,7 @@ async function drainSaves($: EngineInterface, mayStart: () => boolean): Promise<
   for (;;) {
     const w = await readWriter($)
     const k = Object.keys(w.pending).find(x => !tried.has(x))
-    if (k === undefined || !mayStart()) return
+    if (k === undefined || !mayStart() || (endBudget !== null && !endBudget())) return
     tried.add(k)
     const p = w.pending[k]
     if (p !== undefined) await writeOne($, k, p, w)
@@ -217,6 +221,12 @@ async function rehome($: EngineInterface, sid: string, isClassic: boolean): Prom
   const restored = latest === null || latest === 'forgotten' ? null : parseSlot(envelope(sid, latest.root, 1, await $.clock.now(), latest.text), sid)
   const root = restored?.root || (await $.session.root())
   const isUp = await isPaneShown($)
+  // What is on disk is what the restore will hold: seed the dedupe, so landing writes nothing new.
+  if (restored !== null) {
+    const k = writeKey(sid, 'snap')
+    const text = ledgerText(restore(restored.ledger, sid, restored.root || root))
+    await changeWriter($, w => (w.pending[k] === undefined ? { ...w, lastText: withKey(w.lastText, k, text), rootBy: withKey(w.rootBy, sid, restored.root || root) } : w))
+  }
   const old = await transact($, cur => {
     if (cur.sid === sid) return { session: cur, out: null }
     if (cur.sid === '') return { session: { ...cur, sid, root, restored: true }, out: null }
@@ -253,11 +263,18 @@ async function forget($: EngineInterface): Promise<string> {
   const base = await baseDir($)
   if (base === undefined) return 'Docket: no folder to forget from.'
   const k = writeKey(s.sid, 'snap')
-  await changeWriter($, w => ({ ...w, pending: withoutKey(w.pending, k), forgotten: withKey(w.forgotten, s.sid, s.nextId), lastText: withKey(w.lastText, k, tombstone(s.sid)) }))
-  saveChain = saveChain.then(async () => {
+  const now = await $.clock.now()
+  await changeWriter($, w => ({ ...w, pending: withoutKey(w.pending, k), forgotten: withKey(w.forgotten, s.sid, now), lastText: withKey(w.lastText, k, tombstone(s.sid)) }))
+  const erase = saveChain.then(async () => {
     for (const slot of ['a', 'b']) await $.fs.write(`${base}/sessions/${s.sid}.${slot}.json`, tombstone(s.sid))
   })
-  await saveChain
+  // The chain must never stay rejected: later saves (and session.end's finals) run after it.
+  saveChain = erase.catch(err => fail($, 'forget', err))
+  try {
+    await erase
+  } catch (err) {
+    return `Docket: couldn't erase the saved copy (${clip(err instanceof Error ? err.message : String(err), 80)}); saving stays off for this session until a new item.`
+  }
   return 'Docket: forgot the saved copy of this session\'s docket. The pane is unchanged; a new item starts saving again.'
 }
 
@@ -281,7 +298,7 @@ async function prune($: EngineInterface): Promise<void> {
     if (text !== undefined && text.includes('"gone":true')) continue
     saveChain = saveChain.then(() => $.fs.write(`${base}/sessions/${e.name}`, tombstone(m[1] as string))).catch(() => undefined)
   }
-  await saveChain
+  await saveChain.catch(() => undefined)
 }
 
 async function change($: EngineInterface, fn: (s: DocketSession) => DocketSession): Promise<DocketSession> {
@@ -575,14 +592,17 @@ export const register: Register = (on, options) => {
   // and on an in-process /clear or /resume). Observe only; the rehome runs in its own dispatch.
   on('classic.SessionStart', async ($, e, next) => {
     const sid = e.session_id
+    // What the docket was on when this call fired. If, by the deferred run, it has landed on some
+    // other real session, a later switch overtook this call: it is stale and changes nothing. Never
+    // compared with $.session.id(), which can be provisional here (probe results, --continue).
+    const at = (await readSession($)).sid
     $.clock.after(0, () =>
       void guard(
         $,
         'classic',
         (async () => {
-          // A late call for a session already left: the docket is on the current one, leave it.
           const cur = (await readSession($)).sid
-          if (isRealSid(cur) && cur !== sid && cur === (await $.session.id())) return
+          if (cur !== at && isRealSid(cur) && cur !== sid) return
           await rehome($, sid, true)
         })(),
       ),
@@ -605,11 +625,18 @@ export const register: Register = (on, options) => {
         const s = await readSession($)
         if (s.sid === e.sessionId) await queueSave($, s, true)
       }
-      const drained = saveChain.then(() => drainSaves($, () => next.budget.remainingMs > END_MARGIN_MS))
+      // Every drain on the chain (one already running too) stops starting writes near the bound, and the
+      // hook stops waiting there: a write still in flight costs only that save (the A/B slots).
+      endBudget = () => next.budget.remainingMs > END_MARGIN_MS
+      const drained = saveChain.then(() => drainSaves($, () => true))
       saveChain = drained.catch(() => undefined)
-      await drained
+      // The documented bound is 1.5 s; never wait longer, whatever remainingMs reads.
+      const wait = Math.max(0, Math.min(END_BOUND_MS, next.budget.remainingMs) - END_MARGIN_MS)
+      await Promise.race([drained, new Promise<void>(r => $.clock.after(wait, () => r()))])
     } catch (err) {
       await fail($, 'session.end', err)
+    } finally {
+      endBudget = null
     }
     try {
       return await next(e)
