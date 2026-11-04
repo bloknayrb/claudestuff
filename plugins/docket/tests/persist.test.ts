@@ -66,7 +66,9 @@ test('garbled, foreign-sid, wrong-version, tombstoned, over-cap and bad-id files
   expect(parseSlot(good, 'bbbb-2222')).toBe(null)
   expect(parseSlot(good.replace('"v":1', '"v":2'), SID)).toBe(null)
   expect(parseSlot(tombstone(SID), SID)).toBe(null)
-  const many = { ...s, items: Array.from({ length: 101 }, (_, n) => ({ ...s.items[0]!, id: n + 1 })), nextId: 102 }
+  const many = { ...s, items: Array.from({ length: 2001 }, (_, n) => ({ ...s.items[0]!, id: n + 1 })), nextId: 2002 }
+  const real = { ...s, items: Array.from({ length: 150 }, (_, n) => ({ ...s.items[0]!, id: n + 1 })), nextId: 151 }
+  expect(parseSlot(file(real, 1), SID) === null).toBe(false)
   expect(parseSlot(file(many, 1), SID)).toBe(null)
   const badNext = JSON.parse(ledgerText(s))
   badNext.nextId = 1

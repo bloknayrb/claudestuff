@@ -103,12 +103,31 @@ test('a classic call that arrives while the old id is still current still lands 
   // $.session.id() still answers sess-1 when the classic hook names sess-2.
   await ($ as unknown as { classic: { SessionStart: (e: unknown) => Promise<unknown> } }).classic.SessionStart({ hook_event_name: 'SessionStart', source: 'clear', session_id: 'sess-2', transcript_path: '', cwd: 'C:/work' })
   await w.clock.settle()
+  // Already on sess-2 before session.end runs: the old code skipped this rehome.
+  expect(await openIds($)).toEqual([])
+  // A prompt typed now, while $.session.id() still reads sess-1, must not pull the docket back.
+  await say($, w, 'hi')
+  expect(await openIds($)).toEqual([])
   await $.session.end(endAs('clear', 'sess-1'))
   w.sessionId = 'sess-2'
   await w.clock.settle()
   expect(await openIds($)).toEqual([])
   const saved = [slotPath('sess-1', 'a'), slotPath('sess-1', 'b')].map(p => parseSlot(w.files.get(p)?.text, 'sess-1')).filter(x => x !== null)
   expect(saved[0]?.ledger.items.map(i => i.text)).toEqual(['Renew the domain'])
+})
+
+test('a change queued just before /clear lands under the old id, not the new one', async ($, on) => {
+  const w = world(on)
+  await start($)
+  await command($, 'add Renew the domain')
+  // Not settled: the save is still queued when /clear ends the session.
+  await $.session.end(endAs('clear', 'sess-1'))
+  w.sessionId = 'sess-2'
+  await say($, w, 'hi')
+  await w.clock.settle()
+  const saved = [slotPath('sess-1', 'a'), slotPath('sess-1', 'b')].map(p => parseSlot(w.files.get(p)?.text, 'sess-1')).filter(x => x !== null)
+  expect(saved[0]?.ledger.items.map(i => i.text)).toEqual(['Renew the domain'])
+  expect(snapWrites(w, 'sess-2').length).toBe(0)
 })
 
 test('forget, /clear, /resume back: still forgotten, exit writes nothing; a new item saves again', async ($, on) => {

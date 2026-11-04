@@ -6,9 +6,11 @@ import { freshSession } from './ledger'
 import { clip, redact, sanitise } from './text'
 
 export const SNAPSHOT_V = 1
-export const MAX_OPEN = 100
-// Open plus kept closes; a clear batch can hold many, so the cap is loose but finite.
-export const MAX_ITEMS = 1000
+// Load caps, against a planted file only. The live ledger has no open cap (Docket never hides an
+// item), so these sit far above anything a real session reaches: a cap a real session could pass
+// would save a file that can never load.
+export const MAX_OPEN = 2000
+export const MAX_ITEMS = 10000
 export const LAST_FINAL_CHARS = 6000
 export const RETAIN_MS = 30 * 24 * 60 * 60 * 1000
 
@@ -18,7 +20,7 @@ export const isSafeSid = (sid: unknown): sid is string => typeof sid === 'string
 // A real session's id: not the v0.1 marker '' or the not-yet-known 'pending'.
 export const isRealSid = (sid: string): boolean => sid !== '' && sid !== 'pending' && isSafeSid(sid)
 
-export const freshProc = (): DocketProc => ({ isInteractive: null, endingSid: null, epoch: 0, saveToastShown: false })
+export const freshProc = (): DocketProc => ({ isInteractive: null, endingSid: null, epoch: 0, saveToastShown: false, classicSid: null })
 export const freshWriter = (): DocketWriter => ({ seqBy: {}, lastText: {}, pending: {}, rootBy: {}, closed: {}, forgotten: {} })
 export const normProc = (v: Partial<DocketProc> | undefined): DocketProc => ({ ...freshProc(), ...(v ?? {}) })
 export const normWriter = (v: Partial<DocketWriter> | undefined): DocketWriter => ({ ...freshWriter(), ...(v ?? {}) })

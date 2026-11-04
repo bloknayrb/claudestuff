@@ -104,6 +104,9 @@ export type DocketProc = {
   // Bumped by every switch and every session.start: a check that began before is thrown away.
   epoch: number
   saveToastShown: boolean
+  // The session the last classic.SessionStart named: lazy callers don't pull the docket off it while
+  // $.session.id() still reads an older or provisional id.
+  classicSid: string | null
 }
 
 // One write the writer still owes: the latest payload for (sid, kind).

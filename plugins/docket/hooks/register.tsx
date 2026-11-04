@@ -252,9 +252,12 @@ async function switchAway($: EngineInterface, old: DocketSession): Promise<void>
 // Prompts, turns and commands land on the right session even when nothing told Docket of a switch.
 // Not before session.start: until then $.session.id() can be a provisional id (probe, --continue).
 async function lazyRehome($: EngineInterface): Promise<void> {
-  if ((await readProc($)).isInteractive === null) return
+  const proc = await readProc($)
+  if (proc.isInteractive === null) return
   const sid = await $.session.id()
-  if ((await readSession($)).sid !== sid) await rehome($, sid, false)
+  const cur = (await readSession($)).sid
+  // The classic hook landed the docket on its session first: $.session.id() may not have caught up.
+  if (cur !== sid && cur !== proc.classicSid) await rehome($, sid, false)
 }
 
 async function forget($: EngineInterface): Promise<string> {
@@ -603,6 +606,7 @@ export const register: Register = (on, options) => {
         (async () => {
           const cur = (await readSession($)).sid
           if (cur !== at && isRealSid(cur) && cur !== sid) return
+          await changeProc($, p => ({ ...p, classicSid: sid }))
           await rehome($, sid, true)
         })(),
       ),
