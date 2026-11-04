@@ -27,7 +27,9 @@ Requires Claude Code 2.1.317 or newer (function-hook mods).
 - **Your docket survives quitting.** Come back with `claude --resume`, `--continue` or `/resume` and
   the list is as you left it.
 - **The panel** lists open items under **Decide** and **Do**, each with its age in turns (`now`,
-  `2t`). Each item has three buttons:
+  `2t`). Once items have been carried in, it groups them by the session they were first raised in:
+  **This session** first, then `From Nov 1 session (↪ 2d)` and so on, newest first, each with its own
+  Decide and Do. Each item has three buttons:
   - **Reply** puts `Re: <item> — ` in your prompt box (after anything you have typed) so your answer
     names the item. Focus stays in the panel: click the prompt or press Esc to type.
   - **Done** closes it as handled by you, for things you did outside the chat.

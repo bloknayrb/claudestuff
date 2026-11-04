@@ -299,6 +299,36 @@ test('sticky through an empty session: the take of an empty carry still turns th
   expect(w.logs.some(l => l.includes('carried in'))).toBe(false)
 })
 
+test('the pane groups items by the session they came from: this session first, older newest first, Decide/Do inside', async ($, on) => {
+  const w = world(on)
+  await w.clock.set(10 * 24 * 60 * 60 * 1000)
+  const day = 24 * 60 * 60 * 1000
+  const older = { ...source('old-1', []), items: [] } as DocketSession
+  let a = older
+  a = addManual(a, 'Ancient do', w.clock.now() - 5 * day)
+  seedCarry(w, a, { mtime: 900 })
+  w.sessionId = 'sess-9'
+  await freshProcess($, w)
+  await command($, 'add Here and now')
+  const ui = await mountPane($, 'terminal')
+  const ts = (await ui.findAll({ type: 'Text' })).map(t => t.text ?? '')
+  await ui.unmount()
+  const iThis = ts.indexOf('This session')
+  const iOld = ts.findIndex(t => t.startsWith('From ') && t.includes('session (↪ 5d)'))
+  expect(iThis >= 0 && iOld > iThis).toBe(true)
+  expect(ts.indexOf('Here and now') > iThis && ts.indexOf('Here and now') < iOld).toBe(true)
+  expect(ts.indexOf('Ancient do') > iOld).toBe(true)
+  // The digit keys follow the display order: the first row shown is 1.
+  expect(await openIds($)).toEqual([2, 1])
+})
+
+test('with nothing carried there is no session heading', async ($, on) => {
+  const w = world(on)
+  await freshProcess($, w)
+  await command($, 'add Here and now')
+  expect((await texts($)).includes('This session')).toBe(false)
+})
+
 test('the pane row and the band say what the switch does', async ($, on) => {
   const w = world(on)
   await freshProcess($, w)

@@ -33,10 +33,6 @@ function age(turns: number): string {
   return turns <= 0 ? 'now' : `${turns}t`
 }
 
-// Display order, which the digit keys follow: decisions first, then actions, oldest first in each.
-export function ordered(open: readonly Item[]): Item[] {
-  return [...open.filter(i => i.kind === 'decide'), ...open.filter(i => i.kind === 'do')]
-}
 
 // The band button's label, or undefined to draw nothing: shown while anything is open or a check
 // failed. It names what a click does.
@@ -130,11 +126,47 @@ function closedRow(els: Els, g: CloseGroup, act: Actions) {
   )
 }
 
-function section(els: Els, title: string, items: readonly Item[], offset: number, s: DocketSession, live: Live, act: Actions) {
+// The pane's groups: items by the session they were first raised in (Bryan's pick: this session first,
+// then older sessions newest first, each split into Decide and Do). The digit keys follow this order.
+export type OriginGroup = { key: string; label: string | null; decide: Item[]; doItems: Item[] }
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const dayLabel = (ms: number): string => {
+  const d = new Date(ms)
+  return `${MONTHS[d.getMonth()]} ${d.getDate()}`
+}
+
+export function originGroups(open: readonly Item[], sid: string, now: number): OriginGroup[] {
+  const bySrc = new Map<string, Item[]>()
+  for (const i of open) {
+    const src = i.origin === undefined ? sid : i.origin.slice(0, Math.max(0, i.origin.lastIndexOf(':')))
+    const k = src === sid || src === '' ? '' : src
+    bySrc.set(k, [...(bySrc.get(k) ?? []), i])
+  }
+  const newest = (xs: Item[]) => Math.max(...xs.map(i => i.firstSeenAt ?? i.carriedAt ?? 0))
+  const oldest = (xs: Item[]) => Math.min(...xs.map(i => i.firstSeenAt ?? i.carriedAt ?? 0))
+  const older = [...bySrc.entries()].filter(([k]) => k !== '').sort((a, b) => newest(b[1]) - newest(a[1]))
+  const split = (xs: Item[]) => {
+    const sorted = [...xs].sort((a, b) => a.id - b.id)
+    return { decide: sorted.filter(i => i.kind === 'decide'), doItems: sorted.filter(i => i.kind === 'do') }
+  }
+  const mine = bySrc.get('') ?? []
+  // One group only (nothing carried): no session heading, as before.
+  const isSplit = older.length > 0
+  const groups: OriginGroup[] = []
+  if (mine.length > 0 || !isSplit) groups.push({ key: 'this', label: isSplit ? 'This session' : null, ...split(mine) })
+  for (const [k, xs] of older) {
+    const first = oldest(xs)
+    groups.push({ key: k, label: `From ${dayLabel(first)} session (↪ ${wallAge(now - first)})`, ...split(xs) })
+  }
+  return groups
+}
+
+function section(els: Els, title: string, items: readonly Item[], offset: number, s: DocketSession, live: Live, act: Actions, groupKey = 'this') {
   const { Box, Text } = els
   if (items.length === 0) return null
   return (
-    <Box key={`section-${title}`} flexDirection="column" marginTop={1}>
+    <Box key={`section-${groupKey}-${title}`} flexDirection="column" marginTop={1}>
       <Text bold color="warning">{title}</Text>
       {items.map((item, i) => row(els, item, offset + i, s.turn, act, s.view.focusedId === item.id, live.isResolving, live.now))}
     </Box>
@@ -162,9 +194,20 @@ function carryRow(els: Els, s: DocketSession, act: Actions) {
 
 export function paneTree(els: Els, s: DocketSession, open: readonly Item[], groups: readonly CloseGroup[], live: Live, act: Actions) {
   const { Box, Text, Button } = els
-  const list = ordered(open)
-  const decide = list.filter(i => i.kind === 'decide')
-  const doItems = list.filter(i => i.kind === 'do')
+  const grouped = originGroups(open, s.sid, live.now)
+  const list = grouped.flatMap(g => [...g.decide, ...g.doItems])
+  let offset = 0
+  const body = grouped.map(g => {
+    const start = offset
+    offset += g.decide.length + g.doItems.length
+    return (
+      <Box key={`group-${g.key}`} flexDirection="column" marginTop={g.label === null ? 0 : 1}>
+        {g.label !== null && <Text bold>{g.label}</Text>}
+        {section(els, 'Decide', g.decide, start, s, live, act, g.key)}
+        {section(els, 'Do', g.doItems, start + g.decide.length, s, live, act, g.key)}
+      </Box>
+    )
+  })
   const isPaused = s.view.keysPausedUntil !== null
   const keys = !live.isFocused
     ? 'ctrl+x tab gives this pane the keys'
@@ -183,8 +226,7 @@ export function paneTree(els: Els, s: DocketSession, open: readonly Item[], grou
         <Text key="docket-count" bold>{`${list.length} for you to decide or do`}</Text>
       )}
       {keys !== '' && <Text dimColor>{keys}</Text>}
-      {section(els, 'Decide', decide, 0, s, live, act)}
-      {section(els, 'Do', doItems, decide.length, s, live, act)}
+      {body}
       {groups.length > 0 && (
         <Box key="docket-closed" flexDirection="column" marginTop={1}>
           <Button
