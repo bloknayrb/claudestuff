@@ -78,6 +78,8 @@ they can any plugin's model call.
 - **One docket per conversation.** `/clear` starts a new conversation with an empty docket; the old
   one is saved, and `/resume` (or `claude --resume` / `--continue`) brings it back. Between leaving a
   conversation and landing on the next, the button draws nothing for a moment.
+- **One conversation open in two terminals at once** (the same `--resume` twice) gives two writers on
+  the same save files; whichever wrote last is what comes back.
 - **The last moments before a crash** can be lost: each change is saved straight after it happens,
   and the turn whose check was still running when the process died is not saved.
 - **Main conversation only.** Subagents' text is not read; Claude relays what a subagent needs from
@@ -101,9 +103,11 @@ else `~/.claude`:
 - **`sessions/<session-id>.a.json` and `.b.json`**: the saved docket for each conversation that had
   an item, written in turn so a write cut off halfway costs one save, never the docket. They hold the
   item text, the words of Claude's each item came from, your `/docket add` text and the
-  AskUserQuestion questions Docket keeps out of the list, all with token-shaped strings replaced by
-  `[redacted]`. They don't hold what you typed, Claude's turn text beyond its last message, or tool
-  lines. A closed item's note is dropped.
+  AskUserQuestion questions Docket keeps out of the list, Claude's last message, and the
+  conversation's project folder path. Only token-shaped strings (GitHub tokens, `sk-` keys, AWS key
+  ids, JWTs, `Bearer` values, PEM keys) are replaced by `[redacted]`; a password or connection string
+  in one of those texts is saved as written. They don't hold what you typed, Claude's earlier turn
+  text, or tool lines. A closed item's note is dropped.
 - **`<session-id>.json`**: a heartbeat with counts, timestamps and `lastError` after a failure. Never
   item text or model output.
 

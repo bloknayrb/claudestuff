@@ -2,7 +2,7 @@
 // takes $. A file on disk is untrusted: every field is rebuilt by hand, and any failure rejects it.
 
 import type { CarryState, ClosedBy, DocketProc, DocketSession, DocketWriter, Item, ItemKind, ItemStatus, LastCheck } from '../types'
-import { freshSession } from './ledger'
+import { freshSession, KEEP_TOOL_ASKED } from './ledger'
 import { clip, redact, sanitise } from './text'
 
 export const SNAPSHOT_V = 1
@@ -166,7 +166,7 @@ function readLedger(v: unknown, sid: string, savedAt: number): Ledger {
     nextSeq: int(v.nextSeq, 1),
     nextCloseSeq: int(v.nextCloseSeq, 1),
     nextBatch: int(v.nextBatch, 1),
-    toolAsked: v.toolAsked.map(q => str(q, 200)).slice(-10),
+    toolAsked: v.toolAsked.map(q => str(q, 200)).slice(-KEEP_TOOL_ASKED),
     lastCheck: { ok: bool(lc.ok), at: num(lc.at), reason: str(lc.reason, 200), streak: int(lc.streak), checkedTurns: int(lc.checkedTurns) },
     everHadItem: (opt(v, 'everHadItem', bool) ?? false) || items.length > 0,
     carry,

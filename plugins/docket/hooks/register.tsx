@@ -172,7 +172,8 @@ async function writeOne($: EngineInterface, k: string, p: PendingWrite, w: Docke
   await changeWriter($, cur => ({
     ...cur,
     seqBy: withKey(cur.seqBy, k, Math.max(seq, cur.seqBy[k] ?? 0)),
-    lastText: withKey(cur.lastText, k, p.text),
+    // A forget that landed while this write was in flight keeps its tombstone as the last text.
+    lastText: cur.forgotten[p.sid] !== undefined ? cur.lastText : withKey(cur.lastText, k, p.text),
     rootBy: withKey(cur.rootBy, p.sid, p.root),
     pending: cur.pending[k]?.text === p.text ? withoutKey(cur.pending, k) : cur.pending,
   }))
@@ -306,7 +307,11 @@ async function prune($: EngineInterface): Promise<void> {
     if (now - e.mtimeMs < RETAIN_MS) continue
     const text = await readText($, `${base}/sessions/${e.name}`)
     if (text !== undefined && text.includes('"gone":true')) continue
-    saveChain = saveChain.then(() => $.fs.write(`${base}/sessions/${e.name}`, tombstone(m[1] as string))).catch(() => undefined)
+    // Accepted: a second window resuming this sid between the mtime check and this write would lose
+    // that one save (a 30-day-idle session reopened in the same second).
+    saveChain = saveChain
+      .then(() => $.fs.write(`${base}/sessions/${e.name}`, tombstone(m[1] as string)))
+      .catch(err => $.ui.log(`docket: prune write failed: ${err instanceof Error ? err.message : String(err)}`, { to: 'debug' }))
   }
   await saveChain.catch(() => undefined)
 }
