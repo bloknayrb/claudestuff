@@ -256,8 +256,15 @@ async function lazyRehome($: EngineInterface): Promise<void> {
   if (proc.isInteractive === null) return
   const sid = await $.session.id()
   const cur = (await readSession($)).sid
-  // The classic hook landed the docket on its session first: $.session.id() may not have caught up.
-  if (cur !== sid && cur !== proc.classicSid) await rehome($, sid, false)
+  if (cur === sid) {
+    // $.session.id() has caught up with a classic landing: the guard has done its job.
+    if (proc.classicSid !== null) await changeProc($, p => ({ ...p, classicSid: null, classicFrom: null }))
+    return
+  }
+  // The classic hook landed the docket on its session first, and $.session.id() still reads the
+  // session it came from: wait. An id that has moved to a third session is followed.
+  if (cur === proc.classicSid && sid === proc.classicFrom) return
+  await rehome($, sid, false)
 }
 
 async function forget($: EngineInterface): Promise<string> {
@@ -606,7 +613,8 @@ export const register: Register = (on, options) => {
         (async () => {
           const cur = (await readSession($)).sid
           if (cur !== at && isRealSid(cur) && cur !== sid) return
-          await changeProc($, p => ({ ...p, classicSid: sid }))
+          const from = await $.session.id()
+          await changeProc($, p => ({ ...p, classicSid: sid, classicFrom: from === sid ? null : from }))
           await rehome($, sid, true)
         })(),
       ),

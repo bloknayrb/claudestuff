@@ -116,6 +116,20 @@ test('a classic call that arrives while the old id is still current still lands 
   expect(saved[0]?.ledger.items.map(i => i.text)).toEqual(['Renew the domain'])
 })
 
+test('after a classic landing, an id that moves to a third session is followed', async ($, on) => {
+  const w = world(on)
+  await start($)
+  await ($ as unknown as { classic: { SessionStart: (e: unknown) => Promise<unknown> } }).classic.SessionStart({ hook_event_name: 'SessionStart', source: 'clear', session_id: 'sess-2', transcript_path: '', cwd: 'C:/work' })
+  await w.clock.settle()
+  w.sessionId = 'sess-3'
+  await command($, 'add Belongs to three')
+  await w.clock.settle()
+  await $.session.end(endAs('prompt_input_exit', 'sess-3'))
+  const three = [slotPath('sess-3', 'a'), slotPath('sess-3', 'b')].map(p => parseSlot(w.files.get(p)?.text, 'sess-3')).filter(x => x !== null)
+  expect(three[0]?.ledger.items.map(i => i.text)).toEqual(['Belongs to three'])
+  expect(snapWrites(w, 'sess-2').length).toBe(0)
+})
+
 test('a change queued just before /clear lands under the old id, not the new one', async ($, on) => {
   const w = world(on)
   await start($)

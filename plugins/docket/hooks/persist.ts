@@ -20,7 +20,7 @@ export const isSafeSid = (sid: unknown): sid is string => typeof sid === 'string
 // A real session's id: not the v0.1 marker '' or the not-yet-known 'pending'.
 export const isRealSid = (sid: string): boolean => sid !== '' && sid !== 'pending' && isSafeSid(sid)
 
-export const freshProc = (): DocketProc => ({ isInteractive: null, endingSid: null, epoch: 0, saveToastShown: false, classicSid: null })
+export const freshProc = (): DocketProc => ({ isInteractive: null, endingSid: null, epoch: 0, saveToastShown: false, classicSid: null, classicFrom: null })
 export const freshWriter = (): DocketWriter => ({ seqBy: {}, lastText: {}, pending: {}, rootBy: {}, closed: {}, forgotten: {} })
 export const normProc = (v: Partial<DocketProc> | undefined): DocketProc => ({ ...freshProc(), ...(v ?? {}) })
 export const normWriter = (v: Partial<DocketWriter> | undefined): DocketWriter => ({ ...freshWriter(), ...(v ?? {}) })

@@ -107,6 +107,8 @@ export type DocketProc = {
   // The session the last classic.SessionStart named: lazy callers don't pull the docket off it while
   // $.session.id() still reads an older or provisional id.
   classicSid: string | null
+  // What $.session.id() read when that classic call landed; the lazy guard holds only while it still does.
+  classicFrom: string | null
 }
 
 // One write the writer still owes: the latest payload for (sid, kind).
