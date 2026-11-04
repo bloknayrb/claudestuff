@@ -483,7 +483,9 @@ test('a claim write that fails is retried after a reload, writing only the claim
   expect(await openIds($)).toEqual([1])
 })
 
-test('a claim write that fails is retried when the session is left (switchAway)', async ($, on) => {
+// session.end's own leave skips the retry by design (no extra writes in its bound); the claim then
+// stays persisted and is retried on restore, as the reload test shows.
+test('a claim write that fails is retried when a classic call leaves the session (switchAway outside session.end)', async ($, on) => {
   const w = world(on)
   seedCarry(w, source('src-1', ['Renew the domain']))
   w.sessionId = 'sess-9'
@@ -507,6 +509,8 @@ test('a lazy landing, then the classic clear call before the take resolves: one 
   w.sessionId = 'sess-2'
   let release: () => void = () => {}
   w.listGate = { match: '/claims/sess-1/', gate: new Promise<void>(r => { release = r }) }
+  // Count from here: before the clear, sess-1's own taken-check listed these claims too.
+  w.lists = []
   const typing = say($, w, 'hello')
   await w.clock.settle()
   await classic($, w, 'clear', 'sess-2')
@@ -515,6 +519,8 @@ test('a lazy landing, then the classic clear call before the take resolves: one 
   await typing
   await w.clock.settle()
   expect((await openIds($)).length).toBe(1)
+  // One take, not two: the source's claims were listed once (origin dedupe alone would hide a second).
+  expect(w.lists.filter(d => d.includes('/claims/sess-1/')).length).toBe(1)
 })
 
 test('Reply on a carried item brings Claude\'s words; the band says carried, then next session', async ($, on) => {

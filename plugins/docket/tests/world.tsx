@@ -59,6 +59,8 @@ export type World = {
   listGate: { match: string; gate: Promise<void> } | null
   // Set: an fs.write of a path containing this fails (a guard on one folder).
   failWriteMatch: string | null
+  // Every folder fs.list was asked for, in order.
+  lists: string[]
   // Set: every fs.write waits for this (a slow disk).
   writeGate: Promise<void> | null
 }
@@ -90,6 +92,7 @@ export function world(on: On): World {
     links: new Map(),
     listGate: null,
     failWriteMatch: null,
+    lists: [],
     writeGate: null,
   }
   mock.env(on, { USERPROFILE: 'C:\\Users\\tester' })
@@ -118,6 +121,7 @@ export function world(on: On): World {
   on('classic.SessionStart', () => ({}))
   on('fs.list', async (_$, e) => {
     const dir = `${norm(e.path ?? '').replace(/\/+$/, '')}/`
+    w.lists.push(dir)
     if (w.listGate !== null && dir.includes(w.listGate.match)) await w.listGate.gate
     const value = [...w.files.entries()]
       .filter(([p]) => p.startsWith(dir) && !p.slice(dir.length).includes('/'))
