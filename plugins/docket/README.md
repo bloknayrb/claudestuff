@@ -109,7 +109,8 @@ they can any plugin's model call.
     handoff, so both get the items.
   - A session still open in another terminal hands its items to a new session started in that
     folder; the old one then shows "taken by a later session". The items live on in both until each
-    is closed.
+    is closed, and items the old one adds afterwards stay with it. **If you run several Claude
+    windows in one project, keep carry on in only one of them**, or turn it on just before you quit.
   - Resuming a session whose items were carried on still shows them open there.
   - If you type before Claude Code finishes switching conversations, a fork, or a `/resume` onto a
     conversation that never had items, can receive the handoff as a `/clear` would.

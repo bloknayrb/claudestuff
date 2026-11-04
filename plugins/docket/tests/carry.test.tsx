@@ -3,6 +3,7 @@ import type { Engine } from 'claude-code/testing'
 
 import { carryEnvelope, carryText, claimText, normRoot, parseCarry, rootKey, takeInto } from '../hooks/carry'
 import { addManual, freshSession } from '../hooks/ledger'
+import { envelope, ledgerText } from '../hooks/persist'
 import type { DocketSession } from '../types'
 import { BASE, classic, command, freshProcess, mountPane, openIds, say, start, world } from './world'
 import type { World } from './world'
@@ -338,18 +339,142 @@ test('the pane row and the band say what the switch does', async ($, on) => {
   expect((await texts($)).some(t => t.startsWith('Carry to the next session in work: on'))).toBe(true)
 })
 
-test('a take that resolves after the docket moved applies nothing and claims nothing', async ($, on) => {
+test('a startup take whose claim list resolves after the docket moved applies nothing and claims nothing', async ($, on) => {
   const w = world(on)
   seedCarry(w, source('src-1', ['Renew the domain']))
   w.sessionId = 'sess-9'
+  // Hold the take at its claim listing: fs.list waits until released.
+  let release: () => void = () => {}
+  const gate = new Promise<void>(r => { release = r })
+  w.listGate = { match: '/claims/src-1/', gate }
   await classic($, w, 'startup', 'sess-9')
-  // Hold every write: the startup take's own landing happens, then /clear moves the docket on.
   await start($)
+  await w.clock.settle()
+  // The docket moves on (a /clear) while the take is still listing claims.
   await $.session.end(endAs('clear', 'sess-9'))
   w.sessionId = 'sess-10'
   await classic($, w, 'clear', 'sess-10')
+  release()
   await w.clock.settle()
-  const claimed = [...w.files.keys()].filter(p => p.includes('/claims/src-1/'))
-  // Either sess-9 took it before the clear (and claimed), or nothing was taken; never sess-10 by mistake.
-  expect(claimed.every(p => p.endsWith('/sess-9.json'))).toBe(true)
+  expect(await openIds($)).toEqual([])
+  expect([...w.files.keys()].some(p => p.includes('/claims/src-1/'))).toBe(false)
+})
+
+test('after a cold resume, the next carry write wins over the slot an earlier process left', async ($, on) => {
+  const w = world(on)
+  // An earlier process wrote this session's carry six times (b holds seq 6) and its snapshot.
+  const me = source('sess-1', ['Stale item'])
+  seedCarry(w, me, { seq: 6 })
+  w.files.set(`${BASE}/sessions/sess-1.a.json`, {
+    text: envelope('sess-1', ROOT, 1, 900, ledgerText(me)),
+    mtimeMs: 900,
+  })
+  await classic($, w, 'resume', 'sess-1')
+  await start($)
+  await command($, 'carry off')
+  await w.clock.settle()
+  expect(carryOf(w, 'sess-1')?.on).toBe(false)
+  expect(carryOf(w, 'sess-1')?.seq).toBe(7)
+})
+
+test('a taken source that then switched off still leads the next session to where its items went', async ($, on) => {
+  const w = world(on)
+  seedCarry(w, source('mid-1', ['Moved on']), { mtime: 900 })
+  seedCarry(w, source('src-1', [], { carry: { on: false, gen: 1 } }), { mtime: 990 })
+  w.files.set(claimPath('src-1', 1, 'mid-1'), { text: claimText('src-1', 1, 'mid-1', 1), mtimeMs: 950 })
+  w.sessionId = 'sess-9'
+  await freshProcess($, w)
+  expect((await texts($)).some(t => t.includes('Moved on'))).toBe(true)
+})
+
+test('forget on a carry a later session took still writes the off record: no item text left on disk', async ($, on) => {
+  const w = world(on)
+  await freshProcess($, w)
+  await command($, 'add Secret plan')
+  await command($, 'carry on')
+  await w.clock.settle()
+  w.files.set(claimPath('sess-1', 1, 'later-1'), { text: claimText('sess-1', 1, 'later-1', 1), mtimeMs: 2000 })
+  await w.clock.advance(31000)
+  await command($, 'add Another')
+  await w.clock.settle()
+  await command($, 'forget')
+  await w.clock.settle()
+  for (const p of [carryPath('sess-1', 'a'), carryPath('sess-1', 'b')]) {
+    const f = w.files.get(p)
+    if (f !== undefined && parseCarry(f.text, 'sess-1')?.seq === carryOf(w, 'sess-1')?.seq) expect(f.text.includes('Secret plan')).toBe(false)
+  }
+  expect(carryOf(w, 'sess-1')?.on).toBe(false)
+})
+
+test('carry on after forget writes the carry again', async ($, on) => {
+  const w = world(on)
+  await freshProcess($, w)
+  await command($, 'add One')
+  await command($, 'forget')
+  await command($, 'carry on')
+  await w.clock.settle()
+  expect(carryOf(w, 'sess-1')?.on).toBe(true)
+  expect(carryOf(w, 'sess-1')?.items.length).toBe(1)
+})
+
+test('the chain stops after 8 hops; a missing hop takes nothing', async ($, on) => {
+  const w = world(on)
+  // s0 claimed by s1, ... s9: ten links, newest first is s0.
+  for (let n = 0; n <= 9; n += 1) {
+    seedCarry(w, source(`s${n}`, [`Item ${n}`]), { mtime: 1000 - n })
+    if (n < 9) w.files.set(claimPath(`s${n}`, 1, `s${n + 1}`), { text: claimText(`s${n}`, 1, `s${n + 1}`, 1), mtimeMs: 1 })
+  }
+  w.sessionId = 'sess-9'
+  await freshProcess($, w)
+  expect(await openIds($)).toEqual([])
+})
+
+test('a junction planted at the folder key is refused: nothing read or taken through it', async ($, on) => {
+  const w = world(on)
+  seedCarry(w, source('src-1', ['Through a link']))
+  w.links.set(`${BASE}/roots/${KEY}`, 'D:/elsewhere')
+  w.sessionId = 'sess-9'
+  await freshProcess($, w)
+  expect(await openIds($)).toEqual([])
+})
+
+test('sticky chain: C closes all and quits, D takes the empty carry and quits, E takes D\'s carry with its switch on', async ($, on) => {
+  const w = world(on)
+  seedCarry(w, source('c-1', []), { mtime: 900 })
+  w.sessionId = 'd-1'
+  await freshProcess($, w)
+  w.fileClock = 1500
+  await $.session.end(endAs('prompt_input_exit', 'd-1'))
+  expect(carryOf(w, 'd-1')?.on).toBe(true)
+  // A third fresh session: what it finds is D's (empty, on) carry, and its switch ends up on.
+  const found = carryOf(w, 'd-1')
+  expect(found?.items).toEqual([])
+  expect(w.files.has(claimPath('c-1', 1, 'd-1'))).toBe(true)
+})
+
+test('Reply on a carried item brings Claude\'s words; the band says carried, then next session', async ($, on) => {
+  const w = world(on)
+  let src = source('src-1', [])
+  src = { ...src, items: [{ id: 1, kind: 'decide', text: 'Pick a cache', quote: 'SQLite or Postgres?', singleRec: true, source: 'judge', openedTurn: 0, status: 'open', firstSeenAt: 500 }], nextId: 2 }
+  seedCarry(w, src)
+  w.sessionId = 'sess-9'
+  let filled = ''
+  on('prompt.read', () => ({ value: { text: '', cursor: 0 } as never }))
+  on('prompt.fill', (_$, e) => {
+    filled = e.text
+    return { isFilled: true, cursor: 0 } as never
+  })
+  await freshProcess($, w)
+  const band = await $.ui.mount({ plugin: 'docket', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 6, bodyColumns: 100, scroll: { offset: 0, bodyRows: 6 }, view: {} }, viewport: { columns: 160, rows: 50, isFullscreen: true } })
+  expect((await band.find({ key: 'docket-indicator' }))?.props?.label).toBe('◇ 1 carried from your previous session here · click to show')
+  await band.unmount()
+  const ui = await mountPane($, 'terminal')
+  await ui.press({ key: 'reply-1' })
+  await ui.unmount()
+  await w.clock.settle()
+  expect(filled).toBe('Re: Pick a cache (from an earlier session; Claude had said "SQLite or Postgres?") — ')
+  await say($, w, 'hi')
+  const band2 = await $.ui.mount({ plugin: 'docket', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 6, bodyColumns: 100, scroll: { offset: 0, bodyRows: 6 }, view: {} }, viewport: { columns: 160, rows: 50, isFullscreen: true } })
+  expect(String((await band2.find({ key: 'docket-indicator' }))?.props?.label).includes('· ↪ next session')).toBe(true)
+  await band2.unmount()
 })

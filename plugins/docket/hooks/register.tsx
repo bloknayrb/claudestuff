@@ -43,6 +43,9 @@ let saveChain: Promise<void> = Promise.resolve()
 // Set while session.end drains: every drain, including one already running, stops starting writes once
 // the hook's shared bound runs low.
 let endBudget: (() => boolean) | null = null
+// Set for the whole of session.end: nothing lists files while it runs (a write timer queued by
+// switchAway could otherwise fire before endBudget is set).
+let isEnding = false
 // The message count and the opening prompt's text at turn.start: how turn.complete finds the turn.
 let turnStartLen: { turnId: string; len: number; opener: string } | undefined
 // Prompts typed into the running turn: user rows that do not open a turn (see capture.ts).
@@ -124,8 +127,10 @@ async function queueSave($: EngineInterface, s: DocketSession, isFinal: boolean)
   // A session that ever touched the switch persists it, turning it off included.
   if (s.everHadItem || s.items.length > 0 || s.carry.gen > 0) writes.push({ kind: 'snap', text: ledgerText(s) })
   // The carry: only an interactive session's, only once the switch was ever on (an untouched session
-  // writes no carry file, so it can't become a folder's newest), and not once a later session took it.
-  if (s.carry.gen > 0 && !s.carryTaken && s.root !== '' && (await readProc($)).isInteractive === true) writes.push({ kind: 'carry', text: carryText(s) })
+  // writes no carry file, so it can't become a folder's newest), and not once a later session took it,
+  // except the off record (switched off, or forgotten), which always lands: items must not stay on disk.
+  const isOffRecord = !s.carry.on
+  if (s.carry.gen > 0 && (!s.carryTaken || isOffRecord) && s.root !== '' && (await readProc($)).isInteractive === true) writes.push({ kind: 'carry', text: carryText(s) })
   if (writes.length === 0) return
   let isQueued = false
   await changeWriter($, w => {
@@ -183,7 +188,8 @@ async function writeOne($: EngineInterface, k: string, p: PendingWrite, w: Docke
     const dir = await rootDir($, base, p.root)
     if (dir === undefined) return dropPending($, k, p)
     // A later session already took this gen: stop writing it (never in session.end, which lists nothing).
-    if (endBudget === null && (await isOwnCarryTaken($, dir, p.sid, JSON.parse(p.text).gen as number))) return dropPending($, k, p)
+    const body0 = JSON.parse(p.text) as { gen: number; on: boolean }
+    if (body0.on && !isEnding && endBudget === null && (await isOwnCarryTaken($, dir, p.sid, body0.gen))) return dropPending($, k, p)
     path = `${dir}/carry/${p.sid}.${slotName(seq)}.json`
     body = carryEnvelope(p.sid, p.root, seq, await $.clock.now(), p.text)
   } else {
@@ -235,30 +241,30 @@ async function rootDir($: EngineInterface, base: string, root: string): Promise<
   if (root === '') return undefined
   const key = rootKey(root)
   const dir = `${base}/roots/${key}`
-  if (safeRoots.has(dir)) return dir
-  const lower = (p: string) => p.replace(/\\/g, '/').toLowerCase()
-  let real: string | undefined
-  try {
-    const st = await $.fs.stat(dir, { resolve: true })
-    if (st.isLink || st.kind !== 'dir' || st.realPath === undefined) {
-      $.ui.log(`docket: refused carry folder ${key} (not a plain folder)`, { to: 'debug' })
-      return undefined
-    }
-    real = st.realPath
-  } catch {
-    return dir
-  }
+  const lower = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
   let baseReal = base
   try {
     baseReal = (await $.fs.stat(base, { resolve: true })).realPath ?? base
   } catch {
-    // The base was just checked by its child; keep its own spelling.
+    // Not there yet: nothing under it can be a planted link either.
   }
-  if (!lower(real).startsWith(`${lower(baseReal).replace(/\/+$/, '')}/`)) {
-    $.ui.log(`docket: refused carry folder ${key} (resolves outside the base)`, { to: 'debug' })
-    return undefined
+  // Every folder level Docket writes through must, if it exists, be a plain folder that resolves to
+  // exactly where it should: a junction at roots/, roots/<key>, carry/ or claims/ must not redirect.
+  for (const rel of ['roots', `roots/${key}`, `roots/${key}/carry`, `roots/${key}/claims`]) {
+    const p = `${base}/${rel}`
+    if (safeRoots.has(p)) continue
+    let st: Awaited<ReturnType<EngineInterface['fs']['stat']>>
+    try {
+      st = await $.fs.stat(p, { resolve: true })
+    } catch {
+      continue
+    }
+    if (st.isLink || st.kind !== 'dir' || st.realPath === undefined || lower(st.realPath) !== lower(`${baseReal}/${rel}`)) {
+      $.ui.log(`docket: refused carry folder ${rel} (not a plain folder under the base)`, { to: 'debug' })
+      return undefined
+    }
+    safeRoots.add(p)
   }
-  safeRoots.add(dir)
   return dir
 }
 
@@ -314,7 +320,7 @@ async function retryClaim($: EngineInterface): Promise<void> {
 
 // The take: refuse a claimed gen; apply only if the docket is still on `target`; then claim.
 // Take-then-claim: a crash in between can duplicate later, never lose.
-async function takeCarry($: EngineInterface, src: CarrySource, items: readonly Item[], target: string): Promise<'taken' | 'claimed' | 'moved' | 'error'> {
+async function takeCarry($: EngineInterface, src: CarrySource, items: readonly Item[], target: string, isStartup = false): Promise<'taken' | 'claimed' | 'moved' | 'error'> {
   const base = await baseDir($)
   if (base === undefined) return 'error'
   const dir = await rootDir($, base, src.srcRoot)
@@ -326,6 +332,9 @@ async function takeCarry($: EngineInterface, src: CarrySource, items: readonly I
   const folder = folderName(src.srcRoot)
   const applied = await transact($, cur => {
     if (cur.sid !== target) return { session: cur, out: false }
+    // A startup take is for a fresh session only: re-checked here, at the write, in case an item or
+    // the switch changed while the claims were listed.
+    if (isStartup && (cur.everHadItem || cur.carry.gen !== 0 || cur.restored)) return { session: cur, out: false }
     const r = takeInto(cur, items, now, folder)
     return { session: { ...r.session, pendingClaim: src }, out: true }
   })
@@ -361,9 +370,10 @@ async function findCarry($: EngineInterface, root: string, self: string): Promis
     if (sid === self) return null
     const file = await readFile(sid)
     if (file === null) return { why: 'it could not be read' }
-    if (!file.on) return null
+    // Claims first: a taken source that later switched off still leads to where its items went.
     const who = await listClaims($, dir, sid, file.gen)
     if (who === 'error') return null
+    if (!file.on && !who.some(x => x !== self)) return null
     const others = who.filter(x => x !== self)
     if (others.length === 0) {
       const now = await $.clock.now()
@@ -405,7 +415,7 @@ async function maybeStartupTake($: EngineInterface): Promise<void> {
           if (found !== null && 'why' in found) {
             $.ui.log(`Docket: found a carry from your previous session here but didn't use it (${found.why}).`)
           } else if (found !== null) {
-            const r = await takeCarry($, { srcSid: found.file.sid, gen: found.file.gen, srcRoot: found.file.root }, found.file.items, target)
+            const r = await takeCarry($, { srcSid: found.file.sid, gen: found.file.gen, srcRoot: found.file.root }, found.file.items, target, true)
             if (r === 'claimed') $.ui.log("Docket: found a carry from your previous session here but didn't use it (another session already took it).")
           }
           await changeProc($, p => (p.startupSid === target ? { ...p, startupDecided: true } : p))
@@ -440,8 +450,9 @@ async function decideCapture($: EngineInterface, sid: string, source: string | u
   } catch (err) {
     await fail($, 'carry', err)
   } finally {
-    captureTaking = null
+    // Cleared before the in-flight flag drops, so no gap lets a second call start another take.
     await clearIt()
+    captureTaking = null
   }
 }
 
@@ -515,12 +526,21 @@ async function rehomeCore($: EngineInterface, sid: string): Promise<void> {
     return { session: { ...base, view: { ...freshSession().view, isPaneUp: isUp } }, out: cur }
   })
   if (old !== null && isRealSid(old.sid)) await switchAway($, old)
-  // Source notices on restore: a later session may have taken this carry while it was away.
   const now = await readSession($)
-  if (now.sid === sid && now.restored && now.carry.gen > 0) {
+  if (now.sid === sid && now.restored && now.carry.gen > 0 && !isEnding) {
     const base = await baseDir($)
     const dir = base === undefined ? undefined : await rootDir($, base, now.root)
-    if (dir !== undefined) await isOwnCarryTaken($, dir, sid, now.carry.gen, true)
+    if (dir !== undefined) {
+      // The carry slots' seq seeds the writer, as the snapshot's does: a resumed session's next carry
+      // write must win over what an earlier process left in the other slot.
+      const a = parseCarry(await readText($, `${dir}/carry/${sid}.a.json`), sid)
+      const b = parseCarry(await readText($, `${dir}/carry/${sid}.b.json`), sid)
+      const top = Math.max(a?.seq ?? 0, b?.seq ?? 0)
+      const ck = writeKey(sid, 'carry')
+      if (top > 0) await changeWriter($, w => ({ ...w, seqBy: withKey(w.seqBy, ck, Math.max(top, w.seqBy[ck] ?? 0)) }))
+      // Source notices on restore: a later session may have taken this carry while it was away.
+      await isOwnCarryTaken($, dir, sid, now.carry.gen, true)
+    }
   }
   redraw($)
 }
@@ -996,7 +1016,9 @@ export const register: Register = (on, options) => {
           const cur = (await readSession($)).sid
           if (cur !== at && isRealSid(cur) && cur !== sid) return
           const from = await $.session.id()
-          const isStartup = e.source === 'startup' && isSafeSid(sid)
+          // A startup for a sid other than the one this process already started on is stale bookkeeping.
+          const p0 = await readProc($)
+          const isStartup = e.source === 'startup' && isSafeSid(sid) && (p0.startupSid === null || p0.startupSid === sid)
           await changeProc($, p => ({
             ...p,
             classicSid: sid,
@@ -1017,6 +1039,7 @@ export const register: Register = (on, options) => {
   // The conversation ends: on /clear or /resume its docket is saved and the state starts over for the
   // next; on exit its final snapshot is written. Both drain the queue inside the hook's short bound.
   on('session.end', async ($, e, next) => {
+    isEnding = true
     try {
       await changeProc($, p => ({ ...p, endingSid: e.sessionId }))
       if (e.reason === 'clear' || e.reason === 'resume') {
@@ -1042,6 +1065,7 @@ export const register: Register = (on, options) => {
     try {
       return await next(e)
     } finally {
+      isEnding = false
       // Cleared only once the id has moved on; until then rehome's own check holds the old id off.
       try {
         if ((await $.session.id()) !== e.sessionId) await changeProc($, p => (p.endingSid === e.sessionId ? { ...p, endingSid: null } : p))

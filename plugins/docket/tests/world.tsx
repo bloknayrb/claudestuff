@@ -53,6 +53,10 @@ export type World = {
   failWrites: boolean
   reads: number
   root: string
+  // Folder path -> where fs.stat says it really resolves (a junction).
+  links: Map<string, string>
+  // Set: an fs.list of a path containing `match` waits for `gate` (a slow claim listing).
+  listGate: { match: string; gate: Promise<void> } | null
   // Set: every fs.write waits for this (a slow disk).
   writeGate: Promise<void> | null
 }
@@ -81,6 +85,8 @@ export function world(on: On): World {
     failWrites: false,
     reads: 0,
     root: 'C:/work',
+    links: new Map(),
+    listGate: null,
     writeGate: null,
   }
   mock.env(on, { USERPROFILE: 'C:\\Users\\tester' })
@@ -106,8 +112,9 @@ export function world(on: On): World {
     return { value: f.text }
   })
   on('classic.SessionStart', () => ({}))
-  on('fs.list', (_$, e) => {
+  on('fs.list', async (_$, e) => {
     const dir = `${norm(e.path ?? '').replace(/\/+$/, '')}/`
+    if (w.listGate !== null && dir.includes(w.listGate.match)) await w.listGate.gate
     const value = [...w.files.entries()]
       .filter(([p]) => p.startsWith(dir) && !p.slice(dir.length).includes('/'))
       .map(([p, f]) => ({ name: p.slice(dir.length), kind: 'file' as const, size: f.text.length, mtimeMs: f.mtimeMs, isLink: false }))
@@ -117,6 +124,9 @@ export function world(on: On): World {
   const isDir = (p: string) => [...w.files.keys()].some(k => k.startsWith(`${norm(p).replace(/\/+$/, '')}/`))
   on('fs.stat', (_$, e) => {
     const p = norm(e.path)
+    // A planted junction: the folder resolves somewhere else.
+    const link = w.links.get(p)
+    if (link !== undefined) return { value: { kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: false, realPath: link } }
     const f = w.files.get(p)
     if (f !== undefined) return { value: { kind: 'file' as const, size: f.text.length, mtimeMs: f.mtimeMs, isLink: false, realPath: p } }
     if (isDir(p)) return { value: { kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: false, realPath: p } }

@@ -180,14 +180,14 @@ function carryRow(els: Els, s: DocketSession, act: Actions) {
   const state = !s.carry.on
     ? 'off'
     : s.carryTaken
-      ? 'on · taken by a later session · turn off and on to carry again'
+      ? 'on · taken by a later session'
       : s.carrySaveFailed
         ? 'on · last save failed'
         : 'on'
   return (
     <Box key="docket-carry" flexDirection="row" gap={1} marginTop={1}>
       <Text dimColor>{`Carry to the next session in ${where}: ${state} ·`}</Text>
-      <Button key="docket-carry-toggle" plain label={s.carry.on ? 'turn off' : 'turn on'} onPress={() => act.toggleCarry()} />
+      <Button key="docket-carry-toggle" plain label={!s.carry.on ? 'turn on' : s.carryTaken ? 'carry again' : 'turn off'} onPress={() => act.toggleCarry()} />
     </Box>
   )
 }
