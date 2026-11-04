@@ -60,3 +60,20 @@ export function isBare(text: string): boolean {
   }
   return true
 }
+
+// Token shapes replaced before anything is sent. Word-bounded and length-floored, so "task-list" or
+// "desk-lamp" stay as they are.
+const SECRETS: RegExp[] = [
+  /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}\b/g,
+  /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g,
+  // sk- (Anthropic, OpenAI) and sk_ (Stripe-style live/test keys; the eval found one).
+  /\bsk[-_][A-Za-z0-9_-]{20,}/g,
+  /\bAKIA[0-9A-Z]{16}\b/g,
+  /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
+  /\bBearer\s+[A-Za-z0-9._~+/=-]{16,}/g,
+  /-----BEGIN [A-Z ]*KEY-----[\s\S]*?(?:-----END [A-Z ]*KEY-----|$)/g,
+]
+
+export function redact(text: string): string {
+  return SECRETS.reduce((t, re) => t.replace(re, '[redacted]'), text)
+}

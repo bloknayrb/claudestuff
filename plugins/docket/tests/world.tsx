@@ -47,7 +47,16 @@ export type World = {
   gate: Promise<void> | null
   // The plugin's status line as last set ($.ui.status); undefined when cleared.
   status: string | undefined
+  // An in-memory disk: path -> text and the mtime it was written at (fileClock).
+  files: Map<string, { text: string; mtimeMs: number }>
+  fileClock: number
+  failWrites: boolean
+  // Set: every fs.write waits for this (a slow disk).
+  writeGate: Promise<void> | null
 }
+
+export const BASE = 'C:/Users/tester/.claude/state/mods/docket'
+export const slotPath = (sid: string, slot: 'a' | 'b') => `${BASE}/sessions/${sid}.${slot}.json`
 
 export function world(on: On): World {
   const w: World = {
@@ -65,6 +74,10 @@ export function world(on: On): World {
     commands: [],
     gate: null,
     status: undefined,
+    files: new Map(),
+    fileClock: 1000,
+    failWrites: false,
+    writeGate: null,
   }
   mock.env(on, { USERPROFILE: 'C:\\Users\\tester' })
   on('session.id', () => ({ value: w.sessionId }))
@@ -73,10 +86,29 @@ export function world(on: On): World {
     w.commands.push(e.name)
     return { value: { command: e.name } }
   })
-  on('fs.write', (_$, e) => {
-    w.writes.push({ path: e.path, text: e.text })
+  // The engine hands fs hooks the path in the platform's form; the fake disk keys on forward slashes.
+  const norm = (p: string) => p.replace(/\\/g, '/')
+  on('fs.write', async (_$, e) => {
+    if (w.failWrites) throw new Error('blocked by a guard')
+    if (w.writeGate !== null) await w.writeGate
+    w.writes.push({ path: norm(e.path), text: e.text })
+    w.files.set(norm(e.path), { text: e.text, mtimeMs: w.fileClock })
     return { value: undefined }
   })
+  on('fs.read', (_$, e) => {
+    const f = w.files.get(norm(e.path))
+    if (f === undefined) throw new Error(`no file ${e.path}`)
+    return { value: f.text }
+  })
+  on('classic.SessionStart', () => ({}))
+  on('fs.list', (_$, e) => {
+    const dir = `${norm(e.path ?? '').replace(/\/+$/, '')}/`
+    const value = [...w.files.entries()]
+      .filter(([p]) => p.startsWith(dir) && !p.slice(dir.length).includes('/'))
+      .map(([p, f]) => ({ name: p.slice(dir.length), kind: 'file' as const, size: f.text.length, mtimeMs: f.mtimeMs, isLink: false }))
+    return { value }
+  })
+  on('session.root', () => ({ value: 'C:/work' }))
   on('ui.log', (_$, e) => {
     w.logs.push(`${e.to ?? 'transcript'}: ${e.text}`)
     return { value: undefined }

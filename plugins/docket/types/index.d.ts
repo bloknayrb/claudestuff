@@ -1,5 +1,6 @@
-// Docket's state contract. One value, docket.session, kept for the session ($.state survives a hot
-// reload; /clear and /resume reset it).
+// Docket's state contract. docket.session is the current conversation's docket ($.state survives a
+// hot reload; a /clear or /resume replaces it, after it is saved to disk). docket.proc and
+// docket.writer are process-scoped bookkeeping a switch never replaces.
 
 export type ItemKind = 'decide' | 'do'
 export type ItemStatus = 'open' | 'resolved' | 'dismissed'
@@ -28,7 +29,17 @@ export type Item = {
   // Stamped on Reopen, so the evidence that closed the item cannot close it again.
   reopenedAtSeq?: number
   reopenedAtTurn?: number
+  // Where the item was first raised, "<sid>:<id>"; kept when carried (v0.3), so it is never brought in
+  // twice. Older items read it as `${sid}:${id}`.
+  origin?: string
+  // When the item first appeared, kept through every carry: the honest age.
+  firstSeenAt?: number
+  // Set when the item arrived through a carry (v0.3).
+  carriedAt?: number
 }
+
+// The carry switch (v0.3). gen goes up each time it is turned on; { on: false, gen: 0 } until then.
+export type CarryState = { on: boolean; gen: number }
 
 // One thing the user typed: a prompt, or a `!` shell command (text starts with '!').
 export type UserEntry = { seq: number; text: string; afterTurn: number }
@@ -72,10 +83,47 @@ export type DocketSession = {
   lastFinal: string
   lastCheck: LastCheck
   view: ViewState
+  // The conversation this docket belongs to. 'pending' until the session is known (every new process
+  // starts there); '' only for a live v0.1 value from before the upgrade, which is adopted.
+  sid: string
+  // $.session.root() at the first landing; a later /cd doesn't move it.
+  root: string
+  // Saved in the snapshot: a session that never had an item (and never touched carry) writes nothing.
+  everHadItem: boolean
+  carry: CarryState
+  // Not saved: this landing loaded a snapshot or adopted a v0.1 value.
+  restored: boolean
+}
+
+// Process-scoped: survives a hot reload, and is never replaced by a /clear or /resume.
+export type DocketProc = {
+  // null until session.start says.
+  isInteractive: boolean | null
+  // The id session.end is ending, while it is still current.
+  endingSid: string | null
+  // Bumped by every switch and every session.start: a check that began before is thrown away.
+  epoch: number
+  saveToastShown: boolean
+}
+
+// One write the writer still owes: the latest payload for (sid, kind).
+export type PendingWrite = { sid: string; root: string; kind: 'snap'; text: string; isFinal: boolean }
+
+// Process-scoped writer bookkeeping, keyed "<sid>|<kind>" where per (sid, kind).
+export type DocketWriter = {
+  seqBy: Record<string, number>
+  lastText: Record<string, string>
+  pending: Record<string, PendingWrite>
+  // The root each sid was last written with, so the writer's in-memory text can be restored whole.
+  rootBy: Record<string, string>
+  // Sids left by a switch: only a final is written for them until a rehome reopens one.
+  closed: Record<string, true>
+  // Sids /docket forget erased, with the nextId at that moment: the next new item lifts it.
+  forgotten: Record<string, number>
 }
 
 declare module 'claude-code' {
   interface PluginState {
-    docket: { session: DocketSession }
+    docket: { session: DocketSession; proc: DocketProc; writer: DocketWriter }
   }
 }
