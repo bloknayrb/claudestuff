@@ -1008,7 +1008,7 @@ async function newCommand($: EngineInterface, origin: string, rest: string): Pro
   if (why !== '') return why
   // A Reply here line for another open item further down ("…\nRe: B — no") is an answer for this
   // session: it must not leave with the reply.
-  const other = s.items.find(i => i.status === 'open' && i.id !== item.id && parsed.reply.includes(`\nRe: ${i.text} —`))
+  const other = s.items.find(i => i.status === 'open' && i.id !== item.id && parsed.reply.includes(`\n${leadHere(i).trimEnd()}`))
   if (other !== undefined) return `Docket: your reply also answers "${clip(other.text, 50)}" here; send that part on its own first.`
   const root = s.root !== '' ? s.root : await $.session.root()
   const tools = await launchTools($)
@@ -1097,9 +1097,11 @@ async function pickUpFrom($: EngineInterface, nonce: string): Promise<void> {
   if (normRoot(h.root) !== normRoot(root) || now - h.createdAt > HANDOFF_MAX_AGE_MS) return settle(STALE_LINE)
   await changeProc($, p => ({ ...p, handoffContext: { itemText: h.itemText, quote: h.quote } }))
   $.ui.log(`Docket: this window answers "${clip(h.itemText, 60)}".`)
+  // Set once the reply is in the box or shown in the transcript: nothing after that shows it again.
+  let isShown = false
   const done = async (): Promise<void> => {
     await $.fs.write(path, takenText(h.nonce, h.fromSid, h.itemId)).catch(err => fail($, 'handoff', err))
-    await changeProc($, p => ({ ...p, handoffPicked: true }))
+    await changeProc($, p => ({ ...p, handoffPicked: true })).catch(err => fail($, 'handoff', err))
     isPickingUp = false
   }
   // A dialog (trust, MCP approval) can hold the keys in a fresh window: retried until it lands. Stopped
@@ -1116,6 +1118,7 @@ async function pickUpFrom($: EngineInterface, nonce: string): Promise<void> {
       $.ui.log(`docket: handoff fill: ${err instanceof Error ? err.message : String(err)}`, { to: 'debug' })
     }
     if (isFilled) {
+      isShown = true
       $.ui.log('Docket: your reply is in the box; Docket attaches the item for Claude to see when you send it.')
       return done()
     }
@@ -1123,16 +1126,18 @@ async function pickUpFrom($: EngineInterface, nonce: string): Promise<void> {
       $.clock.after(FILL_RETRY_MS, () => void guard($, 'handoff', attemptSafely()))
       return
     }
+    isShown = true
     $.ui.log(`Docket: couldn't put your reply in the box; here it is:\n${h.reply}`)
     await done()
   }
-  // Whatever else throws, the reply is shown rather than lost.
+  // Whatever else throws, the reply is shown rather than lost (once).
   const attemptSafely = async (): Promise<void> => {
     try {
       await attempt()
     } catch (err) {
       isPickingUp = false
-      $.ui.log(`Docket: couldn't put your reply in the box; here it is:\n${h.reply}`)
+      if (!isShown) $.ui.log(`Docket: couldn't put your reply in the box; here it is:\n${h.reply}`)
+      isShown = true
       throw err
     }
   }

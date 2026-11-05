@@ -575,3 +575,18 @@ test('the same fresh window without DOCKET_HANDOFF does take it (the control)', 
   await w.clock.settle()
   expect((await openIds($)).length).toBe(2)
 })
+
+test("a carried item's Reply here answer can't ride out in another item's Reply new", async ($, on) => {
+  const w = world(on)
+  const src = source('sess-0', ['Check DNS'])
+  seedCarry(w, { ...src, items: src.items.map(i => ({ ...i, quote: 'Check the DNS?' })) })
+  await freshProcess($, w)
+  await command($, 'add Renew the domain')
+  const ids = await openIds($)
+  expect(ids.length).toBe(2)
+  const carriedLead = 'Re: Check DNS (from an earlier session; Claude had said "Check the DNS?") — '
+  const newId = Math.max(...ids)
+  const r = await $.command.run({ command: 'docket', args: `new #${newId} — yes\n${carriedLead}no`, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 160 } } as never)
+  expect(String((r as { text?: string }).text).includes('also answers "Check DNS"')).toBe(true)
+  expect((await openIds($)).length).toBe(2)
+})
