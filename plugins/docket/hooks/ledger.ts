@@ -2,7 +2,7 @@
 
 import type { ClaudeEntry, DocketSession, Item, ToolLine, UserEntry } from '../types'
 import type { CheckedResolve, Snapshot, Verdict } from './judge'
-import { clip, isBare, normalise, occursIn, redact, sanitise } from './text'
+import { clip, isBare, isSkip, normalise, occursIn, redact, sanitise } from './text'
 
 // Entry redaction: the pane, the judge and the disk all see the same text.
 const clean = (text: string, max: number): string => sanitise(redact(text), max)
@@ -39,6 +39,7 @@ export function freshSession(): DocketSession {
     carrySaveFailed: false,
     carriedNotice: null,
     pendingClaim: null,
+    walkFocus: null,
   }
 }
 
@@ -102,7 +103,11 @@ export function refusal(s: DocketSession, item: Item, r: CheckedResolve): string
     // the judge quoted ("ok" from "ok thanks"). The exception is a reply that names the item itself, as
     // the Reply button's "Re: <item> — yes" does.
     const namesItem = normalise(e.text).toLowerCase().includes(normalise(`Re: ${item.text} —`).toLowerCase())
-    if ((isBare(r.evidence) || isBare(e.text)) && !namesItem) {
+    // A walk (v0.4): "skip", "later" and the like leave the walked item open, whatever the judge read.
+    if (e.focusId !== undefined && isSkip(e.text)) return 'skip-in-walk'
+    // The item Claude presented, alone and restated, in the turn this reply answers (stamped at addUser).
+    const isFocused = e.focusId === item.id
+    if ((isBare(r.evidence) || isBare(e.text)) && !namesItem && !isFocused) {
       // A dismissed sibling no longer makes the reply ambiguous.
       const openedThen = s.items.filter(i => i.source === 'judge' && i.openedTurn === e.afterTurn && i.status !== 'dismissed')
       const isOnly = openedThen.length === 1 && openedThen[0]?.id === item.id
@@ -180,6 +185,11 @@ export function markDone(s: DocketSession, id: number, now: number): DocketSessi
   return close(s, [id], 'you', new Map([[id, 'marked done']]), now)
 }
 
+// Reply new (v0.4): the user sent this item to a new window. Theirs, as Done is.
+export function handOff(s: DocketSession, id: number, now: number): DocketSession {
+  return close(s, [id], 'you', new Map([[id, 'sent to a new window']]), now)
+}
+
 export function clearAll(s: DocketSession, now: number): DocketSession {
   const ids = openItems(s).map(i => i.id)
   if (ids.length === 0) return s
@@ -206,8 +216,31 @@ export function addManual(s: DocketSession, text: string, now = 0): DocketSessio
   return { ...s, items: [...s.items, item], nextId: s.nextId + 1, everHadItem: true }
 }
 
+// The walk item a reply typed now answers: the one item Claude presented (through the list tool) in the
+// turn that just ended, and restated in that turn's final message. A reply typed while that turn still
+// ran has afterTurn from the turn before, so it gets none.
+export function walkFocusFor(s: DocketSession): number | undefined {
+  const f = s.walkFocus
+  if (f === null || f.turn !== s.turn || f.ids.length !== 1) return undefined
+  const item = s.items.find(i => i.id === f.id && i.status === 'open')
+  if (item === undefined) return undefined
+  return normalise(s.lastFinal).toLowerCase().includes(normalise(item.text).toLowerCase()) ? item.id : undefined
+}
+
+// A walk is going on: Claude presented an item this turn or the one before.
+export const isWalking = (s: DocketSession): boolean => s.walkFocus !== null && s.turn - s.walkFocus.turn <= 1
+
+// Records a presenting call (v0.4) for the turn in progress, s.turn + 1 (turn counts ended turns).
+export function present(s: DocketSession, id: number): DocketSession {
+  const turn = s.turn + 1
+  const prior = s.walkFocus !== null && s.walkFocus.turn === turn ? s.walkFocus.ids : []
+  const ids = prior.includes(id) ? prior : [...prior, id]
+  return { ...s, walkFocus: { id, turn, ids } }
+}
+
 export function addUser(s: DocketSession, text: string): DocketSession {
-  const entry: UserEntry = { seq: s.nextSeq, text: clip(text, 20000), afterTurn: s.turn }
+  const focusId = walkFocusFor(s)
+  const entry: UserEntry = { seq: s.nextSeq, text: clip(text, 20000), afterTurn: s.turn, ...(focusId === undefined ? {} : { focusId }) }
   return { ...s, pendingUser: [...s.pendingUser, entry].slice(-KEEP_USER), nextSeq: s.nextSeq + 1 }
 }
 

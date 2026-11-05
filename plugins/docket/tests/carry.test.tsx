@@ -549,3 +549,29 @@ test('Reply on a carried item brings Claude\'s words; the band says carried, the
   expect(String((await band2.find({ key: 'docket-indicator' }))?.props?.label).includes('· ↪ next session')).toBe(true)
   await band2.unmount()
 })
+
+// v0.4: a window Reply new opened answers one item; it must never take the folder's carry.
+const HANDOFF = '0123456789abcdef0123456789abcdef'
+for (const order of ['classic first', 'session.start first'] as const) {
+  test(`a Reply new window never takes the folder's carry (${order})`, async ($, on) => {
+    const w = world(on, { env: { DOCKET_HANDOFF: HANDOFF } })
+    seedCarry(w, source('sess-0', ['Renew the domain', 'Rotate the key']))
+    if (order === 'classic first') {
+      await freshProcess($, w)
+    } else {
+      await start($)
+      await classic($, w, 'startup', w.sessionId)
+    }
+    await w.clock.settle()
+    expect(await openIds($)).toEqual([])
+    expect(w.files.has(claimPath('sess-0', 1, 'sess-1'))).toBe(false)
+  })
+}
+
+test('the same fresh window without DOCKET_HANDOFF does take it (the control)', async ($, on) => {
+  const w = world(on)
+  seedCarry(w, source('sess-0', ['Renew the domain', 'Rotate the key']))
+  await freshProcess($, w)
+  await w.clock.settle()
+  expect((await openIds($)).length).toBe(2)
+})

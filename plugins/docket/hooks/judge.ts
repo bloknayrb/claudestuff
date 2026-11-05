@@ -1,7 +1,7 @@
 // Pure: what the judge model is sent, and how its reply is checked. Nothing here takes $.
 
 import type { ClaudeEntry, Item, ItemKind, ToolLine, UserEntry } from '../types'
-import { clip, normalise, occursIn, redact } from './text'
+import { clip, normalise, occursIn, redact, SKIP_PHRASES } from './text'
 
 // redact moved to text.ts (ledger entry points and persist.ts use it too); re-exported for callers.
 export { redact }
@@ -46,6 +46,10 @@ Reply with exactly this shape, where "id" is the item's number from <open_items>
 {"add":[{"kind":"decide","text":"...","quote":"...","singleRec":false}],"resolve":[{"id":3,"by":"you","note":"...","evidence":"..."}]}
 Empty arrays when there is nothing.`
 
+// Sent while Claude walks the user through the docket (v0.4): its restatements are not new asks. In the
+// prompt, not RULES, so the cached system block stays the same.
+export const WALK_NOTE = `Claude is walking the user through their open items. Restating or recommending on an open item is not a new ask. ${SKIP_PHRASES.map(p => `'${p}'`).join(', ')} leaves an item open.`
+
 export const RESOLVE_NOTE = 'This is a resolve-only check: return "add": [] and only resolves. <claude_latest> is Claude\'s most recent message, for reading what a short or numbered reply answers.'
 
 export type JudgeInput = {
@@ -58,6 +62,8 @@ export type JudgeInput = {
   toolAsked: readonly string[]
   // Claude's last final message: sent with a resolve-only check as context, never as evidence.
   latest?: string
+  // A walk through the docket is going on (v0.4).
+  walking?: boolean
 }
 
 // Exactly what was sent, redacted and cut: the verbatim checks run against this and nothing else.
@@ -81,8 +87,9 @@ function itemLine(item: Item, withQuote: boolean): string {
   return withQuote && item.quote !== '' ? `${base} (Claude: "${clip(item.quote, 200)}")` : base
 }
 
-function render(mode: Mode, claude: ClaudeEntry[], tools: ToolLine[], user: UserEntry[], open: readonly Item[], closed: readonly Item[], toolAsked: readonly string[], withQuotes: boolean, latest: string): string {
+function render(mode: Mode, claude: ClaudeEntry[], tools: ToolLine[], user: UserEntry[], open: readonly Item[], closed: readonly Item[], toolAsked: readonly string[], withQuotes: boolean, latest: string, walking: boolean): string {
   const parts: string[] = []
+  if (walking) parts.push(WALK_NOTE)
   if (mode === 'resolve') {
     parts.push(RESOLVE_NOTE)
     if (latest !== '') parts.push(`<claude_latest>\n${latest}\n</claude_latest>`)
@@ -110,7 +117,7 @@ export function buildPrompt(input: JudgeInput): Built {
   let withQuotes = true
   // The latest message rides only with a resolve-only check, redacted and held to a tail.
   const latest = input.mode === 'resolve' ? redact(input.latest ?? '').slice(-LATEST_CHARS) : ''
-  const size = () => render(input.mode, claude, tools, user, input.open, input.closed, input.toolAsked, withQuotes, latest).length
+  const size = () => render(input.mode, claude, tools, user, input.open, input.closed, input.toolAsked, withQuotes, latest, input.walking === true).length
   if (size() > BUDGET_CHARS) withQuotes = false
   while (size() > BUDGET_CHARS) {
     const i = claude.findIndex(c => !c.isFinal)
@@ -125,7 +132,7 @@ export function buildPrompt(input: JudgeInput): Built {
     claude = claude.map(c => (c.text.length > room ? { ...c, text: c.text.slice(-room) } : c))
     user = user.map(u => (u.text.length > USER_KEEP_CHARS ? { ...u, text: u.text.slice(-USER_KEEP_CHARS) } : u))
   }
-  const prompt = render(input.mode, claude, tools, user, input.open, input.closed, input.toolAsked, withQuotes, latest)
+  const prompt = render(input.mode, claude, tools, user, input.open, input.closed, input.toolAsked, withQuotes, latest, input.walking === true)
   return {
     prompt,
     snapshot: {

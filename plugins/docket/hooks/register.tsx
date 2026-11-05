@@ -7,10 +7,11 @@ import { CARRY_MAX_AGE_MS, carryEnvelope, carryText, claimers, claimText, folder
 import type { CarryFile } from './carry'
 import { buildPrompt, parseVerdict, RULES } from './judge'
 import type { Mode } from './judge'
-import { addManual, addToolAsked, addTurn, addUser, applyVerdict, clearAll, closedForJudge, closeGroups, dismiss, freshSession, markDone, normalize, openItems, reopen } from './ledger'
+import { addManual, addToolAsked, addTurn, addUser, applyVerdict, clearAll, closedForJudge, closeGroups, dismiss, freshSession, handOff, isWalking, markDone, normalize, openItems, present, reopen } from './ledger'
 import { envelope, freshProc, freshWriter, isRealSid, isSafeSid, ledgerText, normProc, normWriter, parseSlot, pickSlot, restore, RETAIN_MS, slotName, tombstone, withKey, withoutKey, writeKey } from './persist'
+import { blankText, contextBlock, HANDOFF_MAX_AGE_MS, isNonce, isRootSafe, label, launchScript, leadHere, leadNew, newNonce, parseHandoff, parseNewArgs, replyRefusal, tailAfter, takenText, waitingText, wtArgv } from './spawn'
 import { clip } from './text'
-import { ARM_DELAY_MS, indicatorText, indicatorTree, PANE_COLUMNS, PANE_ID, PANE_TITLE, paneTree } from './ui'
+import { ARM_DELAY_MS, indicatorText, indicatorTree, listText, PANE_COLUMNS, PANE_ID, PANE_TITLE, paneTree } from './ui'
 import type { Actions } from './ui'
 
 const MODELS = ['haiku', 'sonnet', 'opus'] as const
@@ -242,6 +243,13 @@ async function rootDir($: EngineInterface, base: string, root: string): Promise<
   if (root === '') return undefined
   const key = rootKey(root)
   const dir = `${base}/roots/${key}`
+  // Every folder level Docket writes through must, if it exists, be a plain folder that resolves to
+  // exactly where it should: a junction at roots/, roots/<key>, carry/ or claims/ must not redirect.
+  return (await safeUnder($, base, ['roots', `roots/${key}`, `roots/${key}/carry`, `roots/${key}/claims`])) ? dir : undefined
+}
+
+// True when each of `rels` under base is absent or a plain folder that resolves to exactly base/rel.
+async function safeUnder($: EngineInterface, base: string, rels: readonly string[]): Promise<boolean> {
   const lower = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
   let baseReal = baseRealCache ?? base
   if (baseRealCache === undefined) {
@@ -252,9 +260,7 @@ async function rootDir($: EngineInterface, base: string, root: string): Promise<
       // Not there yet: nothing under it can be a planted link either.
     }
   }
-  // Every folder level Docket writes through must, if it exists, be a plain folder that resolves to
-  // exactly where it should: a junction at roots/, roots/<key>, carry/ or claims/ must not redirect.
-  for (const rel of ['roots', `roots/${key}`, `roots/${key}/carry`, `roots/${key}/claims`]) {
+  for (const rel of rels) {
     const p = `${base}/${rel}`
     if (safeRoots.has(p)) continue
     let st: Awaited<ReturnType<EngineInterface['fs']['stat']>>
@@ -264,12 +270,12 @@ async function rootDir($: EngineInterface, base: string, root: string): Promise<
       continue
     }
     if (st.isLink || st.kind !== 'dir' || st.realPath === undefined || lower(st.realPath) !== lower(`${baseReal}/${rel}`)) {
-      $.ui.log(`docket: refused carry folder ${rel} (not a plain folder under the base)`, { to: 'debug' })
-      return undefined
+      $.ui.log(`docket: refused folder ${rel} (not a plain folder under the base)`, { to: 'debug' })
+      return false
     }
     safeRoots.add(p)
   }
-  return dir
+  return true
 }
 
 async function listClaims($: EngineInterface, dir: string, srcSid: string, gen: number): Promise<string[] | 'error'> {
@@ -403,6 +409,9 @@ async function maybeStartupTake($: EngineInterface): Promise<void> {
   const proc = await readProc($)
   const s = await readSession($)
   if (proc.startupDecided || proc.isInteractive !== true || proc.startupSid === null || s.sid !== proc.startupSid) return
+  // A window Reply new opened (v0.4) answers one item: it never takes the folder's carry, or every Reply
+  // new with carry on would pull the whole docket across. Latched with isInteractive, so nothing gets here first.
+  if (proc.handoffNonce !== null) return
   if (s.restored || s.everHadItem || s.carry.gen !== 0) return
   // Probe (g): mods are fed classic.SessionStart startup, before session.start. --continue/--resume
   // arrive as source resume, so they never take.
@@ -414,6 +423,7 @@ async function maybeStartupTake($: EngineInterface): Promise<void> {
       'carry',
       (async () => {
         try {
+          if ((await readProc($)).handoffNonce !== null) return
           const target = s.sid
           const found = await findCarry($, s.root, target)
           if (found !== null && 'why' in found) {
@@ -683,6 +693,8 @@ async function forget($: EngineInterface): Promise<string> {
   })
   // The chain must never stay rejected: later saves (and session.end's finals) run after it.
   saveChain = erase.catch(err => fail($, 'forget', err))
+  // Reply new handoffs this session wrote (v0.4): their replies go too.
+  await blankHandoffs($, h => h.fromSid === s.sid).catch(err => fail($, 'forget', err))
   try {
     await erase
   } catch (err) {
@@ -716,6 +728,8 @@ async function prune($: EngineInterface): Promise<void> {
       .catch(err => $.ui.log(`docket: prune write failed: ${err instanceof Error ? err.message : String(err)}`, { to: 'debug' }))
   }
   await saveChain.catch(() => undefined)
+  // Reply new handoffs (v0.4) no window took within their age: the reply is blanked from disk.
+  await blankHandoffs($, h => now - h.mtimeMs > HANDOFF_MAX_AGE_MS)
 }
 
 async function change($: EngineInterface, fn: (s: DocketSession) => DocketSession): Promise<DocketSession> {
@@ -857,7 +871,7 @@ async function runCheck($: EngineInterface, mode: Mode, model: string): Promise<
   const open = openItems(s)
   if (mode === 'resolve' && (open.length === 0 || s.pendingUser.length === 0)) return
   if (mode === 'full' && s.claude.length === 0 && s.tools.length === 0 && s.pendingUser.length === 0) return
-  const built = buildPrompt({ mode, claude: s.claude, tools: s.tools, user: s.pendingUser, open, closed: closedForJudge(s), toolAsked: s.toolAsked, latest: s.lastFinal })
+  const built = buildPrompt({ mode, claude: s.claude, tools: s.tools, user: s.pendingUser, open, closed: closedForJudge(s), toolAsked: s.toolAsked, latest: s.lastFinal, walking: isWalking(s) })
   const mine = new AbortController()
   controller = mine
   let r: Awaited<ReturnType<EngineInterface['model']['complete']>>
@@ -907,24 +921,289 @@ async function runCheck($: EngineInterface, mode: Mode, model: string): Promise<
   if (result.added > 0 || result.resolved > 0) await pauseKeys($)
 }
 
+// --- Reply new (v0.4) ---
+
+const NOT_TAKING = 'Docket: the prompt box is not taking text right now.'
+const NEEDS_WT = 'Docket: Reply new needs Windows Terminal and PowerShell 7 here.'
+const STALE_LINE = "Docket: this window was opened for a reply, but the handoff was missing or stale; your reply is in the original window's history."
+const LAUNCH_TIMEOUT_MS = 15000
+const FILL_RETRY_MS = 1000
+const FILL_FOR_MS = 120000
+
+type LaunchTools = { wt: string; pwsh: string }
+
+// Windows Terminal and PowerShell 7, found by listing WindowsApps (their entries there are
+// app-execution aliases, which a stat may not follow). null where either is missing: not Windows, or
+// not installed.
+async function launchTools($: EngineInterface): Promise<LaunchTools | null> {
+  const local = await $.env.get('LOCALAPPDATA')
+  if (local === undefined || local === '') return null
+  const apps = `${local.replace(/\\/g, '/').replace(/\/+$/, '')}/Microsoft/WindowsApps`
+  let names: string[] = []
+  try {
+    names = (await $.fs.list(apps)).map(x => x.name.toLowerCase())
+  } catch {
+    return null
+  }
+  if (!names.includes('wt.exe')) return null
+  const win = (p: string) => p.replace(/\//g, '\\')
+  if (names.includes('pwsh.exe')) return { wt: win(`${apps}/wt.exe`), pwsh: win(`${apps}/pwsh.exe`) }
+  const installed = 'C:/Program Files/PowerShell/7/pwsh.exe'
+  try {
+    if ((await $.fs.stat(installed)).kind === 'file') return { wt: win(`${apps}/wt.exe`), pwsh: win(installed) }
+  } catch {
+    // Not installed there either.
+  }
+  return null
+}
+
+// Whether this window draws Reply new: interactive, a root wt can take, and both programs present.
+async function checkReplyNew($: EngineInterface): Promise<void> {
+  const proc = await readProc($)
+  const s = await readSession($)
+  const root = s.root !== '' ? s.root : await $.session.root()
+  const ok = proc.isInteractive === true && isRootSafe(root) && (await launchTools($)) !== null
+  await changeProc($, p => (p.canReplyNew === ok ? p : { ...p, canReplyNew: ok }))
+  redraw($)
+}
+
+// Reply new: "/docket new #<id> (<label>) — " in an empty box, or in place of this item's own Reply
+// here lead (its typed tail kept). Anything else in the box stays: the command has to start it.
+async function replyNewTo($: EngineInterface, id: number): Promise<void> {
+  const item = (await readSession($)).items.find(i => i.id === id && i.status === 'open')
+  if (item === undefined) return
+  const lead = leadNew(item)
+  const box = await $.prompt.read()
+  const tail = box.text.trim() === '' ? '' : (tailAfter(box.text, leadHere(item)) ?? tailAfter(box.text, lead))
+  if (tail === undefined) {
+    $.ui.toast('Docket: Reply new needs an empty box; send or clear your draft first.')
+    return
+  }
+  const filled = await $.prompt.fill({ text: `${lead}${tail}` })
+  if (!filled.isFilled) {
+    $.ui.toast(NOT_TAKING)
+    return
+  }
+  $.ui.toast('Docket: type your reply after the dash; Enter opens it in a new window.')
+}
+
+// /docket new: every check first, then the handoff file, then the close, then the launch.
+async function newCommand($: EngineInterface, origin: string, rest: string): Promise<string> {
+  // The model and other plugins can't open windows or close the user's items.
+  if (origin !== 'composer') return 'Docket: Reply new only runs from your own prompt.'
+  if ((await readProc($)).isInteractive !== true) return 'Docket: Reply new works only in an interactive session.'
+  const parsed = parseNewArgs(rest)
+  if (parsed === undefined) return 'Docket: use the Reply new button on an item in the pane.'
+  const s = await readSession($)
+  if (!isRealSid(s.sid)) return "Docket: the session isn't known yet; try again in a moment."
+  const item = s.items.find(i => i.id === parsed.id && i.status === 'open')
+  if (item === undefined) return `Docket: #${parsed.id} isn't open (it may have just closed).`
+  // Prompt history is shared across sessions: a recalled line must not hand off another session's #4.
+  if (parsed.label !== undefined && parsed.label !== label(item)) return `Docket: #${parsed.id} here is "${label(item)}", not the one you replied to.`
+  const why = replyRefusal(parsed.reply)
+  if (why !== '') return why
+  const root = s.root !== '' ? s.root : await $.session.root()
+  const tools = await launchTools($)
+  const base = await baseDir($)
+  if (tools === null || !isRootSafe(root) || base === undefined) return NEEDS_WT
+  if (!(await safeUnder($, base, ['handoff']))) return 'Docket: refused the handoff folder (it is not a plain folder); nothing changed.'
+  const nonce = newNonce(Math.random)
+  const path = `${base}/handoff/${nonce}.json`
+  if (await $.fs.exists(path).catch(() => true)) return "Docket: couldn't write the handoff (the name is taken); nothing changed."
+  const now = await $.clock.now()
+  try {
+    await $.fs.write(path, waitingText({ nonce, fromSid: s.sid, itemId: item.id, root, itemText: item.text, quote: item.quote, reply: parsed.reply, createdAt: now }))
+  } catch (err) {
+    return `Docket: couldn't write the handoff (${clip(err instanceof Error ? err.message : String(err), 80)}); nothing changed.`
+  }
+  // His Enter is the decision: the item closes now, in this session (Reopen undoes).
+  await change($, cur => (cur.sid === s.sid ? handOff(cur, item.id, now) : cur))
+  await pauseKeys($)
+  const argv = wtArgv(tools.wt, tools.pwsh, root, item.text, launchScript(nonce, await $.env.get('CLAUDE_CONFIG_DIR')))
+  $.clock.after(0, () => void guard($, 'launch', launch($, argv, base)))
+  return `Docket: opening a new window for "${clip(item.text, 50)}". Closed here; if no window appears, Reopen it under "closed · show".`
+}
+
+// The item is already closed: any sign the window didn't open is said, with the way back.
+async function launch($: EngineInterface, argv: string[], cwd: string): Promise<void> {
+  let why = ''
+  try {
+    const r = await $.process.run(argv, { cwd, timeoutMs: LAUNCH_TIMEOUT_MS })
+    if (r.exitCode !== 0) why = `exit ${r.exitCode}`
+  } catch (err) {
+    why = err instanceof Error ? err.message : String(err)
+  }
+  if (why === '') return
+  $.ui.log(`docket: launch: ${why}`, { to: 'debug' })
+  $.ui.toast(
+    /time/i.test(why)
+      ? `Docket: Windows Terminal may not have started (${clip(why, 60)}); if no window opened, Reopen the item under "closed · show".`
+      : `Docket: Windows Terminal didn't start (${clip(why, 60)}); Reopen the item under "closed · show".`,
+  )
+}
+
+// In a window Reply new opened: put the reply in the box and hold the item's context for its first
+// prompt. Once per process (handoffPicked), so a hot reload doesn't fill twice.
+async function pickUp($: EngineInterface): Promise<void> {
+  const proc = await readProc($)
+  const nonce = proc.handoffNonce
+  if (nonce === null || proc.handoffPicked) return
+  await changeProc($, p => ({ ...p, handoffPicked: true }))
+  const base = await baseDir($)
+  if (base === undefined || !(await safeUnder($, base, ['handoff']))) {
+    $.ui.log(STALE_LINE)
+    return
+  }
+  const path = `${base}/handoff/${nonce}.json`
+  const h = parseHandoff(await readText($, path), nonce)
+  if (h === null) {
+    $.ui.log(STALE_LINE)
+    return
+  }
+  // Already filled (a second claude started in the tab): nothing to say.
+  if (h.state === 'taken') return
+  const s = await readSession($)
+  const root = s.root !== '' ? s.root : await $.session.root()
+  const now = await $.clock.now()
+  if (normRoot(h.root) !== normRoot(root) || now - h.createdAt > HANDOFF_MAX_AGE_MS) {
+    $.ui.log(STALE_LINE)
+    return
+  }
+  await changeProc($, p => ({ ...p, handoffContext: { itemText: h.itemText, quote: h.quote } }))
+  $.ui.log(`Docket: this window answers "${clip(h.itemText, 60)}". Your reply is in the box; Docket attaches the item for Claude to see when you send it.`)
+  const done = () => $.fs.write(path, takenText(h.nonce, h.fromSid, h.itemId)).catch(err => fail($, 'handoff', err))
+  // A dialog (trust, MCP approval) can hold the keys in a fresh window: retried until it lands. Stopped
+  // the moment the box holds anything, so a late fill never wipes what was typed.
+  const until = now + FILL_FOR_MS
+  const attempt = async (): Promise<void> => {
+    const box = await $.prompt.read()
+    if (box.text.trim() === '') {
+      const r = await $.prompt.fill({ text: h.reply })
+      if (r.isFilled) return void (await done())
+      if ((await $.clock.now()) < until) {
+        $.clock.after(FILL_RETRY_MS, () => void guard($, 'handoff', attempt()))
+        return
+      }
+    }
+    $.ui.log(`Docket: couldn't put your reply in the box; here it is:\n${h.reply}`)
+    await done()
+  }
+  $.clock.after(0, () => void guard($, 'handoff', attempt()))
+}
+
+// Blanks handoff files: a forget blanks this session's; prune those past their age. The mod can't
+// delete, so a blanked file stays as a stub.
+async function blankHandoffs($: EngineInterface, which: (h: { fromSid?: string; mtimeMs: number; nonce: string }) => boolean): Promise<void> {
+  const base = await baseDir($)
+  if (base === undefined || !(await safeUnder($, base, ['handoff']))) return
+  let entries: Awaited<ReturnType<EngineInterface['fs']['list']>> = []
+  try {
+    entries = await $.fs.list(`${base}/handoff`)
+  } catch {
+    return
+  }
+  for (const e of entries) {
+    const m = /^([0-9a-f]{32})\.json$/.exec(e.name)
+    if (m === null || e.kind !== 'file' || e.isLink) continue
+    const nonce = m[1] as string
+    const path = `${base}/handoff/${e.name}`
+    const h = parseHandoff(await readText($, path), nonce)
+    if (h === null) continue
+    if (!which({ fromSid: h.fromSid, mtimeMs: e.mtimeMs, nonce })) continue
+    try {
+      await $.fs.write(path, blankText(nonce))
+    } catch (err) {
+      $.ui.log(`docket: handoff blank failed: ${err instanceof Error ? err.message : String(err)}`, { to: 'debug' })
+    }
+  }
+}
+
+// --- the list tool and the walk (v0.4) ---
+
+const LIST_TOOL = 'mcp__docket__list'
+const LIST_DESCRIPTION =
+  "The user's Docket: what Claude has said in this session (and carried-in sessions) is theirs to decide or do, still open. Call it when the user asks about their docket or wants to go through it. During a walk-through, call it in every turn where you ask about an item, with presenting set to that item's #id, then restate the item's text word for word in your reply. Read-only: items close from the user's own replies."
+const LIST_SCHEMA = {
+  type: 'object',
+  properties: { presenting: { type: 'string', description: 'The #id of the one item you are about to ask the user about (walk-throughs), e.g. "#4".' } },
+  additionalProperties: false,
+}
+const WALK_PROMPT =
+  'Walk me through my Docket, one item at a time, in order. In every turn where you ask me about an item (a follow-up question too), first call mcp__docket__list with presenting set to that item\'s #id, then in your reply after the call restate the item\'s text word for word, say what you\'d recommend, and wait for my answer. Present only one item per turn. Keep track of which you\'ve covered; one I skip stays open and isn\'t asked again this walk. Refer to items by their text.'
+const RESOLVE_WAIT_MS = 5000
+
+async function walkCommand($: EngineInterface): Promise<string> {
+  const s = await readSession($)
+  if (openItems(s).length === 0) return 'Docket: nothing open.'
+  if (isWalking(s)) return 'Docket: already walking; answer Claude, or tell it to stop.'
+  $.clock.after(0, () => void guard($, 'walk', submitWalk($)))
+  return 'Docket: asking Claude to walk you through the docket.'
+}
+
+// Never awaited inside a hook: a plugin's submit starts its turn once the session is idle.
+async function submitWalk($: EngineInterface): Promise<void> {
+  try {
+    const sent = await $.prompt.submit({ text: WALK_PROMPT })
+    if (sent.drop !== undefined) $.ui.toast('Docket: Claude is busy; try the walk again when the turn ends.')
+  } catch (err) {
+    $.ui.toast('Docket: Claude is busy; try the walk again when the turn ends.')
+    await fail($, 'walk', err)
+  }
+}
+
+// The list tool's answer. A resolve check that is due or running may close the item just answered:
+// waited for (a bounded few seconds), so a walk doesn't present it again.
+async function listAnswer($: EngineInterface, rawPresenting: unknown, isMain: boolean): Promise<string> {
+  const start = await $.clock.now()
+  while ((resolveDue || inFlight) && (await $.clock.now()) - start < RESOLVE_WAIT_MS) {
+    await new Promise<void>(r => $.clock.after(200, () => r()))
+  }
+  let presenting: number | 'bad' | undefined
+  if (typeof rawPresenting === 'string' && rawPresenting.trim() !== '') {
+    const m = /^#?(\d+)$/.exec(rawPresenting.trim())
+    presenting = m === null ? 'bad' : Number(m[1])
+  }
+  // A subagent's call reads the list but never moves the walk.
+  if (isMain && typeof presenting === 'number') {
+    const id = presenting
+    await change($, s => (s.items.some(i => i.id === id && i.status === 'open') ? present(s, id) : s))
+  }
+  const s = await readSession($)
+  return listText(s, openItems(s), closeGroups(s), await $.clock.now(), presenting, resolveDue || inFlight)
+}
+
 // --- presses ---
 
 // Puts "Re: <item> — " in the prompt box, after any draft already there, so the reply names the item.
+// The box holding this item's Reply new lead instead: swapped, the typed tail kept.
 async function replyTo($: EngineInterface, id: number): Promise<void> {
   const item = (await readSession($)).items.find(i => i.id === id && i.status === 'open')
   if (item === undefined) return
   // The new conversation knows nothing of a carried item: the reply brings Claude's words with it.
-  const lead = item.carriedAt !== undefined && item.quote !== ''
-    ? `Re: ${item.text} (from an earlier session; Claude had said "${clip(item.quote, 160)}") — `
-    : `Re: ${item.text} — `
+  const lead = leadHere(item)
   const box = await $.prompt.read()
-  const filled = box.text.trim() === '' ? await $.prompt.fill({ text: lead }) : await $.prompt.fill({ text: `\n${lead}`, mode: 'append' })
-  if (!filled.isFilled) $.ui.toast('Docket: the prompt box is not taking text right now.')
+  const swapped = tailAfter(box.text, leadNew(item))
+  const filled =
+    swapped !== undefined
+      ? await $.prompt.fill({ text: `${lead}${swapped}` })
+      : box.text.trim() === ''
+        ? await $.prompt.fill({ text: lead })
+        : await $.prompt.fill({ text: `\n${lead}`, mode: 'append' })
+  if (!filled.isFilled) $.ui.toast(NOT_TAKING)
 }
 
 function actions($: EngineInterface): Actions {
   return {
     reply: id => void guard($, 'reply', replyTo($, id)),
+    replyNew: id => void guard($, 'reply', replyNewTo($, id)),
+    walk: () =>
+      void guard(
+        $,
+        'walk',
+        walkCommand($).then(line => {
+          if (line.includes('nothing open') || line.includes('already walking')) $.ui.toast(line)
+        }),
+      ),
     done: id =>
       void guard(
         $,
@@ -999,12 +1278,23 @@ export const register: Register = (on, options) => {
   const model = modelFrom(options as Record<string, unknown>)
 
   on('session.start', async ($, e, next) => {
+    // A window Reply new opened (v0.4): named by DOCKET_HANDOFF. Read first, in its own try, and latched
+    // with isInteractive below, so no path reaches the startup carry take before it is known.
+    let handoffNonce: string | null = null
     try {
-      await $.command.register({ name: 'docket', description: 'Docket: open or close the pane of what Claude left for you to decide or do (add <text>, clear, carry on|off, forget)', immediate: true })
+      const v = await $.env.get('DOCKET_HANDOFF')
+      handoffNonce = isNonce(v) ? v : null
+    } catch (err) {
+      await fail($, 'handoff env', err)
+    }
+    try {
+      await $.command.register({ name: 'docket', description: 'Docket: open or close the pane of what Claude left for you to decide or do (add <text>, clear, walk, carry on|off, forget)', immediate: true })
       loadedAt = await $.clock.now()
       const sid = await $.session.id()
       // A reload: any check the old module started is now stale.
-      await changeProc($, p => ({ ...p, isInteractive: e.isInteractive, epoch: p.epoch + 1, startupSid: p.startupSid ?? (isSafeSid(sid) ? sid : null) }))
+      await changeProc($, p => ({ ...p, isInteractive: e.isInteractive, epoch: p.epoch + 1, startupSid: p.startupSid ?? (isSafeSid(sid) ? sid : null), handoffNonce: p.handoffNonce ?? handoffNonce }))
+      // Not inherited by the Bash tool's children (or read again by a reload).
+      if (handoffNonce !== null) await $.env.set('DOCKET_HANDOFF', undefined)
       await rehome($, sid, false)
       // Timers died with the old module: re-run the queue, and re-queue the current state (free when
       // nothing was lost, by the dedupe).
@@ -1020,6 +1310,22 @@ export const register: Register = (on, options) => {
       await change($, cur => ({ ...cur, view: { ...cur.view, keysPausedUntil: null, isPaneUp: isUp } }))
     } catch (err) {
       await fail($, 'session.start', err)
+    }
+    // v0.4, each in its own try so one failing leaves the rest (and the block above) standing.
+    try {
+      await $.tool.register({ name: 'list', description: LIST_DESCRIPTION, inputSchema: LIST_SCHEMA, isDeferred: false })
+    } catch (err) {
+      await fail($, 'tool.register', err)
+    }
+    try {
+      await checkReplyNew($)
+    } catch (err) {
+      await fail($, 'reply-new check', err)
+    }
+    try {
+      await pickUp($)
+    } catch (err) {
+      await fail($, 'handoff', err)
     }
     await writeHealth($)
     return next(e)
@@ -1068,6 +1374,8 @@ export const register: Register = (on, options) => {
     try {
       await changeProc($, p => ({ ...p, endingSid: e.sessionId }))
       if (e.reason === 'clear' || e.reason === 'resume') {
+        // A Reply new window's item context belongs to the conversation it opened with.
+        await changeProc($, p => (p.handoffContext === null ? p : { ...p, handoffContext: null }))
         const old = await transact($, cur => (cur.sid === e.sessionId ? { session: freshSession(), out: cur } : { session: cur, out: null }))
         if (old !== null) await switchAway($, old)
       } else {
@@ -1119,6 +1427,13 @@ export const register: Register = (on, options) => {
           resolveDue = true
           schedule($, model)
         }
+      }
+      // A Reply new window (v0.4): the item and Claude's words ride with the first real prompt as context
+      // the model reads. Never through addUser above, so this window's judge never takes them as the user's.
+      const ctx = (await readProc($)).handoffContext
+      if (ctx !== null && e.origin.kind === 'composer' && e.isMeta !== true && e.command === undefined && e.text.trim() !== '') {
+        await changeProc($, p => ({ ...p, handoffContext: null }))
+        return next({ ...e, context: [...(e.context ?? []), contextBlock(ctx)] })
       }
     } catch (err) {
       await fail($, 'prompt.submit', err)
@@ -1196,7 +1511,7 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'Pane', requestId: 'docket' }, async ($, e, next) => {
     try {
       const s = await readSession($)
-      const live = { isChecking: inFlight, isResolving, isFocused: e.props.isFocused, now: await $.clock.now() }
+      const live = { isChecking: inFlight, isResolving, isFocused: e.props.isFocused, now: await $.clock.now(), canReplyNew: (await readProc($)).canReplyNew }
       return paneTree($.ui.resolve(e), s, openItems(s), closeGroups(s), live, actions($))
     } catch (err) {
       void fail($, 'pane', err)
@@ -1228,7 +1543,7 @@ export const register: Register = (on, options) => {
     const r = await next(e)
     if (e.component !== 'Pane' || e.requestId !== PANE_ID) return r
     try {
-      const m = /^(?:reply|done|dismiss)-(\d+)$/.exec(e.element ?? '')
+      const m = /^(?:reply|replynew|done|dismiss)-(\d+)$/.exec(e.element ?? '')
       const focusedId = m?.[1] === undefined ? null : Number(m[1])
       await change($, s => (s.view.focusedId === focusedId ? s : { ...s, view: { ...s.view, focusedId } }))
     } catch (err) {
@@ -1265,6 +1580,8 @@ export const register: Register = (on, options) => {
         await change($, s => addManual(s, text, now))
         return { text: 'Docket: added.' }
       }
+      if (args === 'new' || /^new\s/.test(args)) return { text: await newCommand($, e.origin.kind, args.slice(3)) }
+      if (args === 'walk') return { text: await walkCommand($) }
       if (args === 'forget') return { text: await forget($) }
       if (args === 'carry' || args.startsWith('carry ')) return { text: await carryCommand($, args.slice(5).trim()) }
       if (args === 'clear') {
@@ -1273,7 +1590,7 @@ export const register: Register = (on, options) => {
         await change($, s => clearAll(s, now))
         return { text: before === 0 ? 'Docket: nothing open.' : `Docket: dismissed ${before}; Reopen all in the pane brings them back.` }
       }
-      if (args !== '') return { text: 'Docket: /docket opens or closes the pane; /docket add <text>; /docket clear; /docket carry on|off (send what is open to the next session here); /docket forget (erase the saved copy).' }
+      if (args !== '') return { text: "Docket: /docket opens or closes the pane; /docket add <text>; /docket walk (Claude takes you through what's open); /docket clear; /docket carry on|off (send what is open to the next session here); /docket forget (erase the saved copy). Reply new on an item in the pane opens a new window." }
       return { text: await togglePane($) }
     } catch (err) {
       await fail($, 'command', err)
@@ -1282,5 +1599,14 @@ export const register: Register = (on, options) => {
   }).catch(async ($, e, next) => {
     await fail($, 'command', next.error.message ?? next.error.kind)
     return { text: 'Docket: the command failed; the debug log has the reason.' }
+  })
+
+  // The list, for the session's own model (v0.4). Read-only: items close from the user's replies.
+  on('tool.call', { tool: LIST_TOOL }, async ($, e) => {
+    const input = e as unknown as { presenting?: unknown; agentId?: string }
+    return { result: await listAnswer($, input.presenting, input.agentId === undefined) }
+  }).catch(async ($, e, next) => {
+    await fail($, 'tool.call', next.error.message ?? next.error.kind)
+    return next.called ? next(e) : { deny: 'Docket could not read its list (its hook failed).' }
   })
 }
