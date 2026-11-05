@@ -45,24 +45,34 @@ test('/btw fills an empty box, replaces the item\'s own empty lead, and refuses 
   const ui = await mountPane($, 'terminal')
   await ui.press({ key: 'btw-1' })
   expect(b.draft).toBe(btwQuestion(base))
-  expect(w.toasts.some(t => t.includes('press Enter to ask'))).toBe(true)
+  expect(w.toasts.some(t => t.includes('press Esc, then Enter to ask'))).toBe(true)
   // Pressed again: the same question, unchanged.
   await ui.press({ key: 'btw-1' })
   expect(b.draft).toBe(btwQuestion(base))
-  // Reply here pressed first with nothing typed after it: /btw takes the box.
-  b.draft = leadHere(base)
-  await ui.press({ key: 'btw-1' })
-  expect(b.draft).toBe(btwQuestion(base))
-  b.draft = leadNew(base)
-  await ui.press({ key: 'btw-1' })
-  expect(b.draft).toBe(btwQuestion(base))
-  // Anything typed, or another item's lead: left alone.
-  for (const draft of [`${leadHere(base)}yes`, 'half a thought', 'Re: Rotate the key — ']) {
+  // Reply here pressed first with nothing typed after it (trailing space or not, or only spaces): /btw
+  // takes the box.
+  for (const draft of [leadHere(base), leadHere(base).trimEnd(), `${leadHere(base)}   `, leadNew(base), leadNew(base).trimEnd()]) {
+    b.draft = draft
+    await ui.press({ key: 'btw-1' })
+    expect(b.draft).toBe(btwQuestion(base))
+  }
+  // Anything typed after either lead, another item's lead or question, or any other draft: left alone.
+  const two: Item = { ...base, id: 2, text: 'Rotate the key' }
+  const kept = [`${leadHere(base)}yes`, `${leadNew(base)}renew for 2 years`, `${leadHere(base)}\nmore`, 'half a thought', leadHere(two), btwQuestion(two)]
+  for (const draft of kept) {
     b.draft = draft
     await ui.press({ key: 'btw-1' })
     expect(b.draft).toBe(draft)
   }
-  expect(w.toasts.filter(t => t.includes('/btw needs an empty box')).length).toBe(3)
+  expect(w.toasts.filter(t => t.includes('/btw needs an empty box')).length).toBe(kept.length)
+  // Changing his mind: Reply here on the same item swaps the question for the lead, so the answer he
+  // types never runs as /btw. Reply new refuses over it, as over any draft.
+  b.draft = btwQuestion(base)
+  await ui.press({ key: 'reply-1' })
+  expect(b.draft).toBe(leadHere(base))
+  b.draft = btwQuestion(base)
+  await ui.press({ key: 'replynew-1' })
+  expect(b.draft).toBe(btwQuestion(base))
   await ui.unmount()
   // Nothing closed.
   expect(await openIds($)).toEqual([1, 2])
@@ -77,6 +87,7 @@ test('/btw toasts when the box is not taking text', async ($, on) => {
   await ui.press({ key: 'btw-1' })
   await ui.unmount()
   expect(w.toasts.some(t => t.includes('not taking text'))).toBe(true)
+  expect(w.toasts.some(t => t.includes('Enter to ask'))).toBe(false)
 })
 
 test('a /btw prompt that reaches prompt.submit is never taken as an answer', async ($, on) => {

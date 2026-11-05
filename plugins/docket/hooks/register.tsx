@@ -1235,7 +1235,8 @@ async function replyTo($: EngineInterface, id: number): Promise<void> {
   // The new conversation knows nothing of a carried item: the reply brings Claude's words with it.
   const lead = leadHere(item)
   const box = await $.prompt.read()
-  const swapped = tailAfter(box.text, leadNew(item))
+  // This item's /btw question still in the box: replaced, or the reply typed after it would run as /btw.
+  const swapped = box.text.trim() === btwQuestion(item) ? '' : tailAfter(box.text, leadNew(item))
   const filled =
     swapped !== undefined
       ? await $.prompt.fill({ text: `${lead}${swapped}` })
@@ -1264,7 +1265,8 @@ async function btwTo($: EngineInterface, id: number): Promise<void> {
     $.ui.toast(NOT_TAKING)
     return
   }
-  $.ui.toast('Docket: press Enter to ask; the answer leaves the item open.')
+  // The press leaves the keys in the pane, where Enter would press /btw again: Esc gives them back.
+  $.ui.toast('Docket: press Esc, then Enter to ask; the answer leaves the item open.')
 }
 
 function actions($: EngineInterface): Actions {
@@ -1503,9 +1505,10 @@ export const register: Register = (on, options) => {
         const sid0 = (await readSession($)).sid
         await markSession($, sid0, s => ({ ...s, carriedNotice: null }))
       }
-      // A /btw side question is never an answer, even if a build hands it here without `command` set.
-      const isUser =
-        (e.origin.kind === 'composer' || e.origin.kind === 'bridge') && e.isMeta !== true && e.command === undefined && !/^\/btw\b/.test(e.text.trimStart())
+      // A /btw side question is never an answer, even if a build hands it here without `command` set, and
+      // never the prompt a Reply new window's context rides on (below).
+      const isBtw = /^\/btw\b/.test(e.text.trimStart())
+      const isUser = (e.origin.kind === 'composer' || e.origin.kind === 'bridge') && e.isMeta !== true && e.command === undefined && !isBtw
       if (isUser && e.text.trim() !== '') {
         if (e.turnId !== undefined) midTurn.add(e.text.trim())
         const s = await change($, cur => addUser(cur, e.text, e.turnId !== undefined))
@@ -1517,7 +1520,7 @@ export const register: Register = (on, options) => {
       // A Reply new window (v0.4): the item and Claude's words ride with the first real prompt as context
       // the model reads. Never through addUser above, so this window's judge never takes them as the user's.
       const ctx = (await readProc($)).handoffContext
-      if (ctx !== null && e.origin.kind === 'composer' && e.isMeta !== true && e.command === undefined && e.text.trim() !== '') {
+      if (ctx !== null && e.origin.kind === 'composer' && e.isMeta !== true && e.command === undefined && !isBtw && e.text.trim() !== '') {
         await changeProc($, p => ({ ...p, handoffContext: null }))
         return next({ ...e, context: [...(e.context ?? []), contextBlock(ctx)] })
       }
