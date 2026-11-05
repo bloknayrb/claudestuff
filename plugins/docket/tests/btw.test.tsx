@@ -73,6 +73,7 @@ test('/btw fills an empty box, replaces the item\'s own empty lead, and refuses 
   b.draft = btwQuestion(base)
   await ui.press({ key: 'replynew-1' })
   expect(b.draft).toBe(btwQuestion(base))
+  expect(w.toasts.some(t => t.includes('Reply new needs an empty box'))).toBe(true)
   await ui.unmount()
   // Nothing closed.
   expect(await openIds($)).toEqual([1, 2])
