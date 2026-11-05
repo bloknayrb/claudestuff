@@ -29,6 +29,15 @@ export function label(item: Item): string {
 
 export const leadNew = (item: Item): string => `/docket new #${item.id} (${label(item)}) — `
 
+// The /btw button (v0.5): a side question about the item, which Claude answers without a turn and
+// without the answer entering the conversation. Claude's own words ride along, so a carried item (whose
+// conversation this session never saw) still has something to explain. One line: the box sends on Enter.
+export function btwQuestion(item: Item): string {
+  const what = item.kind === 'decide' ? 'making a decision' : 'doing it'
+  const quote = item.quote === '' ? '' : ` You had said${item.carriedAt !== undefined ? ', in an earlier session' : ''}: "${clip(item.quote.replace(/\s+/g, ' ').trim(), 240)}"`
+  return `/btw can you remind me what this item is and give me more context for ${what}? "${item.text}"${quote}`
+}
+
 // What follows `lead` at the start of the box (its trailing space optional), or undefined when the box
 // does not start with it.
 export function tailAfter(box: string, lead: string): string | undefined {

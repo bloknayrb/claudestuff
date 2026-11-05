@@ -9,7 +9,7 @@ import { buildPrompt, parseVerdict, RULES } from './judge'
 import type { Mode } from './judge'
 import { addManual, addToolAsked, addTurn, addUser, applyVerdict, clearAll, closedForJudge, closeGroups, dismiss, freshSession, handOff, isWalking, markDone, normalize, openItems, present, reopen } from './ledger'
 import { envelope, freshProc, freshWriter, isRealSid, isSafeSid, ledgerText, normProc, normWriter, parseSlot, pickSlot, restore, RETAIN_MS, slotName, tombstone, withKey, withoutKey, writeKey } from './persist'
-import { blankText, contextBlock, HANDOFF_MAX_AGE_MS, isNonce, isRootSafe, label, launchScript, leadHere, leadNew, newNonce, parseHandoff, parseNewArgs, replyRefusal, tailAfter, takenText, waitingText, wtArgv } from './spawn'
+import { blankText, btwQuestion, contextBlock, HANDOFF_MAX_AGE_MS, isNonce, isRootSafe, label, launchScript, leadHere, leadNew, newNonce, parseHandoff, parseNewArgs, replyRefusal, tailAfter, takenText, waitingText, wtArgv } from './spawn'
 import { clip } from './text'
 import { ARM_DELAY_MS, indicatorText, indicatorTree, listText, PANE_COLUMNS, PANE_ID, PANE_TITLE, paneTree } from './ui'
 import type { Actions } from './ui'
@@ -1245,10 +1245,33 @@ async function replyTo($: EngineInterface, id: number): Promise<void> {
   if (!filled.isFilled) $.ui.toast(NOT_TAKING)
 }
 
+// Puts "/btw <what is this item?>" in the prompt box; he presses Enter. A plugin can't run the command
+// itself: a plugin's prompt is never a slash command, and it waits for the turn to end, which /btw exists
+// not to do. /btw has to start the box, so only an empty box, this item's own lead with nothing typed
+// after it, or this item's question already is replaced; any other draft stays and the press toasts.
+async function btwTo($: EngineInterface, id: number): Promise<void> {
+  const item = (await readSession($)).items.find(i => i.id === id && i.status === 'open')
+  if (item === undefined) return
+  const question = btwQuestion(item)
+  const box = (await $.prompt.read()).text
+  const isOurs = (lead: string) => tailAfter(box, lead)?.trim() === ''
+  if (box.trim() !== '' && box !== question && !isOurs(leadHere(item)) && !isOurs(leadNew(item))) {
+    $.ui.toast('Docket: /btw needs an empty box; send or clear your draft first.')
+    return
+  }
+  const filled = await $.prompt.fill({ text: question })
+  if (!filled.isFilled) {
+    $.ui.toast(NOT_TAKING)
+    return
+  }
+  $.ui.toast('Docket: press Enter to ask; the answer leaves the item open.')
+}
+
 function actions($: EngineInterface): Actions {
   return {
     reply: id => void guard($, 'reply', replyTo($, id)),
     replyNew: id => void guard($, 'reply', replyNewTo($, id)),
+    btw: id => void guard($, 'btw', btwTo($, id)),
     walk: () =>
       void guard(
         $,
@@ -1480,7 +1503,9 @@ export const register: Register = (on, options) => {
         const sid0 = (await readSession($)).sid
         await markSession($, sid0, s => ({ ...s, carriedNotice: null }))
       }
-      const isUser = (e.origin.kind === 'composer' || e.origin.kind === 'bridge') && e.isMeta !== true && e.command === undefined
+      // A /btw side question is never an answer, even if a build hands it here without `command` set.
+      const isUser =
+        (e.origin.kind === 'composer' || e.origin.kind === 'bridge') && e.isMeta !== true && e.command === undefined && !/^\/btw\b/.test(e.text.trimStart())
       if (isUser && e.text.trim() !== '') {
         if (e.turnId !== undefined) midTurn.add(e.text.trim())
         const s = await change($, cur => addUser(cur, e.text, e.turnId !== undefined))
@@ -1604,7 +1629,7 @@ export const register: Register = (on, options) => {
     const r = await next(e)
     if (e.component !== 'Pane' || e.requestId !== PANE_ID) return r
     try {
-      const m = /^(?:reply|replynew|done|dismiss)-(\d+)$/.exec(e.element ?? '')
+      const m = /^(?:reply|replynew|btw|done|dismiss)-(\d+)$/.exec(e.element ?? '')
       const focusedId = m?.[1] === undefined ? null : Number(m[1])
       await change($, s => (s.view.focusedId === focusedId ? s : { ...s, view: { ...s.view, focusedId } }))
     } catch (err) {

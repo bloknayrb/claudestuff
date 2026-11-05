@@ -270,7 +270,7 @@ Are you...
 
 **What**: A list of everything Claude said in prose is yours to decide or do (not AskUserQuestion); each item clears when you answer or act, Claude reports it done, or you dismiss it
 
-**Commands**: `/docket` (open or close the panel), `/docket add <text>`, `/docket clear`, `/docket carry on|off`, `/docket walk` (Claude takes you through what is open), `/docket forget`; **Reply new** on an item answers it in a new Windows Terminal window
+**Commands**: `/docket` (open or close the panel), `/docket add <text>`, `/docket clear`, `/docket carry on|off`, `/docket walk` (Claude takes you through what is open), `/docket forget`; **Reply new** on an item answers it in a new Windows Terminal window, and **/btw** asks Claude on the side what an item is about
 
 **Hooks**: a panel, a clickable button above the prompt, a judge model call after each turn; each conversation's docket is saved and comes back on resume, and `/docket carry on` sends it to the next session in the folder
 
