@@ -29,9 +29,11 @@ Requires Claude Code 2.1.317 or newer (function-hook mods).
 - **The panel** lists open items under **Decide** and **Do**, each with its age in turns (`now`,
   `2t`). Once items have been carried in, it groups them by the session they were first raised in:
   **This session** first, then `From Nov 1 session (↪ 2d)` and so on, newest first, each with its own
-  Decide and Do. Each item has three buttons:
-  - **Reply** puts `Re: <item> — ` in your prompt box (after anything you have typed) so your answer
-    names the item. Focus stays in the panel: click the prompt or press Esc to type.
+  Decide and Do. Each item has these buttons:
+  - **Reply here** puts `Re: <item> — ` in your prompt box (after anything you have typed) so your
+    answer names the item. Focus stays in the panel: click the prompt or press Esc to type.
+  - **Reply new** answers the item in a new Claude Code window instead (below). Shown on Windows
+    when Windows Terminal and PowerShell 7 are installed.
   - **Done** closes it as handled by you, for things you did outside the chat.
   - **✕** dismisses it. The digit keys `1`-`9` do the same, in the order shown, while the panel has
     the keys (`ctrl+x tab`).
@@ -40,6 +42,40 @@ Requires Claude Code 2.1.317 or newer (function-hook mods).
   a Reopen button each. Reopen is the undo for a wrong close.
 - After any change to the list the digit keys pause for 1.1 s, and each press during the pause
   restarts it, so a list that just reordered cannot turn a press into the wrong dismiss.
+
+## Reply new: answer an item in a new window
+
+**Reply new** puts `/docket new #4 (<item>) — ` in your prompt box (or swaps it for the same item's
+`Re: … — ` lead, keeping what you typed). Type your reply after the dash and press Enter:
+
+- The item closes here as yours (`you: sent to a new window`); Reopen under `closed · show` brings it
+  back.
+- A new Windows Terminal window opens in the same folder and starts `claude`. Its prompt box already
+  holds your reply: read it and press Enter there. With that first prompt, Docket attaches the item
+  and what Claude had said about it, as context for Claude; it doesn't count as your words.
+- Your reply never goes on a command line: it waits in a small file that the new window reads once
+  and empties. The window doesn't take this folder's carry.
+- If no window appears, a toast says so; your reply is still in this window's history (up arrow).
+- Reply new needs an empty box, or that item's own Reply here lead: anything else you typed stays
+  where it is. A reply starting with `!` or `/` is refused, since in the new box it would run as a
+  command.
+
+## Walking through the docket with Claude
+
+**Walk through these with Claude** at the foot of the panel, or `/docket walk`, asks Claude to take
+you through what's open one item at a time: it restates each, says what it recommends, and waits for
+your answer. Claude reads the list through a tool, `mcp__docket__list`, which it can also call
+whenever you ask about your docket.
+
+- Answer as you would anyway. A bare "yes" or "do it" closes the item Claude just presented, as long
+  as it presented only that one and restated it. "skip", "later", "next", "pass" or "not now" leaves
+  the item open.
+- The panel marks the item being discussed with `▸` and says `walking with Claude`. A walk ends by
+  itself once Claude stops presenting items.
+- The tool is read-only: Claude can't close an item; your replies do, through the same checks as
+  always.
+- If Claude Code asks permission for the tool on each item, allow it once for good with
+  `"mcp__docket__list"` under `permissions.allow` in your settings.
 
 ## Carrying the docket to the next session
 
@@ -79,7 +115,10 @@ Code checks the judge's answer before anything changes:
 - A close cannot rest on words written before the item existed, or on the words that closed it
   before you reopened it.
 - A bare go-ahead ("make it so", "yes", "ok") or refusal ("no") closes an item only when exactly one
-  item was opened in the turn just before and Claude had recommended one option.
+  item was opened in the turn just before and Claude had recommended one option, or, in a walk, when
+  Claude presented that one item alone and restated it in the turn you answered. In a walk, Claude
+  picks which item a bare answer lands on: if it asks about something else in the same message, a
+  "yes" can still count for the presented item.
 - Only prompts you typed (or sent through Remote Control) count as your words, plus your `!` shell
   commands. Prompts from channels, other sessions, plugins and scheduled tasks never do.
 - At most 6 adds and 3 closes per check; what the judge returns is shown as plain text, with control
@@ -131,6 +170,14 @@ they can any plugin's model call.
 - **The panel never opens by itself.** A mod cannot see other mods' panels, so opening unasked could
   cover a Bridge decision card.
 - **The button is drawn on terminal and desktop only.** Elsewhere, use `/docket`.
+- **Reply new is Windows-only** (Windows Terminal and PowerShell 7), and the new window is a Windows
+  Terminal window whatever terminal you use. The item closes when you press Enter, before the window
+  has opened. A window that hasn't picked up its reply within 15 minutes ignores it. The `/docket new`
+  line stays in this conversation, and Claude here can read it. The new tab runs PowerShell without
+  your profile, so `claude` must be on your normal PATH (not added only in `$PROFILE`); if it isn't,
+  the tab shows the error, and Reopen brings the item back.
+- **A walk answer typed while Claude is still writing** doesn't get the walk's bare-answer allowance;
+  answer once the turn ends.
 
 ## Files
 
@@ -152,6 +199,9 @@ else `~/.claude`:
   Ids and a timestamp only.
 - **`<session-id>.json`**: a heartbeat with counts, timestamps and `lastError` after a failure. Never
   item text or model output.
+- **`handoff/<nonce>.json`** (Reply new): your reply, the item, Claude's words about it and the
+  folder, until the new window takes it. Then only ids remain. One that no window took is blanked
+  after 15 minutes (when a later session starts), and `/docket forget` blanks this conversation's.
 
 A file read back is checked field by field; anything malformed is ignored whole. Saved dockets not
 touched for 30 days are overwritten with a small `"gone"` stub (a mod can't delete files), so the

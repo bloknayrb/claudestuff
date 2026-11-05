@@ -61,6 +61,15 @@ export function isBare(text: string): boolean {
   return true
 }
 
+// The words that mean "not now" during a walk (v0.4): a reply made only of one of them leaves the
+// walked item open. One list for the judge note, the gate and the tests.
+export const SKIP_PHRASES = ['skip', 'skip it', 'not now', 'later', 'next', 'pass'] as const
+
+export function isSkip(text: string): boolean {
+  const flat = normalise(text).toLowerCase().replace(/[.,!?;:]/g, ' ').replace(/\s+/g, ' ').trim()
+  return (SKIP_PHRASES as readonly string[]).includes(flat)
+}
+
 // Token shapes replaced before anything is sent. Word-bounded and length-floored, so "task-list" or
 // "desk-lamp" stay as they are.
 const SECRETS: RegExp[] = [

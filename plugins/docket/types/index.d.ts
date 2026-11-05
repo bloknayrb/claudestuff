@@ -42,7 +42,9 @@ export type Item = {
 export type CarryState = { on: boolean; gen: number }
 
 // One thing the user typed: a prompt, or a `!` shell command (text starts with '!').
-export type UserEntry = { seq: number; text: string; afterTurn: number }
+// v0.4, stamped when it was typed (see ledger.addUser): focusId, the walk item this reply answers;
+// inWalk, a walk was going on (so "skip" and the like never close an item).
+export type UserEntry = { seq: number; text: string; afterTurn: number; focusId?: number; inWalk?: true }
 // One assistant message's text, or one tool line, tagged with the main turn it came from.
 export type ClaudeEntry = { turn: number; text: string; isFinal: boolean }
 export type ToolLine = { turn: number; text: string }
@@ -102,7 +104,15 @@ export type DocketSession = {
   carriedNotice: { count: number; folder: string; isSeen: boolean } | null
   // Saved: a take applied whose claim isn't written yet; retried until it is.
   pendingClaim: CarrySource | null
+  // Not saved (v0.4): the item Claude last presented in a walk, through the list tool's `presenting`.
+  // turn is the main turn it was presented in; ids every distinct id presented in that turn.
+  walkFocus: WalkFocus | null
 }
+
+export type WalkFocus = { id: number; turn: number; ids: number[] }
+
+// What a Reply new window shows Claude with the first prompt it sends (v0.4).
+export type HandoffContext = { itemText: string; quote: string }
 
 // Where a carry came from: its session, the switch generation it was taken at, and that session's root
 // (claims live under the source's folder).
@@ -133,6 +143,13 @@ export type DocketProc = {
   classicStartupSeenFor: string | null
   clearCapture: ClearCapture | null
   captureSeq: number
+  // v0.4, Reply new. In a window Docket opened: the handoff's nonce (latched at session.start, before
+  // anything can take the folder's carry), whether it was picked up, and the item context the first
+  // prompt carries. In any window: whether this one can open a new window at all.
+  handoffNonce: string | null
+  handoffPicked: boolean
+  handoffContext: HandoffContext | null
+  canReplyNew: boolean
 }
 
 export type WriteKind = 'snap' | 'carry'

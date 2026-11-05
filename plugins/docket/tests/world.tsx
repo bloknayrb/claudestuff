@@ -63,12 +63,29 @@ export type World = {
   lists: string[]
   // Set: every fs.write waits for this (a slow disk).
   writeGate: Promise<void> | null
+  // v0.4: every $.process.run, and what the next one answers (exit 0 by default).
+  runs: { argv: readonly string[]; cwd?: string }[]
+  runAnswer: { exitCode: number } | { throws: string }
+  // v0.4: every $.env.set.
+  envSets: { name: string; value: string | undefined }[]
+  // v0.4: every prompt that reached the bottom of prompt.submit.
+  submits: { text: string; origin: unknown }[]
+}
+
+export const LOCALAPPDATA = 'C:\\Users\\tester\\AppData\\Local'
+export const APPS = 'C:/Users/tester/AppData/Local/Microsoft/WindowsApps'
+
+export type WorldOptions = {
+  // Extra environment variables (DOCKET_HANDOFF, CLAUDE_CONFIG_DIR).
+  env?: Record<string, string>
+  // A Windows box with Windows Terminal and PowerShell 7 in WindowsApps (default true).
+  hasTerminal?: boolean
 }
 
 export const BASE = 'C:/Users/tester/.claude/state/mods/docket'
 export const slotPath = (sid: string, slot: 'a' | 'b') => `${BASE}/sessions/${sid}.${slot}.json`
 
-export function world(on: On): World {
+export function world(on: On, opts: WorldOptions = {}): World {
   const w: World = {
     clock: mock.clock(on, { now: 1000 }),
     sessionId: 'sess-1',
@@ -94,8 +111,28 @@ export function world(on: On): World {
     failWriteMatch: null,
     lists: [],
     writeGate: null,
+    runs: [],
+    runAnswer: { exitCode: 0 },
+    envSets: [],
+    submits: [],
   }
-  mock.env(on, { USERPROFILE: 'C:\\Users\\tester' })
+  mock.env(on, { USERPROFILE: 'C:\\Users\\tester', LOCALAPPDATA, ...(opts.env ?? {}) })
+  if (opts.hasTerminal !== false) {
+    w.files.set(`${APPS}/wt.exe`, { text: '', mtimeMs: 0 })
+    w.files.set(`${APPS}/pwsh.exe`, { text: '', mtimeMs: 0 })
+  }
+  on('env.set', (_$, e) => {
+    w.envSets.push({ name: e.name, value: e.value })
+    return { value: {} }
+  })
+  on('tool.register', (_$, e) => ({ value: { tool: `mcp__docket__${e.name}` } }))
+  on('process.run', (_$, e) => {
+    w.runs.push({ argv: e.argv, ...(e.init?.cwd === undefined ? {} : { cwd: e.init.cwd }) })
+    const a = w.runAnswer
+    // A deny rejects the caller with the reason (a throw here would only skip this hook).
+    if ('throws' in a) return { deny: a.throws }
+    return { value: { exitCode: a.exitCode, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
   on('session.id', () => ({ value: w.sessionId }))
   on('session.messages', () => ({ value: w.messages }))
   on('command.register', (_$, e) => {
@@ -178,7 +215,10 @@ export function world(on: On): World {
     }
     return { value: { isAnswered: true as const, text: r.text, usage: USAGE } }
   })
-  on('prompt.submit', (_$, e) => ({ text: e.text, context: e.context, origin: e.origin }))
+  on('prompt.submit', (_$, e) => {
+    w.submits.push({ text: e.text, origin: e.origin })
+    return { text: e.text, context: e.context, origin: e.origin }
+  })
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
   on('turn.start', (_$, e) => ({ turnId: e.turnId }))

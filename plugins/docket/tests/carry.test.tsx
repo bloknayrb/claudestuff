@@ -549,3 +549,44 @@ test('Reply on a carried item brings Claude\'s words; the band says carried, the
   expect(String((await band2.find({ key: 'docket-indicator' }))?.props?.label).includes('· ↪ next session')).toBe(true)
   await band2.unmount()
 })
+
+// v0.4: a window Reply new opened answers one item; it must never take the folder's carry.
+const HANDOFF = '0123456789abcdef0123456789abcdef'
+for (const order of ['classic first', 'session.start first'] as const) {
+  test(`a Reply new window never takes the folder's carry (${order})`, async ($, on) => {
+    const w = world(on, { env: { DOCKET_HANDOFF: HANDOFF } })
+    seedCarry(w, source('sess-0', ['Renew the domain', 'Rotate the key']))
+    if (order === 'classic first') {
+      await freshProcess($, w)
+    } else {
+      await start($)
+      await classic($, w, 'startup', w.sessionId)
+    }
+    await w.clock.settle()
+    expect(await openIds($)).toEqual([])
+    expect(w.files.has(claimPath('sess-0', 1, 'sess-1'))).toBe(false)
+  })
+}
+
+test('the same fresh window without DOCKET_HANDOFF does take it (the control)', async ($, on) => {
+  const w = world(on)
+  seedCarry(w, source('sess-0', ['Renew the domain', 'Rotate the key']))
+  await freshProcess($, w)
+  await w.clock.settle()
+  expect((await openIds($)).length).toBe(2)
+})
+
+test("a carried item's Reply here answer can't ride out in another item's Reply new", async ($, on) => {
+  const w = world(on)
+  const src = source('sess-0', ['Check DNS'])
+  seedCarry(w, { ...src, items: src.items.map(i => ({ ...i, quote: 'Check the DNS?' })) })
+  await freshProcess($, w)
+  await command($, 'add Renew the domain')
+  const ids = await openIds($)
+  expect(ids.length).toBe(2)
+  const carriedLead = 'Re: Check DNS (from an earlier session; Claude had said "Check the DNS?") — '
+  const newId = Math.max(...ids)
+  const r = await $.command.run({ command: 'docket', args: `new #${newId} — yes\n${carriedLead}no`, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 160 } } as never)
+  expect(String((r as { text?: string }).text).includes('also answers "Check DNS"')).toBe(true)
+  expect((await openIds($)).length).toBe(2)
+})
