@@ -70,7 +70,8 @@ function row(els: Els, item: Item, n: number, turn: number, act: Actions, isFocu
   const { isResolving, now } = live
   const isKeyed = n < 9
   // The item Claude is walking the user through right now.
-  const pos = isWalkItem ? '▸' : isKeyed ? String(n + 1) : '·'
+  const digit = isKeyed ? String(n + 1) : '·'
+  const pos = isWalkItem ? `▸${digit}` : digit
   const showQuote = isFocusedItem || isWalkItem
   // A carried item's age is wall-clock from when it first appeared, wherever it was raised.
   const ageLabel = item.carriedAt !== undefined ? `↪ ${wallAge(now - (item.firstSeenAt ?? item.carriedAt))}` : age(turn - item.openedTurn)
@@ -209,9 +210,9 @@ export function listText(s: DocketSession, open: readonly Item[], groups: readon
     for (const i of displayOrder(open, s.sid, now)) {
       const quote = i.quote === '' ? '' : ` (Claude: "${sanitise(i.quote, 200)}")`
       const when = i.carriedAt !== undefined ? `from the ${dayLabel(i.firstSeenAt ?? i.carriedAt)} session, ${wallAge(now - (i.firstSeenAt ?? i.carriedAt))} ago` : turnsAgo(s.turn - i.openedTurn)
-      const checking = isChecking ? " (checking the user's last reply; don't re-present yet)" : ''
-      lines.push(`#${i.id} [${i.kind}] "${sanitise(i.text, 120)}"${quote} — ${when}${checking}`)
+      lines.push(`#${i.id} [${i.kind}] "${sanitise(i.text, 120)}"${quote} — ${when}`)
     }
+    if (isChecking) lines.push("The user's last reply is still being checked: an item it answers may close; don't re-present that one yet.")
   }
   const last = groups[0]?.items[0]
   if (last !== undefined && last.by !== 'clear') lines.push(`Last closed: #${last.id} "${sanitise(last.text, 120)}" (${closedWhy(last)})`)

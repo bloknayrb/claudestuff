@@ -173,7 +173,9 @@ they can any plugin's model call.
 - **Reply new is Windows-only** (Windows Terminal and PowerShell 7), and the new window is a Windows
   Terminal window whatever terminal you use. The item closes when you press Enter, before the window
   has opened. A window that hasn't picked up its reply within 15 minutes ignores it. The `/docket new`
-  line stays in this conversation, and Claude here can read it.
+  line stays in this conversation, and Claude here can read it. The new tab runs PowerShell without
+  your profile, so `claude` must be on your normal PATH (not added only in `$PROFILE`); if it isn't,
+  the tab shows the error, and Reopen brings the item back.
 - **A walk answer typed while Claude is still writing** doesn't get the walk's bare-answer allowance;
   answer once the turn ends.
 

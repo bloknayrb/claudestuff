@@ -42,8 +42,9 @@ export type Item = {
 export type CarryState = { on: boolean; gen: number }
 
 // One thing the user typed: a prompt, or a `!` shell command (text starts with '!').
-// focusId (v0.4): the walk item this reply answers, stamped when it was typed (see ledger.addUser).
-export type UserEntry = { seq: number; text: string; afterTurn: number; focusId?: number }
+// v0.4, stamped when it was typed (see ledger.addUser): focusId, the walk item this reply answers;
+// inWalk, a walk was going on (so "skip" and the like never close an item).
+export type UserEntry = { seq: number; text: string; afterTurn: number; focusId?: number; inWalk?: true }
 // One assistant message's text, or one tool line, tagged with the main turn it came from.
 export type ClaudeEntry = { turn: number; text: string; isFinal: boolean }
 export type ToolLine = { turn: number; text: string }

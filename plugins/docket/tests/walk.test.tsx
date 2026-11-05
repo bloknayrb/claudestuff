@@ -170,3 +170,36 @@ test('walkFocusFor: the turn just ended, one id, restated in the final message',
   expect(isWalking({ ...s, turn: s.turn + 1 })).toBe(true)
   expect(isWalking({ ...s, turn: s.turn + 2 })).toBe(false)
 })
+
+test('a reply typed while the next turn runs gets no stamp: a mid-turn "yes" never lands on the last item', async ($, on) => {
+  const w = world(on)
+  await threeItems($, w)
+  await list($, '#1')
+  await turn($, w, 't1', ['First: Renew the domain. OK?'])
+  await say($, w, 'skip')
+  // The next turn streams before presenting anything; "yes" is typed into it.
+  w.replies.push(verdict({ resolve: [{ id: 1, by: 'you', note: 'go ahead', evidence: 'yes' }] }))
+  await say($, w, 'yes', 'composer', 't2')
+  expect(await openIds($)).toEqual([1, 2, 3])
+})
+
+test('a walk reply tells the judge which item it answers, even when the check runs later', async ($, on) => {
+  const w = world(on)
+  await threeItems($, w)
+  await list($, '#2')
+  await turn($, w, 't1', ['Next: Rotate the key. Shall I?'])
+  await say($, w, 'yes')
+  const sent = w.calls.at(-1)?.prompt ?? ''
+  expect(sent.includes('(This reply answers open item 2.) yes')).toBe(true)
+})
+
+test('an unstamped "skip" during a walk is refused too', async ($, on) => {
+  const w = world(on)
+  await threeItems($, w)
+  await list($, '#1')
+  // The final message doesn't restate the item: no focus stamp, but still a walk.
+  await turn($, w, 't1', ['What do you think about that one?'])
+  w.replies.push(verdict({ resolve: [{ id: 1, by: 'you', note: 'skipped', evidence: 'skip' }] }))
+  await say($, w, 'skip')
+  expect(await openIds($)).toEqual([1, 2, 3])
+})

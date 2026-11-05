@@ -295,3 +295,100 @@ test('forget blanks the handoffs this session wrote', async ($, on) => {
   expect(files.length).toBe(1)
   expect(files[0]?.[1].text.includes('renew for 2 years')).toBe(false)
 })
+
+test('a handoff already taken is silent; a missing one says so', async ($, on) => {
+  const w = world(on, { env: { DOCKET_HANDOFF: NONCE } })
+  const b = box(on, w)
+  w.files.set(`${BASE}/handoff/${NONCE}.json`, { text: takenText(NONCE, 'sess-0', 3), mtimeMs: 1000 })
+  await start($)
+  await w.clock.settle()
+  expect(b.fills.length).toBe(0)
+  expect(w.logs.filter(l => l.startsWith('transcript: Docket')).length).toBe(0)
+})
+
+test('a missing handoff file says so once', async ($, on) => {
+  const w = world(on, { env: { DOCKET_HANDOFF: NONCE } })
+  const b = box(on, w)
+  await start($)
+  await w.clock.settle()
+  await start($)
+  await w.clock.settle()
+  expect(b.fills.length).toBe(0)
+  expect(w.logs.filter(l => l.includes('missing or stale')).length).toBe(1)
+})
+
+test('a fill refused for the whole window logs the reply and marks the handoff taken', async ($, on) => {
+  const w = world(on, { env: { DOCKET_HANDOFF: NONCE } })
+  box(on, w, 1000)
+  w.files.set(`${BASE}/handoff/${NONCE}.json`, { text: waiting(1000), mtimeMs: 1000 })
+  await start($)
+  await w.clock.settle()
+  for (let i = 0; i < 125; i += 1) {
+    await w.clock.advance(1000)
+    await w.clock.settle()
+  }
+  expect(w.logs.some(l => l.includes("couldn't put your reply in the box") && l.includes('renew for 2 years'))).toBe(true)
+  expect(w.files.get(`${BASE}/handoff/${NONCE}.json`)?.text).toBe(takenText(NONCE, 'sess-0', 3))
+})
+
+test('a fill that throws is retried, and the reply is never lost to the debug log', async ($, on) => {
+  const w = world(on, { env: { DOCKET_HANDOFF: NONCE } })
+  let throws = 2
+  const fills: string[] = []
+  on('prompt.read', () => ({ value: { text: '', cursor: 0 } as never }))
+  on('prompt.fill', (_$, e) => {
+    if (throws > 0) {
+      throws -= 1
+      throw new Error('no box yet')
+    }
+    fills.push(e.text)
+    return { isFilled: true, text: e.text, cursor: 0 } as never
+  })
+  w.files.set(`${BASE}/handoff/${NONCE}.json`, { text: waiting(1000), mtimeMs: 1000 })
+  await start($)
+  for (let i = 0; i < 4; i += 1) {
+    await w.clock.settle()
+    await w.clock.advance(1000)
+  }
+  await w.clock.settle()
+  expect(fills).toEqual(['renew for 2 years'])
+  expect(w.files.get(`${BASE}/handoff/${NONCE}.json`)?.text).toBe(takenText(NONCE, 'sess-0', 3))
+})
+
+test('a /clear drops a new window\'s pending item context', async ($, on) => {
+  const w = world(on, { env: { DOCKET_HANDOFF: NONCE } })
+  box(on, w)
+  w.files.set(`${BASE}/handoff/${NONCE}.json`, { text: waiting(1000), mtimeMs: 1000 })
+  await start($)
+  await w.clock.settle()
+  await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: { id: 'sess-1' } } as never)
+  w.sessionId = 'sess-2'
+  await w.clock.settle()
+  const submit = $.prompt.submit as unknown as (e: Record<string, unknown>) => Promise<{ context?: string[] }>
+  const first = await submit({ text: 'hello', origin: { kind: 'composer' }, queueSubmit: false })
+  expect(first.context ?? []).toEqual([])
+})
+
+test('prune blanks a handoff no window took within 15 minutes', async ($, on) => {
+  const w = world(on)
+  w.files.set(`${BASE}/handoff/${NONCE}.json`, { text: waiting(0), mtimeMs: 0 })
+  await w.clock.set(20 * 60 * 1000)
+  await start($)
+  await w.clock.advance(60000)
+  await w.clock.settle()
+  expect(w.files.get(`${BASE}/handoff/${NONCE}.json`)?.text.includes('renew for 2 years')).toBe(false)
+})
+
+test('Reply new over a box answering two items refuses, so the second answer stays here', async ($, on) => {
+  const w = world(on)
+  const b = box(on, w)
+  await start($)
+  await command($, 'add Renew the domain')
+  await command($, 'add Rotate the key')
+  b.draft = 'Re: Renew the domain — yes\nRe: Rotate the key — no'
+  const ui = await mountPane($, 'terminal')
+  await ui.press({ key: 'replynew-1' })
+  await ui.unmount()
+  expect(b.draft).toBe('Re: Renew the domain — yes\nRe: Rotate the key — no')
+  expect(w.toasts.some(t => t.includes('Reply new needs an empty box'))).toBe(true)
+})

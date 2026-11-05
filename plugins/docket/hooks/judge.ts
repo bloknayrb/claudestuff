@@ -101,7 +101,10 @@ function render(mode: Mode, claude: ClaudeEntry[], tools: ToolLine[], user: User
     parts.push(`<claude_text>\n${claude.map(c => c.text).join('\n\n')}\n</claude_text>`)
     parts.push(`<tool_lines>\n${tools.map(t => t.text).join('\n')}\n</tool_lines>`)
   }
-  parts.push(`<user_text>\n${user.map(u => u.text).join('\n\n')}\n</user_text>`)
+  // A walk reply carries which item it answers (v0.4): a check that runs after the walk has moved on
+  // still knows, from the reply itself rather than Claude's latest message.
+  const userLine = (u: UserEntry) => (u.focusId === undefined ? u.text : `(This reply answers open item ${u.focusId}.) ${u.text}`)
+  parts.push(`<user_text>\n${user.map(userLine).join('\n\n')}\n</user_text>`)
   return parts.join('\n\n')
 }
 

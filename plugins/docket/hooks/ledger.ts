@@ -103,8 +103,8 @@ export function refusal(s: DocketSession, item: Item, r: CheckedResolve): string
     // the judge quoted ("ok" from "ok thanks"). The exception is a reply that names the item itself, as
     // the Reply button's "Re: <item> — yes" does.
     const namesItem = normalise(e.text).toLowerCase().includes(normalise(`Re: ${item.text} —`).toLowerCase())
-    // A walk (v0.4): "skip", "later" and the like leave the walked item open, whatever the judge read.
-    if (e.focusId !== undefined && isSkip(e.text)) return 'skip-in-walk'
+    // A walk (v0.4): "skip", "later" and the like leave items open, whatever the judge read.
+    if (e.inWalk === true && isSkip(e.text)) return 'skip-in-walk'
     // The item Claude presented, alone and restated, in the turn this reply answers (stamped at addUser).
     const isFocused = e.focusId === item.id
     if ((isBare(r.evidence) || isBare(e.text)) && !namesItem && !isFocused) {
@@ -238,9 +238,17 @@ export function present(s: DocketSession, id: number): DocketSession {
   return { ...s, walkFocus: { id, turn, ids } }
 }
 
-export function addUser(s: DocketSession, text: string): DocketSession {
-  const focusId = walkFocusFor(s)
-  const entry: UserEntry = { seq: s.nextSeq, text: clip(text, 20000), afterTurn: s.turn, ...(focusId === undefined ? {} : { focusId }) }
+// isMidTurn: typed while a turn ran. Such a reply answers whatever that turn is saying, which the
+// last presented item may no longer be: it gets no focus stamp.
+export function addUser(s: DocketSession, text: string, isMidTurn = false): DocketSession {
+  const focusId = isMidTurn ? undefined : walkFocusFor(s)
+  const entry: UserEntry = {
+    seq: s.nextSeq,
+    text: clip(text, 20000),
+    afterTurn: s.turn,
+    ...(focusId === undefined ? {} : { focusId }),
+    ...(isWalking(s) ? { inWalk: true as const } : {}),
+  }
   return { ...s, pendingUser: [...s.pendingUser, entry].slice(-KEEP_USER), nextSeq: s.nextSeq + 1 }
 }
 
