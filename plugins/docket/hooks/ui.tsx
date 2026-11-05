@@ -195,7 +195,7 @@ function closedWhy(i: Item): string {
 }
 
 // What the list tool answers (v0.4): items by #id and text, as data. `presenting` is the id the call
-// named (undefined when none); `isChecking` marks rows a resolve check may still close.
+// named (undefined when none); `isChecking` adds a line: a resolve check may still close an item.
 export function listText(s: DocketSession, open: readonly Item[], groups: readonly CloseGroup[], now: number, presenting: number | 'bad' | undefined, isChecking: boolean): string {
   const lines: string[] = []
   if (presenting === 'bad') lines.push("That #id isn't on the Docket; use an #id from the list below.")

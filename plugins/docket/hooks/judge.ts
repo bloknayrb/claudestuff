@@ -203,7 +203,9 @@ export function parseVerdict(reply: string, snap: Snapshot): Parsed {
       // Haiku writes "id":"3" more often than not (the eval: 60-69 drops a round), so a numeric string
       // counts too.
       const id = typeof res?.id === 'number' ? res.id : typeof res?.id === 'string' && /^\d+$/.test(res.id.trim()) ? Number(res.id.trim()) : Number.NaN
-      const evidence = isString(res?.evidence) ? res.evidence : ''
+      // A walk reply's "(This reply answers open item N.)" is Docket's, not the user's: a quote that
+      // starts with it is checked without it.
+      const evidence = isString(res?.evidence) ? res.evidence.replace(/^\s*\(This reply answers open item \d+\.\)\s*/, '') : ''
       const note = isString(res?.note) ? clip(normalise(res.note), 80) : ''
       const isOpen = snap.openIds.includes(id)
       const isDup = resolves.some(x => x.id === id)

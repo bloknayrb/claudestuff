@@ -392,3 +392,18 @@ test('Reply new over a box answering two items refuses, so the second answer sta
   expect(b.draft).toBe('Re: Renew the domain — yes\nRe: Rotate the key — no')
   expect(w.toasts.some(t => t.includes('Reply new needs an empty box'))).toBe(true)
 })
+
+test('a Reply new line that also holds another item\'s Reply here answer is refused, so that answer stays here', async ($, on) => {
+  const w = world(on)
+  await start($)
+  await command($, 'add Renew the domain')
+  await command($, 'add Rotate the key')
+  const text = await newRun($, 'new #1 — yes\nRe: Rotate the key — no')
+  await w.clock.settle()
+  expect(text.includes('also answers "Rotate the key"')).toBe(true)
+  expect(handoffFiles(w).length).toBe(0)
+  expect(await openIds($)).toEqual([1, 2])
+  // A line that merely starts with "Re:" (a pasted subject) is fine.
+  const ok = await newRun($, 'new #1 — see below\nRe: your invoice')
+  expect(ok.startsWith('Docket: opening a new window')).toBe(true)
+})

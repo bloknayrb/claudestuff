@@ -1006,6 +1006,10 @@ async function newCommand($: EngineInterface, origin: string, rest: string): Pro
   if (parsed.label !== undefined && parsed.label !== label(item)) return `Docket: #${parsed.id} here is "${label(item)}", not the one you replied to.`
   const why = replyRefusal(parsed.reply)
   if (why !== '') return why
+  // A Reply here line for another open item further down ("…\nRe: B — no") is an answer for this
+  // session: it must not leave with the reply.
+  const other = s.items.find(i => i.status === 'open' && i.id !== item.id && parsed.reply.includes(`\nRe: ${i.text} —`))
+  if (other !== undefined) return `Docket: your reply also answers "${clip(other.text, 50)}" here; send that part on its own first.`
   const root = s.root !== '' ? s.root : await $.session.root()
   const tools = await launchTools($)
   const base = await baseDir($)
@@ -1014,7 +1018,8 @@ async function newCommand($: EngineInterface, origin: string, rest: string): Pro
   const nonce = newNonce(Math.random)
   const path = `${base}/handoff/${nonce}.json`
   if (await $.fs.exists(path).catch(() => true)) return "Docket: couldn't write the handoff (the name is taken); nothing changed."
-  // Everything that can throw comes before anything changes.
+  // The launch is built before anything changes. (A save failing after the close, or a reload before
+  // the launch timer, leaves the item closed with no window: Reopen recovers, and prune blanks the file.)
   const argv = wtArgv(tools.wt, tools.pwsh, root, item.text, launchScript(nonce, await $.env.get('CLAUDE_CONFIG_DIR')))
   const now = await $.clock.now()
   try {
@@ -1031,7 +1036,7 @@ async function newCommand($: EngineInterface, origin: string, rest: string): Pro
   })
   if (!isClosed) {
     await $.fs.write(path, blankText(nonce)).catch(err => fail($, 'handoff', err))
-    return `Docket: #${item.id} closed in the meantime; no window opened.`
+    return `Docket: #${item.id} closed, or the conversation changed, in the meantime; no window opened.`
   }
   await pauseKeys($)
   $.clock.after(0, () => void guard($, 'launch', launch($, argv, base)))
@@ -1061,9 +1066,18 @@ async function launch($: EngineInterface, argv: string[], cwd: string): Promise<
 // timers picks it up again (the file still reads waiting), and never fills twice after that.
 async function pickUp($: EngineInterface): Promise<void> {
   const proc = await readProc($)
-  const nonce = proc.handoffNonce
-  if (nonce === null || proc.handoffPicked || proc.isInteractive !== true || isPickingUp) return
+  if (proc.handoffNonce === null || proc.handoffPicked || proc.isInteractive !== true || isPickingUp) return
   isPickingUp = true
+  try {
+    await pickUpFrom($, proc.handoffNonce)
+  } catch (err) {
+    // A later session.start (or a reload) may try again.
+    isPickingUp = false
+    throw err
+  }
+}
+
+async function pickUpFrom($: EngineInterface, nonce: string): Promise<void> {
   const base = await baseDir($)
   // Nothing to fill: said once (or not at all, for one already taken), and never again on a reload.
   const settle = async (line?: string): Promise<void> => {
@@ -1106,13 +1120,23 @@ async function pickUp($: EngineInterface): Promise<void> {
       return done()
     }
     if (isEmpty && (await $.clock.now()) < until) {
-      $.clock.after(FILL_RETRY_MS, () => void guard($, 'handoff', attempt()))
+      $.clock.after(FILL_RETRY_MS, () => void guard($, 'handoff', attemptSafely()))
       return
     }
     $.ui.log(`Docket: couldn't put your reply in the box; here it is:\n${h.reply}`)
     await done()
   }
-  $.clock.after(0, () => void guard($, 'handoff', attempt()))
+  // Whatever else throws, the reply is shown rather than lost.
+  const attemptSafely = async (): Promise<void> => {
+    try {
+      await attempt()
+    } catch (err) {
+      isPickingUp = false
+      $.ui.log(`Docket: couldn't put your reply in the box; here it is:\n${h.reply}`)
+      throw err
+    }
+  }
+  $.clock.after(0, () => void guard($, 'handoff', attemptSafely()))
 }
 
 // Blanks handoff files: a forget blanks this session's; prune those past their age. The mod can't
@@ -1319,8 +1343,13 @@ export const register: Register = (on, options) => {
       await changeProc($, p => ({ ...p, isInteractive: e.isInteractive, epoch: p.epoch + 1, startupSid: p.startupSid ?? (isSafeSid(sid) ? sid : null), handoffNonce: p.handoffNonce ?? handoffNonce }))
       // Not inherited by the Bash tool's children (or read again by a reload).
       if (handoffNonce !== null) {
-        const unset = await $.env.set('DOCKET_HANDOFF', undefined)
-        if ('deny' in unset && unset.deny !== undefined) $.ui.log(`docket: couldn't unset DOCKET_HANDOFF: ${unset.deny}`, { to: 'debug' })
+        try {
+          const unset = await $.env.set('DOCKET_HANDOFF', undefined)
+          if ('deny' in unset && unset.deny !== undefined) $.ui.log(`docket: couldn't unset DOCKET_HANDOFF: ${unset.deny}`, { to: 'debug' })
+        } catch (err) {
+          // A refusal must not skip the landing below; pickUp is gated on isInteractive anyway.
+          $.ui.log(`docket: couldn't unset DOCKET_HANDOFF: ${err instanceof Error ? err.message : String(err)}`, { to: 'debug' })
+        }
       }
       await rehome($, sid, false)
       // Timers died with the old module: re-run the queue, and re-queue the current state (free when

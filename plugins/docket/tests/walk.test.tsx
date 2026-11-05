@@ -203,3 +203,13 @@ test('an unstamped "skip" during a walk is refused too', async ($, on) => {
   await say($, w, 'skip')
   expect(await openIds($)).toEqual([1, 2, 3])
 })
+
+test('a judge that quotes the walk annotation with the reply still closes the item', async ($, on) => {
+  const w = world(on)
+  await threeItems($, w)
+  await list($, '#2')
+  await turn($, w, 't1', ['Next: Rotate the key. Shall I?'])
+  w.replies.push(verdict({ resolve: [{ id: 2, by: 'you', note: 'go ahead', evidence: '(This reply answers open item 2.) yes' }] }))
+  await say($, w, 'yes')
+  expect(await openIds($)).toEqual([1, 3])
+})
