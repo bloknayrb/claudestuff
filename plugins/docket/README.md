@@ -34,6 +34,11 @@ Requires Claude Code 2.1.317 or newer (function-hook mods).
     answer names the item. Focus stays in the panel: click the prompt or press Esc to type.
   - **Reply new** answers the item in a new Claude Code window instead (below). Shown on Windows
     when Windows Terminal and PowerShell 7 are installed.
+  - **/btw** puts `/btw can you remind me what this item is and give me more context for making a
+    decision? "<item>"` (with Claude's words about it) in your prompt box. Focus stays in the panel,
+    so press Esc (or click the prompt), then Enter to ask. Claude
+    answers on the side, even mid-turn, and the answer neither enters the conversation nor closes the
+    item. It needs an empty box, or that item's own Reply lead with nothing typed after it.
   - **Done** closes it as handled by you, for things you did outside the chat.
   - **✕** dismisses it. The digit keys `1`-`9` do the same, in the order shown, while the panel has
     the keys (`ctrl+x tab`).

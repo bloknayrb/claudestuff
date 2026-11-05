@@ -20,6 +20,7 @@ export type Els = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
 export type Actions = {
   reply: (id: number) => void
   replyNew: (id: number) => void
+  btw: (id: number) => void
   walk: () => void
   done: (id: number) => void
   dismiss: (id: number) => void
@@ -87,6 +88,7 @@ function row(els: Els, item: Item, n: number, turn: number, act: Actions, isFocu
       <Box flexDirection="row" gap={2} paddingLeft={2}>
         <Button key={`reply-${item.id}`} plain label="Reply here" onPress={() => act.reply(item.id)} />
         {live.canReplyNew && <Button key={`replynew-${item.id}`} plain label="Reply new" onPress={() => act.replyNew(item.id)} />}
+        <Button key={`btw-${item.id}`} plain label="/btw" onPress={() => act.btw(item.id)} />
         <Button key={`done-${item.id}`} plain label="Done" onPress={() => act.done(item.id)} />
         <Button key={`dismiss-${item.id}`} plain label="✕" {...(isKeyed ? { hotkey: String(n + 1) } : {})} onPress={() => act.dismiss(item.id)} />
       </Box>

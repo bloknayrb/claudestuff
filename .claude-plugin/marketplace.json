@@ -81,7 +81,7 @@
     {
       "name": "docket",
       "source": "./plugins/docket",
-      "description": "A panel listing what Claude has said in prose is yours to decide or do; each item clears when you answer or act, Claude reports it done, or you dismiss it. Reply in a new window, or walk through the list with Claude"
+      "description": "A panel listing what Claude has said in prose is yours to decide or do; each item clears when you answer or act, Claude reports it done, or you dismiss it. Reply in a new window, ask /btw about an item, or walk through the list with Claude"
     },
     {
       "name": "claim-ledger",
