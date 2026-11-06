@@ -854,6 +854,13 @@ async function runNext($: EngineInterface, model: string): Promise<void> {
     isResolving = false
     redraw($)
   }
+  // v0.6: whatever the check came to (applied, failed, aborted, thrown away), a reply still waiting is
+  // queued again rather than left for the next prompt. Bounded: each failure counts against the reply.
+  try {
+    queueReplies(await readSession($), turnStartLen === undefined)
+  } catch (err) {
+    await fail($, 'judge', err)
+  }
   if (fullDue || resolveDue) schedule($, model)
 }
 
@@ -1609,7 +1616,7 @@ export const register: Register = (on, options) => {
       const cmd = bashInput(text)
       if (cmd !== undefined) {
         const s = await change($, cur => addUser(cur, `!${cmd}`))
-        queueReplies(s, false)
+        queueReplies(s, turnStartLen === undefined)
         schedule($, model)
       }
     } catch (err) {

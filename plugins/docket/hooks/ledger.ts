@@ -118,7 +118,9 @@ export function normalize(value: Partial<DocketSession> | undefined): DocketSess
     everHadItem: (value.everHadItem ?? false) || (value.items?.length ?? 0) > 0,
     lastCheck: { ...fresh.lastCheck, ...(value.lastCheck ?? {}) },
     view: { ...fresh.view, ...(value.view ?? {}) },
-    // v0.6 fields a live v0.5 value lacks.
+    // v0.6 fields a live v0.5 value lacks. Its pending replies answered the last final; marked clipped,
+    // since which part of it they saw is unknown, so they tie by message but are never labelled.
+    pendingUser: (value.pendingUser ?? []).map(u => (u.answered !== undefined || (value.lastFinal ?? '') === '' ? u : { ...u, answered: { text: redact(value.lastFinal ?? '').slice(-ANSWERED_CHARS), clipped: true } })),
     lastFinalClipped: value.lastFinalClipped ?? false,
     userLog: value.userLog ?? [],
     lastReply: value.lastReply ?? null,
@@ -162,22 +164,33 @@ function close(s: DocketSession, ids: readonly number[], by: Item['by'], notes: 
 
 // v0.6: whether a reply is tied to an item: Claude presented it in a walk (focus), the Reply button
 // named it (lead), or the message the reply answered is about it and about no other open item.
-export function tiedTo(s: DocketSession, e: { focusId?: number; namedId?: number; answered?: { text: string } }, item: Item): boolean {
-  if (e.focusId === item.id || e.namedId === item.id) return true
-  const msg = e.answered?.text ?? ''
-  if (msg === '' || !names(msg, item)) return false
-  return openItems(s).filter(i => i.id !== item.id && names(msg, i)).length === 0
+type Tie = { focusId?: number; namedId?: number; answered?: { text: string }; aboutIds?: number[] }
+
+// The items the message a reply answered is about: recorded when it was typed, against the items open
+// then (a sibling closed since must still count), or worked out now for an entry from before v0.6.
+const aboutOf = (s: DocketSession, e: Tie): number[] => e.aboutIds ?? (e.answered === undefined ? [] : openItems(s).filter(i => names((e.answered as { text: string }).text, i)).map(i => i.id))
+
+// The message a reply answered is about this item and about no other.
+export const isAboutOnly = (s: DocketSession, e: Tie, item: Item): boolean => {
+  const about = aboutOf(s, e)
+  return about.length === 1 && about[0] === item.id
+}
+
+export function tiedTo(s: DocketSession, e: Tie, item: Item): boolean {
+  return e.focusId === item.id || e.namedId === item.id || isAboutOnly(s, e, item)
 }
 
 // What a judged reply records on the item it closes (v0.6): the user's words, and for an option pick
-// tied to the item by its message, the option code read by their key.
+// whose message is about this item alone, the option code read by their key. A tie by focus or lead
+// says which item, not which list: a message about two items may hold the other one's options.
 export function answerFor(s: DocketSession, e: UserEntry, item: Item): Answer {
   const words = clean(wordsOf(e), 200)
   const pick = optionPick(wordsOf(e))
   const msg = e.answered
-  if (pick === undefined || msg === undefined || msg.clipped || e.midTurn === true || !names(msg.text, item)) return { words }
+  const base = { words, seq: e.seq }
+  if (pick === undefined || msg === undefined || msg.clipped || e.midTurn === true || !isAboutOnly(s, e, item)) return base
   const option = resolvePick(pick, msg.text)
-  return option === undefined ? { words } : { words, option: { key: option.key, label: clean(option.label, 80) } }
+  return option === undefined ? base : { ...base, option: { key: option.key, label: clean(option.label, 80) } }
 }
 
 // Code's own guards on a resolve, whatever the model said. Returns why it is refused, or ''.
@@ -363,11 +376,12 @@ export function present(s: DocketSession, id: number): DocketSession {
 
 // isMidTurn: typed while a turn ran. Such a reply answers whatever that turn is saying, which the
 // last presented item may no longer be: it gets no focus stamp.
-// The Reply button's lead (v0.6): the open item whose "Re: <item> — " the text starts with, and what
-// the user typed after it. Matched against the items' own leads, since an item's text may hold a dash.
+// The Reply button's lead (v0.6): the item whose "Re: <item> — " the text starts with, and what the user
+// typed after it. Matched against the items' own leads, since an item's text may hold a dash; against
+// closed items too, since an earlier reply may close the item before this one is sent.
 export function stripLead(s: DocketSession, text: string): { words: string; namedId?: number } {
   const t = text.trimStart()
-  for (const item of openItems(s)) {
+  for (const item of s.items) {
     const lead = leadHere(item).trimEnd()
     if (t.startsWith(lead)) return { words: t.slice(lead.length).trim(), namedId: item.id }
   }
@@ -380,10 +394,15 @@ export function addUser(s: DocketSession, text: string, isMidTurn = false): Dock
   // v0.6: the message the reply answers is the one on screen now, kept with it.
   const final = redact(s.lastFinal)
   const answered = final === '' ? undefined : { text: final.slice(-ANSWERED_CHARS), clipped: s.lastFinalClipped || final.length > ANSWERED_CHARS }
+  // Which items that message is about, open or closed, as of now: a later close must not make it look
+  // about one item only, and an item closed wrongly before this reply must still be one it is about
+  // (the case amend corrects).
+  const aboutIds = answered === undefined ? [] : s.items.filter(i => names(answered.text, i)).map(i => i.id)
   const stamps = {
     ...(focusId === undefined ? {} : { focusId }),
     ...(namedId === undefined ? {} : { namedId }),
     ...(answered === undefined ? {} : { answered }),
+    aboutIds,
   }
   const entry: UserEntry = {
     seq: s.nextSeq,

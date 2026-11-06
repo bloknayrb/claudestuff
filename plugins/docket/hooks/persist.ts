@@ -144,7 +144,8 @@ function readAnswer(x: unknown): Answer {
   if (!isObj(x)) return fail('answer')
   const option = opt(x, 'option', o => (isObj(o) ? { key: str(o.key, 2), label: str(o.label, 80) } : fail('option')))
   const linked = opt(x, 'linked', bool)
-  return { words: str(x.words, 2000), ...(option === undefined ? {} : { option }), ...(linked === true ? { linked: true as const } : {}) }
+  const seq = opt(x, 'seq', s => int(s, 1))
+  return { words: str(x.words, 2000), ...(option === undefined ? {} : { option }), ...(linked === true ? { linked: true as const } : {}), ...(seq === undefined ? {} : { seq }) }
 }
 
 export function readItem(v: unknown, sid: string, savedAt: number): Item {

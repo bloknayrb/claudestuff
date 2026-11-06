@@ -131,6 +131,33 @@ test('an aborted turn is not judged; its text rides with the next check', async 
   expect(w.calls[0]?.prompt.includes('Should I rotate the key?')).toBe(true)
 })
 
+test("v0.6: a reply after an aborted turn, with no turn after it, schedules that turn's check and is judged", async ($, on) => {
+  const w = world(on)
+  await start($)
+  await command($, 'add Pick the cache')
+  await turn($, w, 't1', [ASK], { reason: 'aborted' })
+  expect(w.calls.length).toBe(0)
+  w.replies.push(verdict({}), verdict({ resolve: [{ id: 1, by: 'you', note: 'SQLite', evidence: 'use sqlite' }] }))
+  // Typed while the session is idle; no turn follows in this test.
+  await say($, w, 'use sqlite')
+  expect(w.calls.length).toBe(2)
+  expect(w.calls[0]?.prompt.includes(ASK)).toBe(true)
+  expect(w.calls[1]?.prompt.includes('use sqlite')).toBe(true)
+  expect(await openIds($)).toEqual([])
+})
+
+test('v0.6: a failed check is retried for a waiting reply without another prompt, and the reply is then judged', async ($, on) => {
+  const w = world(on)
+  await start($)
+  w.replies.push({ fail: 'api-error' })
+  await turn($, w, 't1', [ASK])
+  w.replies.push({ fail: 'api-error' }, ADD_ASK, verdict({ resolve: [{ id: 1, by: 'you', note: 'SQLite', evidence: 'use sqlite' }] }))
+  await say($, w, 'use sqlite')
+  expect(w.calls.length).toBe(4)
+  expect(w.calls[3]?.prompt.includes('resolve-only')).toBe(true)
+  expect(await openIds($)).toEqual([])
+})
+
 test('failures: api-error and non-JSON mark the band; the first of a streak toasts once', async ($, on) => {
   const w = world(on)
   await start($)

@@ -24,13 +24,15 @@ const flat = (t: string): string => normalise(redact(t)).toLowerCase()
 
 // The user's typed reply that evidence quotes: the whole reply, or at least 8 characters of one, typed
 // after `afterTurn`. The newest match wins.
-export function findReply(s: DocketSession, evidence: string, afterTurn: number): LoggedReply | undefined {
+export function findReply(s: DocketSession, evidence: string, afterTurn: number, prefer?: number): LoggedReply | undefined {
   const ev = flat(evidence)
   if (ev === '') return undefined
-  return [...s.userLog].reverse().find(l => l.afterTurn >= afterTurn && (flat(l.words) === ev || (ev.length >= MIN_SPAN && flat(l.words).includes(ev))))
+  const hits = [...s.userLog].reverse().filter(l => l.afterTurn >= afterTurn && (flat(l.words) === ev || (ev.length >= MIN_SPAN && flat(l.words).includes(ev))))
+  // Two replies with the same words ("1", "yes"): the one that closed the item, when it is among them.
+  return hits.find(l => l.seq === prefer) ?? hits[0]
 }
 
-const asEntry = (l: LoggedReply): UserEntry => ({ seq: l.seq, text: l.words, afterTurn: l.afterTurn, words: l.words, ...(l.focusId === undefined ? {} : { focusId: l.focusId }), ...(l.namedId === undefined ? {} : { namedId: l.namedId }), ...(l.answered === undefined ? {} : { answered: l.answered }) })
+const asEntry = (l: LoggedReply): UserEntry => ({ seq: l.seq, text: l.words, afterTurn: l.afterTurn, words: l.words, ...(l.focusId === undefined ? {} : { focusId: l.focusId }), ...(l.namedId === undefined ? {} : { namedId: l.namedId }), ...(l.answered === undefined ? {} : { answered: l.answered }), ...(l.aboutIds === undefined ? {} : { aboutIds: l.aboutIds }) })
 
 function state(i: Item): string {
   return i.status === 'open' ? `#${i.id} is open` : `#${i.id} is already closed`
@@ -58,11 +60,12 @@ export function amend(s: DocketSession, id: number | undefined, correction: unkn
   }
   const text = typeof correction === 'string' ? sanitise(redact(correction), 200) : ''
   if (text === '') return { session: s, text: 'amend needs the corrected resolution as text.' }
-  const reply = typeof evidence === 'string' ? findReply(s, evidence, item.openedTurn) : undefined
+  const reply = typeof evidence === 'string' ? findReply(s, evidence, item.openedTurn, item.answer.seq) : undefined
   if (reply === undefined) {
     return { session: s, text: `That evidence isn't the user's own reply, typed after #${item.id} opened: quote the whole reply, or at least ${MIN_SPAN} characters of it, exactly.` }
   }
-  const isSame = flat(reply.words) === flat(item.answer.words)
+  // The same reply by its seq; by its words only for a close recorded without one.
+  const isSame = item.answer.seq !== undefined ? reply.seq === item.answer.seq : flat(reply.words) === flat(item.answer.words)
   if (!isSame && !tiedTo(s, asEntry(reply), item)) {
     return { session: s, text: `That reply isn't about #${item.id}: it wasn't presented, replied to, or named in the message the user answered. Annotate instead.` }
   }

@@ -6,6 +6,7 @@ import type { Snapshot, Verdict } from '../hooks/judge'
 import { addTurn, addUser, applyVerdict, freshSession, judgeable, markDone, handOff, MAX_REPLY_FAILS, failWaiting, names, openItems, stripLead, tiedTo } from '../hooks/ledger'
 import { parseSlot, toLedger, envelope, restore } from '../hooks/persist'
 import { amend, annotate, closeByClaude } from '../hooks/tools'
+import { optionPick } from '../hooks/options'
 import { closeByTool } from '../hooks/ledger'
 import { leadHere } from '../hooks/spawn'
 import type { DocketSession, Item } from '../types'
@@ -34,7 +35,7 @@ test('a pick is labelled from the message it answered, which names the item', as
   const s = addUser(session(two(), 2, MSG_41), '1')
   const r = resolveWith(s, [{ id: 1, evidence: '1', note: 'Chose option 2' }])
   const closed = r.session.items.find(i => i.id === 1)
-  expect(closed?.answer).toEqual({ words: '1', option: { key: '1', label: 'Stay silent (recommended)' } })
+  expect(closed?.answer).toEqual({ words: '1', seq: 1, option: { key: '1', label: 'Stay silent (recommended)' } })
   expect(closed?.note).toBe('')
   expect(closedLine(closed as Item)).toBe('you chose option 1, "Stay silent (recommended)"')
 })
@@ -59,7 +60,7 @@ test('a pick the message does not tie to the item is refused; one tied by lead o
   const led = addUser(session(two(), 2, MSG_41), `${leadHere(item(2, { text: ITEM_42 }))}1`)
   const r = resolveWith(led, [{ id: 2, evidence: '1' }])
   expect(r.refused).toEqual([])
-  expect(r.session.items.find(i => i.id === 2)?.answer).toEqual({ words: '1' })
+  expect(r.session.items.find(i => i.id === 2)?.answer).toEqual({ words: '1', seq: 1 })
   // A lead for one item never lets the pick close another.
   expect(resolveWith(led, [{ id: 1, evidence: '1' }]).refused).toEqual(['option-other-item'])
 })
@@ -71,9 +72,9 @@ test('a mid-turn pick or bare reply closes nothing unless its lead names the ite
 
 test('a clipped answered message, two lists, or a repeated key records the words alone', async () => {
   const clipped = { ...addUser({ ...session(two(), 2, MSG_41), lastFinalClipped: true }, '1') }
-  expect(resolveWith(clipped, [{ id: 1, evidence: '1' }]).session.items.find(i => i.id === 1)?.answer).toEqual({ words: '1' })
+  expect(resolveWith(clipped, [{ id: 1, evidence: '1' }]).session.items.find(i => i.id === 1)?.answer).toEqual({ words: '1', seq: 1 })
   const twoLists = addUser(session(two(), 2, `${MSG_41}\n\nSteps:\n1. Build.\n2. Test.`), '1')
-  expect(resolveWith(twoLists, [{ id: 1, evidence: '1' }]).session.items.find(i => i.id === 1)?.answer).toEqual({ words: '1' })
+  expect(resolveWith(twoLists, [{ id: 1, evidence: '1' }]).session.items.find(i => i.id === 1)?.answer).toEqual({ words: '1', seq: 1 })
 })
 
 test('names: text or quote, never a bare #id', async () => {
@@ -125,7 +126,7 @@ test('a full prompt never carries the user words; a resolve prompt carries one r
 test('buttons and Claude closes say so; an unknown close renders safely', async () => {
   expect(closedHead(markDone(session([item(1)]), 1, 0).items[0] as Item)).toBe('you marked it done')
   expect(closedHead(handOff(session([item(1)]), 1, 0).items[0] as Item)).toBe('you sent it to a new window')
-  expect(closedHead(item(1, { status: 'resolved', by: 'you', note: 'Approved' }))).toBe('closed from your reply')
+  expect(closedHead(item(1, { status: 'resolved', by: 'you', note: 'Approved' }))).toBe('closed by you')
   expect(closedLine(item(1, { status: 'resolved', by: 'claude', note: 'merged' }))).toBe("per Claude's report: merged")
   expect(closedHead(item(1, { status: 'dismissed', by: 'bogus' as never }))).toBe('closed')
 })
@@ -215,4 +216,28 @@ test('storage: v0.6 records round-trip, a v0.5 snapshot loads, a restored long f
   const long = restore({ ...toLedger(session([], 1, 'x'.repeat(7000))) }, 's', 'C:/r')
   expect(long.lastFinalClipped).toBe(true)
   void tiedTo
+})
+
+test("review: a pick tied by a Reply lead takes no label from another item's list in the same message", async () => {
+  const items = [item(1, { text: 'Rotate the deploy key' }), item(2, { text: 'Decide on the badge' })]
+  const msg = ['Rotate the deploy key is done on my side.', '', 'Separately, Decide on the badge:', '1. **Keep.** x', '2. **Remove.** y'].join('\n')
+  const s = addUser(session(items, 2, msg), `${leadHere(items[0] as Item)}1`)
+  const r = resolveWith(s, [{ id: 1, evidence: '1' }])
+  expect(r.session.items.find(i => i.id === 1)?.answer).toEqual({ words: '1', seq: 1 })
+})
+
+test('review: amend picks the reply that closed the item when two replies share its words', async () => {
+  let s = session([item(1, { text: ITEM_41 }), item(2, { text: ITEM_42 })], 2, MSG_41)
+  s = addUser(s, '1')
+  s = resolveWith(s, [{ id: 1, evidence: '1' }]).session
+  s = addUser({ ...s, turn: 3, lastFinal: MSG_42 }, '1')
+  s = resolveWith(s, [{ id: 2, evidence: '1' }]).session
+  const r = amend(s, 1, 'Recorded right.', '1', 10).session.items.find(i => i.id === 1) as Item
+  expect(r.answer).toEqual({ words: '1', seq: 1, option: { key: '1', label: 'Stay silent (recommended)' } })
+  expect(youPart(r)).toBe('you chose option 1, "Stay silent (recommended)"')
+})
+
+test('review: a hyphenated word is prose, not a pick', async () => {
+  for (const t of ['e-mail them', 'a-ok', 'd-day', '10-minute call works']) expect(optionPick(t)).toBe(undefined)
+  expect(optionPick('2 - but keep it')).toEqual({ key: '2', tail: 'but keep it' })
 })

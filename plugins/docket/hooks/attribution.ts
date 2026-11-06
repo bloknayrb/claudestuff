@@ -21,7 +21,7 @@ export function youPart(i: Item): string | undefined {
   if (i.via === 'done' || (i.answer === undefined && i.note === DONE_NOTE)) return 'you marked it done'
   if (i.via === 'reply-new' || (i.answer === undefined && i.note === REPLY_NEW_NOTE)) return 'you sent it to a new window'
   const a = i.answer
-  if (a === undefined) return 'closed from your reply'
+  if (a === undefined) return 'closed by you'
   const linked = a.linked === true ? ' (linked by Claude)' : ''
   if (a.option !== undefined) {
     const option = `option ${a.option.key}, ${q(a.option.label, 80)}`

@@ -11,8 +11,8 @@ export type ClosedBy = 'you' | 'claude' | 'dismiss' | 'clear' | 'claude-tool'
 
 // What the user said when a reply of theirs closed an item (v0.6): their words as typed (the Reply lead
 // stripped), and, for an option pick, the option code read by their key. linked: Claude's amend tied
-// these words to the item; they are not the reply that first closed it.
-export type Answer = { words: string; option?: { key: string; label: string }; linked?: true }
+// these words to the item; they are not the reply that first closed it. seq: that reply's.
+export type Answer = { words: string; option?: { key: string; label: string }; linked?: true; seq?: number }
 export type CloseKind = 'duplicate' | 'settled-earlier' | 'user-asked' | 'done-by-claude' | 'stale'
 // Why Claude closed an item with the close tool. dupOf for a duplicate; cite: the #id or the user's words.
 export type Closure = { kind: CloseKind; reason: string; dupOf?: number; cite?: string }
@@ -78,12 +78,14 @@ export type UserEntry = {
   midTurn?: true
   fails?: number
   answered?: Answered
+  // The open items that message was about when the reply was typed (v0.6).
+  aboutIds?: number[]
 }
 // clipped: the message was longer than what was kept, so its option lists can't be trusted whole.
 export type Answered = { text: string; clipped: boolean }
 // One prompt the user typed, as Docket recorded it (v0.6): the only source amend and close cite from.
 // overCap: open items its check left by the per-reply limit; answered and the stamps tie it to items.
-export type LoggedReply = { seq: number; words: string; afterTurn: number; overCap?: number[]; focusId?: number; namedId?: number; answered?: Answered }
+export type LoggedReply = { seq: number; words: string; afterTurn: number; overCap?: number[]; focusId?: number; namedId?: number; answered?: Answered; aboutIds?: number[] }
 // The latest judged reply whose verdict went over the per-reply limit (v0.6). shown: list has shown it.
 export type LastReply = { seq: number; words: string; closed: number[]; overCap: number[]; shown: boolean }
 // One assistant message's text, or one tool line, tagged with the main turn it came from.

@@ -11,7 +11,7 @@ const KEY = String.raw`(\d{1,2}|[a-h])`
 // What may come before the key. Not '#': "#2" is a docket or GitHub number as often as an option.
 const LEAD = String.raw`(?:(?:option|choice|number|go with|pick)\s+)?`
 // After the key: nothing, a closing mark, or a tail introduced by punctuation or one of a few words.
-const PICK = new RegExp(String.raw`^${LEAD}${KEY}\s*[.)]?\s*(?:$|[,;:-]\s*(.*)$|\s+((?:but|please|with|thanks|and keep)\b.*)$)`, 'i')
+const PICK = new RegExp(String.raw`^${LEAD}${KEY}\s*[.)]?\s*(?:$|(?:[,;:]|\s-|-\s)\s*(.*)$|\s+((?:but|please|with|thanks|and keep)\b.*)$)`, 'i')
 
 // A reply made of one option key, with an optional lead word and tail. Prose that only starts with a
 // key ("a good idea", "1 more thing") and several keys ("1 and 3", "1, 3") are not picks.
