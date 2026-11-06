@@ -65,12 +65,14 @@ export function amend(s: DocketSession, id: number | undefined, correction: unkn
     return { session: s, text: `That evidence isn't the user's own reply, typed after #${item.id} opened: quote the whole reply, or at least ${MIN_SPAN} characters of it, exactly.` }
   }
   // The same reply by its seq; by its words only for a close recorded without one.
-  const isSame = item.answer.seq !== undefined ? reply.seq === item.answer.seq : flat(reply.words) === flat(item.answer.words)
+  // Compared with the reply that closed the item, kept in superseded after a first amend: citing it again
+  // is Docket's own record, not a link Claude made.
+  const closing = item.superseded?.answer ?? item.answer
+  const isSame = closing.seq !== undefined ? reply.seq === closing.seq : flat(reply.words) === flat(closing.words)
   if (!isSame && !tiedTo(s, asEntry(reply), item)) {
     return { session: s, text: `That reply isn't about #${item.id}: it wasn't presented, replied to, or named in the message the user answered. Annotate instead.` }
   }
-  // A second amend keeps the mark: the words are still ones Claude linked, not the reply that closed it.
-  const isLinked = !isSame || item.answer.linked === true
+  const isLinked = !isSame
   const answer = { ...answerFor(s, asEntry(reply), item), ...(isLinked ? { linked: true as const } : {}) }
   const superseded = item.superseded !== undefined
     ? { ...item.superseded, correction: text, at: now }

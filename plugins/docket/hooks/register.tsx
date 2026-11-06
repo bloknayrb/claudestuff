@@ -45,6 +45,8 @@ let progressed = false
 // This module instance, claimed in proc at session.start: after a hot reload, an old instance's runner
 // stops queueing, so two runners never judge the same reply.
 const RUNNER = Math.floor(Math.random() * 1e9) + 1
+// Unclaimed (no session.start yet) counts as this instance's: only a newer instance's claim stops it.
+const isRunner = (p: DocketProc): boolean => p.runner === null || p.runner === RUNNER
 let controller: AbortController | undefined
 // Writes run one after another on this chain, so no two share a slot.
 let saveChain: Promise<void> = Promise.resolve()
@@ -856,6 +858,9 @@ async function runNext($: EngineInterface, model: string): Promise<void> {
   redraw($)
   try {
     await runCheck($, mode, model)
+  } catch (err) {
+    // Reported here, not thrown past the reschedule: a fullDue set while this ran must still run.
+    await fail($, 'judge', err)
   } finally {
     inFlight = false
     isResolving = false
@@ -863,10 +868,13 @@ async function runNext($: EngineInterface, model: string): Promise<void> {
   }
   // v0.6: when the check changed something (applied, failed, let a reply go), a reply still waiting is
   // queued again rather than left for the next prompt. Bounded: each failure counts against the reply.
+  // An instance a reload replaced neither queues nor reschedules, so two never judge the same reply.
   try {
-    if (progressed && (await readProc($)).runner === RUNNER) queueReplies(await readSession($), turnStartLen === undefined)
+    if (!isRunner(await readProc($))) return
+    if (progressed) queueReplies(await readSession($), turnStartLen === undefined)
   } catch (err) {
     await fail($, 'judge', err)
+    return
   }
   if (fullDue || resolveDue) schedule($, model)
 }
@@ -1448,12 +1456,18 @@ export const register: Register = (on, options) => {
     } catch (err) {
       await fail($, 'handoff env', err)
     }
+    // The runner claim first, in its own try: a failure below must not leave this instance unclaimed.
+    try {
+      await changeProc($, p => ({ ...p, runner: RUNNER }))
+    } catch (err) {
+      await fail($, 'runner', err)
+    }
     try {
       await $.command.register({ name: 'docket', description: 'Docket: open or close the pane of what Claude left for you to decide or do (add <text>, clear, walk, carry on|off, forget)', immediate: true })
       loadedAt = await $.clock.now()
       const sid = await $.session.id()
       // A reload: any check the old module started is now stale.
-      await changeProc($, p => ({ ...p, runner: RUNNER, isInteractive: e.isInteractive, epoch: p.epoch + 1, startupSid: p.startupSid ?? (isSafeSid(sid) ? sid : null), handoffNonce: p.handoffNonce ?? handoffNonce }))
+      await changeProc($, p => ({ ...p, isInteractive: e.isInteractive, epoch: p.epoch + 1, startupSid: p.startupSid ?? (isSafeSid(sid) ? sid : null), handoffNonce: p.handoffNonce ?? handoffNonce }))
       // Not inherited by the Bash tool's children (or read again by a reload).
       if (handoffNonce !== null) {
         try {

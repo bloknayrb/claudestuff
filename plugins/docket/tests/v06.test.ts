@@ -156,6 +156,29 @@ test('amend fixes the #41 mislabel by the user\'s later "1": linked by Claude, t
   expect(line.startsWith('you chose option 1')).toBe(true)
 })
 
+test('review: amending back to the reply that closed the item drops the linked mark', async () => {
+  const once = amend(the41Mislabel(), 1, 'Option 1.', '1', 10).session
+  const back = amend(once, 1, 'Option 2 after all.', 'option 2', 11)
+  expect(back.session).not.toBe(once)
+  const it = back.session.items.find(i => i.id === 1) as Item
+  expect(youPart(it).includes('linked by Claude')).toBe(false)
+  expect(it.answer?.words).toBe('option 2')
+})
+
+test('review: an item Claude closed still counts for what a message is about; a duplicate it closed does not', async () => {
+  const msg = 'Two things: Merge the docs PR? And Renew the domain?'
+  const base = session([item(1, { text: 'Merge the docs PR' }), item(2, { text: 'Renew the domain' })], 2, msg)
+  const stale = closeByClaude(base, 2, 'stale', 'no longer relevant', undefined, 9, closeFn).session
+  expect(addUser(stale, 'yes').pendingUser.at(-1)?.aboutIds).toEqual([1, 2])
+  const dup = closeByClaude(base, 2, 'duplicate-of:#1', 'same ask', undefined, 9, closeFn).session
+  expect(addUser(dup, 'yes').pendingUser.at(-1)?.aboutIds).toEqual([1])
+})
+
+test('review: the longest lead wins over an open item whose lead it starts with', async () => {
+  const s = session([item(1, { text: 'Ship it — now', status: 'resolved', by: 'you', note: 'x' }), item(2, { text: 'Ship it' })])
+  expect(stripLead(s, `${leadHere(item(1, { text: 'Ship it — now' }))}yes`)).toEqual({ words: 'yes', namedId: 1 })
+})
+
 test('amend refuses Claude-supplied evidence, a short span, an open item, and a button close', async () => {
   const s = the41Mislabel()
   expect(amend(s, 1, 'x', 'the user chose to stay silent', 10).session).toBe(s)

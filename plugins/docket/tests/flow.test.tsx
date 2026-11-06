@@ -166,6 +166,16 @@ test('v0.6: a reply before the session is known waits without spinning, and make
   expect(w.calls.length).toBe(0)
 })
 
+test('v0.6: after session.start, a reply while the session stays pending still never spins', async ($, on) => {
+  const w = world(on)
+  // An unsafe id: the docket stays on its pending session, with this instance's runner claimed.
+  w.sessionId = '../not-a-session'
+  await start($)
+  await say($, w, 'use sqlite')
+  await w.clock.settle()
+  expect(w.calls.length).toBe(0)
+})
+
 test('failures: api-error and non-JSON mark the band; the first of a streak toasts once', async ($, on) => {
   const w = world(on)
   await start($)
