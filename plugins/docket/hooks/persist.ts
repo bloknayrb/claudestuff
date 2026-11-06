@@ -1,7 +1,7 @@
 // Pure: what a snapshot holds, how it is written and how a file read back is checked. Nothing here
 // takes $. A file on disk is untrusted: every field is rebuilt by hand, and any failure rejects it.
 
-import type { CarrySource, CarryState, ClosedBy, DocketProc, DocketSession, DocketWriter, Item, ItemKind, ItemStatus, LastCheck, WriteKind } from '../types'
+import type { Answer, CarrySource, CarryState, CloseKind, ClosedBy, DocketProc, DocketSession, DocketWriter, Item, ItemKind, ItemStatus, LastCheck, WriteKind } from '../types'
 import { freshSession, KEEP_TOOL_ASKED } from './ledger'
 import { clip, redact, sanitise } from './text'
 
@@ -36,6 +36,7 @@ export const freshProc = (): DocketProc => ({
   handoffPicked: false,
   handoffContext: null,
   canReplyNew: false,
+  runner: null,
 })
 export const freshWriter = (): DocketWriter => ({ seqBy: {}, lastText: {}, pending: {}, rootBy: {}, closed: {}, forgotten: {} })
 export const normProc = (v: Partial<DocketProc> | undefined): DocketProc => ({ ...freshProc(), ...(v ?? {}) })
@@ -70,14 +71,27 @@ export type Slot = { seq: number; root: string; savedAt: number; ledger: Ledger 
 
 const r = (t: string): string => redact(t)
 
-// The persisted part of a session. Buffers (pendingUser, claude, tools) and the view stay out; a closed
-// item's note is dropped; every string is redacted again as a backstop to redaction at entry.
+const rAnswer = (a: Answer): Answer => ({ ...a, words: r(a.words), ...(a.option === undefined ? {} : { option: { key: a.option.key, label: r(a.option.label) } }) })
+
+// v0.6: the user's words and Claude's notes, closures and corrections, redacted for the disk.
+export function redactRecords(i: Item): Item {
+  return {
+    ...i,
+    ...(i.answer === undefined ? {} : { answer: rAnswer(i.answer) }),
+    ...(i.notes === undefined ? {} : { notes: i.notes.map(n => ({ ...n, text: r(n.text) })) }),
+    ...(i.closure === undefined ? {} : { closure: { ...i.closure, reason: r(i.closure.reason), ...(i.closure.cite === undefined ? {} : { cite: r(i.closure.cite) }) } }),
+    ...(i.superseded === undefined ? {} : { superseded: { ...i.superseded, correction: r(i.superseded.correction), ...(i.superseded.note === undefined ? {} : { note: r(i.superseded.note) }), ...(i.superseded.answer === undefined ? {} : { answer: rAnswer(i.superseded.answer) }) } }),
+  }
+}
+
+// The persisted part of a session. Buffers (pendingUser, claude, tools, userLog) and the view stay out;
+// every string is redacted again as a backstop to redaction at entry. v0.6 keeps a closed item's note
+// (it was dropped before): an amend's superseded reading has to survive a resume.
 export function toLedger(s: DocketSession): Ledger {
   return {
     items: s.items.map(i => {
-      const { note, ...rest } = i
-      const kept: Item = { ...rest, text: r(i.text), quote: r(i.quote), origin: i.origin ?? `${s.sid}:${i.id}` }
-      return i.status === 'open' && note !== undefined ? { ...kept, note: r(note) } : kept
+      const kept: Item = { ...i, text: r(i.text), quote: r(i.quote), origin: i.origin ?? `${s.sid}:${i.id}` }
+      return redactRecords(i.note === undefined ? kept : { ...kept, note: r(i.note) })
     }),
     nextId: s.nextId,
     turn: s.turn,
@@ -121,8 +135,19 @@ const opt = <T>(o: Record<string, unknown>, k: string, f: (v: unknown) => T): T 
 
 const KINDS: readonly ItemKind[] = ['decide', 'do']
 const STATUSES: readonly ItemStatus[] = ['open', 'resolved', 'dismissed']
-const BYS: readonly ClosedBy[] = ['you', 'claude', 'dismiss', 'clear']
+const BYS: readonly ClosedBy[] = ['you', 'claude', 'dismiss', 'clear', 'claude-tool']
+const KINDS_CLOSE: readonly CloseKind[] = ['duplicate', 'settled-earlier', 'user-asked', 'done-by-claude', 'stale']
+const VIAS = ['done', 'reply-new'] as const
+export const MAX_NOTES = 5
 const SOURCES = ['judge', 'manual'] as const
+
+function readAnswer(x: unknown): Answer {
+  if (!isObj(x)) return fail('answer')
+  const option = opt(x, 'option', o => (isObj(o) ? { key: str(o.key, 2), label: str(o.label, 80) } : fail('option')))
+  const linked = opt(x, 'linked', bool)
+  const seq = opt(x, 'seq', s => int(s, 1))
+  return { words: str(x.words, 2000), ...(option === undefined ? {} : { option }), ...(linked === true ? { linked: true as const } : {}), ...(seq === undefined ? {} : { seq }) }
+}
 
 export function readItem(v: unknown, sid: string, savedAt: number): Item {
   if (!isObj(v)) return fail('item')
@@ -147,7 +172,28 @@ export function readItem(v: unknown, sid: string, savedAt: number): Item {
   const reopenedAtSeq = opt(v, 'reopenedAtSeq', x => int(x))
   const reopenedAtTurn = opt(v, 'reopenedAtTurn', x => int(x))
   const carriedAt = opt(v, 'carriedAt', num)
+  // v0.6 records, each optional so a v0.5 file loads.
+  const answer = opt(v, 'answer', readAnswer)
+  const via = opt(v, 'via', x => oneOf(x, VIAS))
+  const notes = opt(v, 'notes', x => (Array.isArray(x) && x.length <= MAX_NOTES ? x.map(n => (isObj(n) ? { text: str(n.text, 200), at: num(n.at) } : fail('note'))) : fail('notes')))
+  const closure = opt(v, 'closure', x => {
+    if (!isObj(x)) return fail('closure')
+    const dupOf = opt(x, 'dupOf', d => int(d, 1))
+    const cite = opt(x, 'cite', c => str(c, 2000))
+    return { kind: oneOf(x.kind, KINDS_CLOSE), reason: str(x.reason, 200), ...(dupOf === undefined ? {} : { dupOf }), ...(cite === undefined ? {} : { cite }) }
+  })
+  const superseded = opt(v, 'superseded', x => {
+    if (!isObj(x)) return fail('superseded')
+    const n = opt(x, 'note', y => str(y, 80))
+    const a = opt(x, 'answer', readAnswer)
+    return { at: num(x.at), correction: str(x.correction, 200), ...(n === undefined ? {} : { note: n }), ...(a === undefined ? {} : { answer: a }) }
+  })
   return {
+    ...(answer === undefined ? {} : { answer }),
+    ...(via === undefined ? {} : { via }),
+    ...(notes === undefined ? {} : { notes }),
+    ...(closure === undefined ? {} : { closure }),
+    ...(superseded === undefined ? {} : { superseded }),
     ...item,
     ...(by === undefined ? {} : { by }),
     ...(note === undefined ? {} : { note }),
@@ -228,5 +274,6 @@ export function pickSlot(a: Slot | null, b: Slot | null): Slot | null {
 
 // A session rebuilt from a snapshot: the ledger's fields over a fresh session, buffers and view empty.
 export function restore(ledger: Ledger, sid: string, root: string): DocketSession {
-  return { ...freshSession(), ...ledger, sid, root, restored: true }
+  // lastFinal comes back cut to the saved length: a reply to it can't read its option lists whole.
+  return { ...freshSession(), ...ledger, sid, root, restored: true, lastFinalClipped: ledger.lastFinal.length >= LAST_FINAL_CHARS }
 }

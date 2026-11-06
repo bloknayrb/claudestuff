@@ -7,11 +7,12 @@ import { CARRY_MAX_AGE_MS, carryEnvelope, carryText, claimers, claimText, folder
 import type { CarryFile } from './carry'
 import { buildPrompt, parseVerdict, RULES } from './judge'
 import type { Mode } from './judge'
-import { addManual, addToolAsked, addTurn, addUser, applyVerdict, clearAll, closedForJudge, closeGroups, dismiss, freshSession, handOff, isWalking, isWalkLive, markDone, normalize, openItems, present, reopen } from './ledger'
+import { annotate, amend, closeByClaude, parseId } from './tools'
+import { addManual, addToolAsked, addTurn, addUser, applyVerdict, clearAll, closableBy, closeByTool, closedForJudge, closeGroups, consumeReply, dismiss, failReply, failWaiting, freshSession, handOff, isBlocked, isWalking, isWalkLive, judgeable, markDone, MAX_RESOLVES, normalize, openItems, present, reopen } from './ledger'
 import { envelope, freshProc, freshWriter, isRealSid, isSafeSid, ledgerText, normProc, normWriter, parseSlot, pickSlot, restore, RETAIN_MS, slotName, tombstone, withKey, withoutKey, writeKey } from './persist'
 import { blankText, btwQuestion, contextBlock, HANDOFF_MAX_AGE_MS, isBtwText, isNonce, isRootSafe, label, launchScript, leadHere, leadNew, newNonce, parseHandoff, parseNewArgs, replyRefusal, tailAfter, takenText, waitingText, wtArgv } from './spawn'
 import { clip } from './text'
-import { ARM_DELAY_MS, indicatorText, indicatorTree, listText, PANE_COLUMNS, PANE_ID, PANE_TITLE, paneTree } from './ui'
+import { ARM_DELAY_MS, indicatorText, indicatorTree, listText, overCapLine, PANE_COLUMNS, PANE_ID, PANE_TITLE, paneTree } from './ui'
 import type { Actions, WalkKind } from './ui'
 
 const MODELS = ['haiku', 'sonnet', 'opus'] as const
@@ -38,6 +39,14 @@ let resolveDue = false
 let fullDue = false
 let inFlight = false
 let isResolving = false
+// v0.6: the check just run changed something (applied a verdict, recorded a failure, let a reply go).
+// Only then is a waiting reply queued again, so a check that can't run (no session yet) never spins.
+let progressed = false
+// This module instance, claimed in proc at session.start: after a hot reload, an old instance's runner
+// stops queueing, so two runners never judge the same reply.
+const RUNNER = Math.floor(Math.random() * 1e9) + 1
+// Unclaimed (no session.start yet) counts as this instance's: only a newer instance's claim stops it.
+const isRunner = (p: DocketProc): boolean => p.runner === null || p.runner === RUNNER
 let controller: AbortController | undefined
 // Writes run one after another on this chain, so no two share a slot.
 let saveChain: Promise<void> = Promise.resolve()
@@ -839,29 +848,50 @@ async function runNext($: EngineInterface, model: string): Promise<void> {
   if (inFlight) return
   const mode: Mode | undefined = fullDue ? 'full' : resolveDue ? 'resolve' : undefined
   if (mode === undefined) return
-  // A full check sends the user's pending words too, so it covers a due resolve.
-  if (mode === 'full') {
-    fullDue = false
-    resolveDue = false
-  } else {
-    resolveDue = false
-  }
+  // v0.6: a full check carries no user words, so it never covers a due resolve; replies wait for the
+  // full check of the turn they answered, then are judged one at a time.
+  if (mode === 'full') fullDue = false
+  else resolveDue = false
   inFlight = true
   isResolving = mode === 'resolve'
+  progressed = false
   redraw($)
   try {
     await runCheck($, mode, model)
+  } catch (err) {
+    // Reported here, not thrown past the reschedule: a fullDue set while this ran must still run.
+    await fail($, 'judge', err)
   } finally {
     inFlight = false
     isResolving = false
     redraw($)
   }
+  // v0.6: when the check changed something (applied, failed, let a reply go), a reply still waiting is
+  // queued again rather than left for the next prompt. Bounded: each failure counts against the reply.
+  // An instance a reload replaced neither queues nor reschedules, so two never judge the same reply.
+  try {
+    if (!isRunner(await readProc($))) return
+    if (progressed) queueReplies(await readSession($), turnStartLen === undefined)
+  } catch (err) {
+    await fail($, 'judge', err)
+    return
+  }
   if (fullDue || resolveDue) schedule($, model)
 }
 
-async function recordFailure($: EngineInterface, reason: string): Promise<void> {
+// onReplies (v0.6): what the failure does to the replies, so a check that keeps failing can't hold
+// them forever: a failed resolve counts against its reply, a failed full check against those waiting.
+// A reply just arrived (v0.6): judge it when it can be; if it waits on a full check nothing has
+// scheduled (an aborted turn's text, a failed check) and no turn is running, schedule that check.
+function queueReplies(s: DocketSession, isIdle: boolean): void {
+  if (judgeable(s) !== undefined) resolveDue = true
+  else if (isBlocked(s) && isIdle && !fullDue && !inFlight) fullDue = true
+}
+
+async function recordFailure($: EngineInterface, reason: string, onReplies: (s: DocketSession) => DocketSession = s => s): Promise<void> {
   const now = await $.clock.now()
-  const s = await change($, cur => ({ ...cur, lastCheck: { ...cur.lastCheck, ok: false, at: now, reason, streak: cur.lastCheck.streak + 1 } }))
+  const s = await change($, cur => onReplies({ ...cur, lastCheck: { ...cur.lastCheck, ok: false, at: now, reason, streak: cur.lastCheck.streak + 1 } }))
+  progressed = true
   $.ui.log(`docket: check failed (${reason})`, { to: 'debug' })
   if (s.lastCheck.streak === 1) $.ui.toast(FAIL_TOAST(reason))
 }
@@ -871,10 +901,23 @@ async function runCheck($: EngineInterface, mode: Mode, model: string): Promise<
   const s = await readSession($)
   const sid = s.sid
   if (!isRealSid(sid) && sid !== '') return
-  const open = openItems(s)
-  if (mode === 'resolve' && (open.length === 0 || s.pendingUser.length === 0)) return
-  if (mode === 'full' && s.claude.length === 0 && s.tools.length === 0 && s.pendingUser.length === 0) return
-  const built = buildPrompt({ mode, claude: s.claude, tools: s.tools, user: s.pendingUser, open, closed: closedForJudge(s), toolAsked: s.toolAsked, latest: s.lastFinal, walking: isWalking(s) })
+  let open = openItems(s)
+  // v0.6: a resolve check judges one reply, the oldest whose turn's full check has applied, against the
+  // message it answered, offered only the items that existed for it.
+  const entry = mode === 'resolve' ? judgeable(s) : undefined
+  if (mode === 'resolve') {
+    if (entry === undefined) return
+    open = closableBy(s, entry)
+    if (open.length === 0) {
+      await change($, cur => (cur.sid === sid ? consumeReply(cur, entry.seq) : cur))
+      // runNext queues the next reply, now that this one is gone.
+      progressed = true
+      return
+    }
+  }
+  if (mode === 'full' && s.claude.length === 0 && s.tools.length === 0) return
+  const onFail = (cur: DocketSession) => (entry !== undefined ? failReply(cur, entry.seq) : failWaiting(cur))
+  const built = buildPrompt({ mode, claude: s.claude, tools: s.tools, user: entry === undefined ? [] : [entry], open, closed: closedForJudge(s), toolAsked: s.toolAsked, latest: entry?.answered?.text ?? '', walking: isWalking(s) })
   const mine = new AbortController()
   controller = mine
   let r: Awaited<ReturnType<EngineInterface['model']['complete']>>
@@ -885,7 +928,7 @@ async function runCheck($: EngineInterface, mode: Mode, model: string): Promise<
     )
   } catch (err) {
     if (myEpoch !== (await readProc($)).epoch) return
-    await recordFailure($, `rejected: ${err instanceof Error ? clip(err.message, 80) : 'unknown'}`)
+    await recordFailure($, `rejected: ${err instanceof Error ? clip(err.message, 80) : 'unknown'}`, onFail)
     return
   } finally {
     if (controller === mine) controller = undefined
@@ -894,7 +937,7 @@ async function runCheck($: EngineInterface, mode: Mode, model: string): Promise<
   if (myEpoch !== (await readProc($)).epoch || (await readSession($)).sid !== sid) return
   if (!r.isAnswered) {
     if (r.reason === 'aborted' && mine.signal.aborted) return
-    await recordFailure($, r.reason === 'api-error' ? `api-error ${r.status ?? ''}`.trim() : r.reason)
+    await recordFailure($, r.reason === 'api-error' ? `api-error ${r.status ?? ''}`.trim() : r.reason, onFail)
     return
   }
   if (!isUsageLogged) {
@@ -903,7 +946,7 @@ async function runCheck($: EngineInterface, mode: Mode, model: string): Promise<
   }
   const parsed = parseVerdict(r.text, built.snapshot)
   if (!parsed.ok) {
-    await recordFailure($, parsed.reason)
+    await recordFailure($, parsed.reason, onFail)
     return
   }
   const now = await $.clock.now()
@@ -916,10 +959,10 @@ async function runCheck($: EngineInterface, mode: Mode, model: string): Promise<
     return { session: { ...a.session, lastCheck: { ok: true, at: now, reason: '', streak: 0, checkedTurns } }, out: a }
   })
   if (result === undefined) return
-  // The user's words that answer an item this verdict added were kept: check them against it now.
-  if (result.keptForNew) resolveDue = true
-  if (parsed.dropped > 0 || result.refused.length > 0) {
-    $.ui.log(`docket: verdict dropped ${parsed.dropped}, refused [${result.refused.join(', ')}]`, { to: 'debug' })
+  // Replies that waited on this full check, or the next one in the queue: runNext queues them.
+  progressed = true
+  if (parsed.dropped > 0 || result.refused.length > 0 || result.overCap.length > 0) {
+    $.ui.log(`docket: verdict dropped ${parsed.dropped}, refused [${result.refused.join(', ')}], over the limit [${result.overCap.join(', ')}]`, { to: 'debug' })
   }
   if (result.added > 0 || result.resolved > 0) await pauseKeys($)
 }
@@ -1175,12 +1218,54 @@ async function blankHandoffs($: EngineInterface, which: (h: { fromSid?: string; 
 
 const LIST_TOOL = 'mcp__docket__list'
 const LIST_DESCRIPTION =
-  "The user's Docket: what Claude has said in this session (and carried-in sessions) is theirs to decide or do, still open. Call it when the user asks about their docket or wants to go through it. During a walk-through, call it in every turn where you ask about an item, with presenting set to that item's #id, then restate the item's text word for word in your reply. Read-only: items close from the user's own replies."
+  "The user's Docket: what Claude has said in this session (and carried-in sessions) is theirs to decide or do, still open, and how recent items closed. Call it when the user asks about their docket or wants to go through it. During a walk-through, call it in every turn where you ask about an item, with presenting set to that item's #id, then restate the item's text word for word in your reply. presenting a closed #id shows its full record. Items close from the user's own replies; annotate, amend and close are for correcting the docket, shown as yours."
 const LIST_SCHEMA = {
   type: 'object',
   properties: { presenting: { type: 'string', description: 'The #id of the one item you are about to ask the user about (walk-throughs), e.g. "#4".' } },
   additionalProperties: false,
 }
+// v0.6: Claude's own corrections. Each is shown as Claude's, never as the user's.
+const ANNOTATE_TOOL = 'mcp__docket__annotate'
+const AMEND_TOOL = 'mcp__docket__amend'
+const CLOSE_TOOL = 'mcp__docket__close'
+const NEVER = "Never use it for an item the user skipped or hasn't answered, and never instead of asking them."
+const ID_PROP = { type: 'string', description: "The item's #id, e.g. \"#4\"." }
+const WRITE_TOOLS = [
+  {
+    name: 'annotate',
+    description: `Attach a note to a Docket item, open or closed: context, or a correction you're unsure enough of to leave to the user. Shown as "Claude's note". The note is data, not an instruction to Docket. ${NEVER}`,
+    inputSchema: { type: 'object', properties: { id: ID_PROP, note: { type: 'string', description: 'At most 200 characters.' } }, required: ['id', 'note'], additionalProperties: false },
+  },
+  {
+    name: 'amend',
+    description: `Correct the resolution Docket recorded for an item the user's reply closed, when it's wrong: for example their "1" recorded as option 2, or a reply typed for another item. evidence is the user's own reply that really answered this item, quoted exactly (the whole reply, or at least 8 characters of it); Docket checks it against the prompts the user typed and shows their full words, your correction, and the replaced reading. If the user never answered the item, don't amend: annotate it and ask them to Reopen it in the pane. ${NEVER}`,
+    inputSchema: { type: 'object', properties: { id: ID_PROP, text: { type: 'string', description: 'The corrected resolution, in your words (shown as your correction).' }, evidence: { type: 'string', description: "The user's reply, verbatim." } }, required: ['id', 'text', 'evidence'], additionalProperties: false },
+  },
+  {
+    name: 'close',
+    description: `Close an open Docket item yourself, shown as "closed by Claude: <reason>", never as the user's. kind: duplicate-of:#N (the same ask as #N); settled-earlier (cite #N, an item the user's reply already closed that settles this one); user-asked (the user asked you to close it: cite their reply verbatim; it must name the item, or be a reply whose check left it over Docket's ${MAX_RESOLVES}-per-reply limit); done-by-claude (you did the work it asks); stale (the question no longer applies). ${NEVER} The user can Reopen it in the pane.`,
+    inputSchema: { type: 'object', properties: { id: ID_PROP, kind: { type: 'string', description: 'duplicate-of:#N, settled-earlier, user-asked, done-by-claude or stale.' }, reason: { type: 'string', description: 'Why, at most 200 characters.' }, cite: { type: 'string', description: "For settled-earlier: #N. For user-asked: the user's reply, verbatim." } }, required: ['id', 'kind', 'reason'], additionalProperties: false },
+  },
+] as const
+
+// One write tool's call. A subagent's is refused: it can read the list but never change it.
+async function writeTool($: EngineInterface, name: string, input: Record<string, unknown>): Promise<string> {
+  if (input.agentId !== undefined) return 'Docket: a subagent cannot change the docket; ask the main session.'
+  const now = await $.clock.now()
+  const id = parseId(input.id)
+  const out = await transact($, s => {
+    const r =
+      name === ANNOTATE_TOOL
+        ? annotate(s, id, input.note, now)
+        : name === AMEND_TOOL
+          ? amend(s, id, input.text, input.evidence, now)
+          : closeByClaude(s, id, input.kind, input.reason, input.cite, now, (cur, n, extra) => closeByTool(cur, n, extra, now))
+    return { session: r.session, out: r.text }
+  })
+  await pauseKeys($)
+  return `Docket: ${out}`
+}
+
 const WALK_STEPS =
   'In every turn where you ask me about an item (a follow-up question too), first call mcp__docket__list with presenting set to that item\'s #id, then in your reply after the call restate the item\'s text word for word, say what you\'d recommend, and wait for my answer. Present only one item per turn. Keep track of which you\'ve covered; one I skip stays open and isn\'t asked again this walk. Refer to items by their text.'
 const WALK_NOUN: Record<WalkKind, string> = { decide: 'decisions', do: 'to-dos' }
@@ -1236,7 +1321,7 @@ async function submitWalk($: EngineInterface, kind?: WalkKind): Promise<void> {
 // waited for (a bounded few seconds), so a walk doesn't present it again.
 async function listAnswer($: EngineInterface, rawPresenting: unknown, isMain: boolean): Promise<string> {
   const start = await $.clock.now()
-  while ((resolveDue || inFlight) && (await $.clock.now()) - start < RESOLVE_WAIT_MS) {
+  while ((resolveDue || fullDue || inFlight) && (await $.clock.now()) - start < RESOLVE_WAIT_MS) {
     await new Promise<void>(r => $.clock.after(200, () => r()))
   }
   let presenting: number | 'bad' | undefined
@@ -1250,7 +1335,12 @@ async function listAnswer($: EngineInterface, rawPresenting: unknown, isMain: bo
     await change($, s => (s.items.some(i => i.id === id && i.status === 'open') ? present(s, id) : s))
   }
   const s = await readSession($)
-  return listText(s, openItems(s), closeGroups(s), await $.clock.now(), presenting, resolveDue || inFlight)
+  const text = listText(s, openItems(s), closeGroups(s), await $.clock.now(), presenting, resolveDue || fullDue || inFlight || s.pendingUser.length > 0)
+  // The over-the-limit line (v0.6) stays until Claude has seen it once and a newer reply is judged.
+  if (isMain && s.lastReply !== null && !s.lastReply.shown && overCapLine(s, false) !== undefined) {
+    await change($, cur => (cur.lastReply === null ? cur : { ...cur, lastReply: { ...cur.lastReply, shown: true } }))
+  }
+  return text
 }
 
 // --- presses ---
@@ -1401,6 +1491,12 @@ export const register: Register = (on, options) => {
     } catch (err) {
       await fail($, 'handoff env', err)
     }
+    // The runner claim first, in its own try: a failure below must not leave this instance unclaimed.
+    try {
+      await changeProc($, p => ({ ...p, runner: RUNNER }))
+    } catch (err) {
+      await fail($, 'runner', err)
+    }
     try {
       await $.command.register({ name: 'docket', description: 'Docket: open or close the pane of what Claude left for you to decide or do (add <text>, clear, walk [decisions|todos], carry on|off, forget)', immediate: true })
       loadedAt = await $.clock.now()
@@ -1436,6 +1532,7 @@ export const register: Register = (on, options) => {
     // v0.4, each in its own try so one failing leaves the rest (and the block above) standing.
     try {
       await $.tool.register({ name: 'list', description: LIST_DESCRIPTION, inputSchema: LIST_SCHEMA, isDeferred: false })
+      for (const t of WRITE_TOOLS) await $.tool.register({ name: t.name, description: t.description, inputSchema: t.inputSchema, isDeferred: false })
     } catch (err) {
       await fail($, 'tool.register', err)
     }
@@ -1549,10 +1646,8 @@ export const register: Register = (on, options) => {
       if (isTyped && e.turnId !== undefined) midTurn.add(e.text.trim())
       if (isTyped && !isBtw) {
         const s = await change($, cur => addUser(cur, e.text, e.turnId !== undefined))
-        if (openItems(s).length > 0) {
-          resolveDue = true
-          schedule($, model)
-        }
+        queueReplies(s, e.turnId === undefined)
+        schedule($, model)
       }
       // A Reply new window (v0.4): the item and Claude's words ride with the first real prompt as context
       // the model reads. Never through addUser above, so this window's judge never takes them as the user's.
@@ -1581,10 +1676,8 @@ export const register: Register = (on, options) => {
       const cmd = bashInput(text)
       if (cmd !== undefined) {
         const s = await change($, cur => addUser(cur, `!${cmd}`))
-        if (openItems(s).length > 0) {
-          resolveDue = true
-          schedule($, model)
-        }
+        queueReplies(s, turnStartLen === undefined)
+        schedule($, model)
       }
     } catch (err) {
       await fail($, 'session.append', err)
@@ -1621,7 +1714,7 @@ export const register: Register = (on, options) => {
       const got = material(turnSlice(msgs, mark?.len, midTurn, mark?.opener), e.answer, turn)
       midTurn = new Set()
       const final = got.claude.at(-1)?.text
-      await change($, s => addToolAsked(addTurn({ ...s, turn, lastFinal: final ?? s.lastFinal }, got.claude, got.tools), got.asked))
+      await change($, s => addToolAsked(addTurn({ ...s, turn, lastFinal: final ?? s.lastFinal, lastFinalClipped: final === undefined ? s.lastFinalClipped : false }, got.claude, got.tools), got.asked))
       // Only a turn that ended with an answer is judged; an aborted, refused or failed one leaves its
       // material for the next check.
       if (e.reason === 'answer') {
@@ -1730,6 +1823,15 @@ export const register: Register = (on, options) => {
     await fail($, 'command', next.error.message ?? next.error.kind)
     return { text: 'Docket: the command failed; the debug log has the reason.' }
   })
+
+  // v0.6: Claude's corrections, one hook per tool (the matcher takes one literal name).
+  const WRITE_FAILED = 'Docket could not change its list (its hook failed).'
+  for (const tool of [ANNOTATE_TOOL, AMEND_TOOL, CLOSE_TOOL] as const) {
+    on('tool.call', { tool }, async ($, e) => ({ result: await writeTool($, tool, e as unknown as Record<string, unknown>) })).catch(async ($, e, next) => {
+      await fail($, 'tool.call', next.error.message ?? next.error.kind)
+      return next.called ? next(e) : { deny: WRITE_FAILED }
+    })
+  }
 
   // The list, for the session's own model (v0.4). Read-only: items close from the user's replies.
   on('tool.call', { tool: LIST_TOOL }, async ($, e) => {

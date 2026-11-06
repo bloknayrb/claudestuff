@@ -111,7 +111,7 @@ test('/docket new writes the handoff, closes the item as yours, and launches Win
   expect(await openIds($)).toEqual([])
   const ui = await mountPane($, 'terminal')
   await ui.press({ key: 'docket-show-closed' })
-  expect(await ui.find({ type: 'Text', text: 'Renew the domain — you: sent to a new window' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '↳ you sent it to a new window' })).toBeDefined()
   await ui.unmount()
   // One launch: wt from WindowsApps, run from the docket folder, the script carrying only the nonce.
   expect(w.runs.length).toBe(1)

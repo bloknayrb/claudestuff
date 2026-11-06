@@ -39,21 +39,21 @@ test('verbatim checks match through curly quotes and whitespace', async () => {
 })
 
 test('a resolve needs an open id and evidence from the right side', async () => {
-  const { snapshot } = buildPrompt(base())
-  const reply = JSON.stringify({
-    add: [],
-    resolve: [
-      { id: 1, by: 'you', note: 'SQLite', evidence: 'use sqlite' },
-      { id: 9, by: 'you', note: 'x', evidence: 'use sqlite' },
-      { id: 1, by: 'claude', note: 'dup', evidence: 'gh pr view 18' },
-    ],
-  })
-  const r = parseVerdict(reply, snapshot)
-  expect(r.ok).toBe(true)
-  if (!r.ok) return
-  expect(r.verdict.resolves.length).toBe(1)
-  expect(r.verdict.resolves[0]?.by).toBe('you')
-  expect(r.dropped).toBe(2)
+  const you = buildPrompt(base({ mode: 'resolve' })).snapshot
+  const r = parseVerdict(JSON.stringify({ add: [], resolve: [{ id: 1, by: 'you', note: 'SQLite', evidence: 'use sqlite' }, { id: 9, by: 'you', note: 'x', evidence: 'use sqlite' }] }), you)
+  expect(r.ok && r.verdict.resolves.map(x => x.by)).toEqual(['you'])
+  expect(r.ok && r.dropped).toBe(1)
+  const full = buildPrompt(base()).snapshot
+  const c = parseVerdict(JSON.stringify({ add: [], resolve: [{ id: 1, by: 'claude', note: 'merged', evidence: 'gh pr view 18' }] }), full)
+  expect(c.ok && c.verdict.resolves.map(x => x.by)).toEqual(['claude'])
+})
+
+test('v0.6: a full check carries no user words, and a "you" resolve from one is dropped', async () => {
+  const { snapshot, prompt } = buildPrompt(base())
+  expect(prompt.includes('<user_text>')).toBe(false)
+  expect(prompt.includes('use sqlite')).toBe(false)
+  const r = parseVerdict('{"add":[],"resolve":[{"id":1,"by":"you","note":"x","evidence":"use sqlite"}]}', snapshot)
+  expect(r.ok && r.verdict.resolves.length).toBe(0)
 })
 
 test('by-you evidence found only in Claude text is refused', async () => {
@@ -85,7 +85,7 @@ test('redaction replaces token shapes and leaves look-alike words', async () => 
 })
 
 test('redaction runs before the budget, so the snapshot holds no secret', async () => {
-  const { snapshot, prompt } = buildPrompt(base({ user: [{ seq: 1, text: `here: ${GH}`, afterTurn: 1 }] }))
+  const { snapshot, prompt } = buildPrompt(base({ mode: 'resolve', user: [{ seq: 1, text: `here: ${GH}`, afterTurn: 1 }] }))
   expect(prompt.includes('ghp_')).toBe(false)
   expect(snapshot.user[0]?.text.includes('[redacted]')).toBe(true)
 })
@@ -122,7 +122,7 @@ test('user text beyond the newest 4 KB is cut oldest first', async () => {
 })
 
 test('a numeric-string id counts as the number; any other string is dropped', async () => {
-  const { snapshot } = buildPrompt(base())
+  const { snapshot } = buildPrompt(base({ mode: 'resolve' }))
   const r = parseVerdict('{"add":[],"resolve":[{"id":"1","by":"you","note":"x","evidence":"use sqlite"},{"id":"one","by":"you","note":"x","evidence":"use sqlite"}]}', snapshot)
   expect(r.ok && r.verdict.resolves.map(x => x.id)).toEqual([1])
   expect(r.ok && r.dropped).toBe(1)
