@@ -35,18 +35,18 @@ test('a pick is labelled from the message it answered, which names the item', as
   const s = addUser(session(two(), 2, MSG_41), '1')
   const r = resolveWith(s, [{ id: 1, evidence: '1', note: 'Chose option 2' }])
   const closed = r.session.items.find(i => i.id === 1)
-  expect(closed?.answer).toEqual({ words: '1', seq: 1, option: { key: '1', label: 'Stay silent (recommended)' } })
+  expect(closed?.answer).toEqual({ words: '1', seq: 1, option: { key: '1', label: 'Keep the default (recommended)' } })
   expect(closed?.note).toBe('')
-  expect(closedLine(closed as Item)).toBe('you chose option 1, "Stay silent (recommended)"')
+  expect(closedLine(closed as Item)).toBe('you chose option 1, "Keep the default (recommended)"')
 })
 
 test('a pick with a tail shows the words and the option; a reading never sits under "you"', async () => {
-  const s = addUser(session(two(), 2, MSG_41), '1, but only for resolved threads')
+  const s = addUser(session(two(), 2, MSG_41), '1, but only on the laptop')
   const closed = resolveWith(s, [{ id: 1, evidence: '1, but only' }]).session.items.find(i => i.id === 1) as Item
-  expect(youPart(closed)).toBe('you said: "1, but only for resolved threads" (option 1, "Stay silent (recommended)")')
-  const prose = addUser(session(two(), 2, MSG_41), 'stay silent, obviously')
-  const p = resolveWith(prose, [{ id: 1, evidence: 'stay silent', note: 'Approved silence' }]).session.items.find(i => i.id === 1) as Item
-  expect(closedLine(p)).toBe('you said: "stay silent, obviously" · Docket\'s reading: Approved silence')
+  expect(youPart(closed)).toBe('you said: "1, but only on the laptop" (option 1, "Keep the default (recommended)")')
+  const prose = addUser(session(two(), 2, MSG_41), 'keep the default, obviously')
+  const p = resolveWith(prose, [{ id: 1, evidence: 'keep the default', note: 'Approved the default' }]).session.items.find(i => i.id === 1) as Item
+  expect(closedLine(p)).toBe('you said: "keep the default, obviously" · Docket\'s reading: Approved the default')
 })
 
 test('a pick the message does not tie to the item is refused; one tied by lead or focus closes it', async () => {
@@ -80,15 +80,15 @@ test('a clipped answered message, two lists, or a repeated key records the words
 test('names: text or quote, never a bare #id', async () => {
   expect(names(MSG_41, item(1, { text: ITEM_41 }))).toBe(true)
   expect(names('See PR #2 for the fix.', item(2, { text: 'Merge the release' }))).toBe(false)
-  expect(names('as you put it, should it stay silent, or reopen the comment?', item(3, { text: 'x y z', quote: 'should it stay silent, or reopen the comment?' }))).toBe(true)
+  expect(names('as you put it, should it keep the default, or switch to dark mode?', item(3, { text: 'x y z', quote: 'should it keep the default, or switch to dark mode?' }))).toBe(true)
 })
 
 test('the Reply lead is stripped and names its item; the typed words are what is kept', async () => {
   const s = session(two())
   const lead = leadHere(item(2, { text: ITEM_42 }))
-  expect(stripLead(s, `${lead}keep the storage`)).toEqual({ words: 'keep the storage', namedId: 2 })
-  const after = addUser(s, `${lead}keep the storage`)
-  expect(after.userLog.at(-1)?.words).toBe('keep the storage')
+  expect(stripLead(s, `${lead}keep the cache`)).toEqual({ words: 'keep the cache', namedId: 2 })
+  const after = addUser(s, `${lead}keep the cache`)
+  expect(after.userLog.at(-1)?.words).toBe('keep the cache')
   expect(after.pendingUser.at(-1)?.namedId).toBe(2)
 })
 
@@ -120,7 +120,7 @@ test('a full prompt never carries the user words; a resolve prompt carries one r
   const full = buildPrompt({ mode: 'full', claude: [{ turn: 3, text: MSG_42, isFinal: true }], tools: [], user: s.pendingUser, open: s.items, closed: [], toolAsked: [] })
   expect(full.prompt.includes('<user_text>')).toBe(false)
   const res = buildPrompt({ mode: 'resolve', claude: [], tools: [], user: entry === undefined ? [] : [entry], open: s.items, closed: [], toolAsked: [], latest: entry?.answered?.text ?? '' })
-  expect(res.prompt.includes('1. **Stay silent (recommended).**')).toBe(true)
+  expect(res.prompt.includes('1. **Keep the default (recommended).**')).toBe(true)
 })
 
 test('buttons and Claude closes say so; an unknown close renders safely', async () => {
@@ -139,7 +139,7 @@ function the41Mislabel(): DocketSession {
   // #41 was closed from "option 2" (typed for another item); the user's real answer was a later "1".
   let s = session([item(1, { text: ITEM_41, openedTurn: 1 }), item(2, { text: ITEM_42 })], 2, MSG_41)
   s = addUser(s, 'option 2')
-  s = resolveWith(s, [{ id: 1, evidence: 'option 2', note: 'Chose option 2: reopen the comment' }]).session
+  s = resolveWith(s, [{ id: 1, evidence: 'option 2', note: 'Chose option 2: switch to dark mode' }]).session
   s = { ...s, turn: 3 }
   s = addUser(s, '1')
   return { ...s, pendingUser: [] }
@@ -147,12 +147,12 @@ function the41Mislabel(): DocketSession {
 
 test('amend fixes the #41 mislabel by the user\'s later "1": linked by Claude, the old reading kept as replaced', async () => {
   const s = the41Mislabel()
-  const r = amend(s, 1, 'The user chose option 1, stay silent.', '1', 10)
+  const r = amend(s, 1, 'The user chose option 1, keep the default.', '1', 10)
   const fixed = r.session.items.find(i => i.id === 1) as Item
-  expect(youPart(fixed)).toBe('you chose option 1, "Stay silent (recommended)" (linked by Claude)')
+  expect(youPart(fixed)).toBe('you chose option 1, "Keep the default (recommended)" (linked by Claude)')
   const line = closedLine(fixed)
   expect(line.includes('Docket\'s earlier reading (replaced): from "option 2"')).toBe(true)
-  expect(line.includes("Claude's correction: The user chose option 1, stay silent.")).toBe(true)
+  expect(line.includes("Claude's correction: The user chose option 1, keep the default.")).toBe(true)
   expect(line.startsWith('you chose option 1')).toBe(true)
 })
 
@@ -229,7 +229,7 @@ test('review: the longest lead wins over an open item whose lead it starts with'
 
 test('amend refuses Claude-supplied evidence, a short span, an open item, and a button close', async () => {
   const s = the41Mislabel()
-  expect(amend(s, 1, 'x', 'the user chose to stay silent', 10).session).toBe(s)
+  expect(amend(s, 1, 'x', 'the user chose to keep the default', 10).session).toBe(s)
   expect(amend(s, 1, 'x', 'optio', 10).session).toBe(s)
   expect(amend(s, 2, 'x', '1', 10).session).toBe(s)
   const done = markDone(session([item(1)]), 1, 0)
@@ -290,8 +290,8 @@ test('storage: v0.6 records round-trip, a v0.5 snapshot loads, a restored long f
 })
 
 test("review: a pick tied by a Reply lead takes no label from another item's list in the same message", async () => {
-  const items = [item(1, { text: 'Rotate the deploy key' }), item(2, { text: 'Decide on the badge' })]
-  const msg = ['Rotate the deploy key is done on my side.', '', 'Separately, Decide on the badge:', '1. **Keep.** x', '2. **Remove.** y'].join('\n')
+  const items = [item(1, { text: 'Rotate the deploy key' }), item(2, { text: 'Decide on the banner' })]
+  const msg = ['Rotate the deploy key is done on my side.', '', 'Separately, Decide on the banner:', '1. **Keep.** x', '2. **Remove.** y'].join('\n')
   const s = addUser(session(items, 2, msg), `${leadHere(items[0] as Item)}1`)
   const r = resolveWith(s, [{ id: 1, evidence: '1' }])
   expect(r.session.items.find(i => i.id === 1)?.answer).toEqual({ words: '1', seq: 1 })
@@ -304,8 +304,8 @@ test('review: amend picks the reply that closed the item when two replies share 
   s = addUser({ ...s, turn: 3, lastFinal: MSG_42 }, '1')
   s = resolveWith(s, [{ id: 2, evidence: '1' }]).session
   const r = amend(s, 1, 'Recorded right.', '1', 10).session.items.find(i => i.id === 1) as Item
-  expect(r.answer).toEqual({ words: '1', seq: 1, option: { key: '1', label: 'Stay silent (recommended)' } })
-  expect(youPart(r)).toBe('you chose option 1, "Stay silent (recommended)"')
+  expect(r.answer).toEqual({ words: '1', seq: 1, option: { key: '1', label: 'Keep the default (recommended)' } })
+  expect(youPart(r)).toBe('you chose option 1, "Keep the default (recommended)"')
 })
 
 test('review: a hyphenated word is prose, not a pick', async () => {

@@ -10,17 +10,17 @@ test('option picks: keys with lead words and tails', async () => {
   const yes: [string, string, string][] = [
     ['1', '1', ''], ['2.', '2', ''], ['option 2', '2', ''], ['Option 2', '2', ''], ['choice b', 'b', ''],
     ['a', 'a', ''], ['B)', 'b', ''], ['1, with X', '1', 'with X'], ['2 — but keep Y', '2', 'but keep Y'], ['1 please', '1', 'please'],
-    ['go with 1', '1', ''], ['  3  ', '3', ''], ['2 but keep the badge', '2', 'but keep the badge'], ['1: fine', '1', 'fine'],
+    ['go with 1', '1', ''], ['  3  ', '3', ''], ['2 but keep the banner', '2', 'but keep the banner'], ['1: fine', '1', 'fine'],
   ]
   for (const [reply, key, tail] of yes) expect(optionPick(reply)).toEqual({ key, tail })
   const no = ['a good idea', '1 more thing', '1 and 3', '1, 3', '1, and 3', 'both', 'the first one', '#2', '#41: 1', 'yes', '0', '21', 'i', '', 'option 2 and 3']
   for (const reply of no) expect(optionPick(reply)).toBe(undefined)
 })
 
-test('the #41 message: "1" is Stay silent, "2" is Reopen the comment', async () => {
-  expect(labels(MSG_41)).toEqual([['1=Stay silent (recommended)', '2=Reopen the comment']])
-  expect(resolvePick(pick('1'), MSG_41)).toEqual({ key: '1', label: 'Stay silent (recommended)' })
-  expect(resolvePick(pick('2'), MSG_41)).toEqual({ key: '2', label: 'Reopen the comment' })
+test('the #41 message: "1" is Keep the default, "2" is Switch to dark mode', async () => {
+  expect(labels(MSG_41)).toEqual([['1=Keep the default (recommended)', '2=Switch to dark mode']])
+  expect(resolvePick(pick('1'), MSG_41)).toEqual({ key: '1', label: 'Keep the default (recommended)' })
+  expect(resolvePick(pick('2'), MSG_41)).toEqual({ key: '2', label: 'Switch to dark mode' })
   expect(resolvePick(pick('3'), MSG_41)).toBe(undefined)
   expect(resolvePick(pick('3'), MSG_42)?.label).toBe('Leave it')
 })

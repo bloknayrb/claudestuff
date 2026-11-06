@@ -114,7 +114,7 @@ How a closed item reads:
 
 | Shown | Meaning |
 |---|---|
-| `you chose option 1, "Stay silent (recommended)"` | You replied with an option's number or letter, and Docket read the option's own label from the message you were answering. |
+| `you chose option 1, "Keep the default (recommended)"` | You replied with an option's number or letter, and Docket read the option's own label from the message you were answering. |
 | `you said: "…"` | Your words as you typed them. Beside it, `Docket's reading: …` is what the judge model took them to mean. That reading is not yours. |
 | `you marked it done` / `you sent it to a new window` | You pressed Done or Reply new. |
 | `per Claude's report: …` | Claude's own text or tool calls showed it done. |
