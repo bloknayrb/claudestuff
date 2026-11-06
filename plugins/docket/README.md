@@ -67,16 +67,22 @@ Requires Claude Code 2.1.317 or newer (function-hook mods).
 
 ## Walking through the docket with Claude
 
-**Walk through these with Claude** at the foot of the panel, or `/docket walk`, asks Claude to take
-you through what's open one item at a time: it restates each, says what it recommends, and waits for
-your answer. Claude reads the list through a tool, `mcp__docket__list`, which it can also call
-whenever you ask about your docket.
+Decisions and to-dos are walked separately. Under the **Decide** section, **Walk through the N
+decisions with Claude** (or `/docket walk decisions`) asks Claude to take you through the open
+decisions one at a time. Under **Do**, **Walk through the N to-dos with Claude** (or
+`/docket walk todos`) does the same for the to-dos. Each walk covers every open item of its kind,
+carried ones included, so with carried sessions the button sits under the first section of its kind
+only. Claude restates each item, says what it recommends, waits for your answer, and stops when
+none of that kind remain. A bare `/docket walk` still takes you through everything. Claude reads
+the list through a tool, `mcp__docket__list`, which it can also call whenever you ask about your
+docket.
 
 - Answer as you would anyway. A bare "yes" or "do it" closes the item Claude just presented, as long
   as it presented only that one and restated it. "skip", "later", "next", "pass" or "not now" leaves
   the item open.
 - The panel marks the item being discussed with `▸` and says `walking with Claude`. A walk ends by
-  itself once Claude stops presenting items.
+  itself once a turn of Claude's ends without presenting an item; then the other kind's walk can
+  start. One walk runs at a time.
 - Your replies close items, through the same checks as always. Claude can't close an item *as
   yours*; see the next section for what it can do.
 - If Claude Code asks permission for the tool on each item, allow it once for good with
@@ -146,7 +152,7 @@ was on screen when you typed it, so a "2" is read against that message's list an
 later one. A reply waits until the check of the turn it answered has finished, so that any item it
 answers already exists.
 
-(Before v0.6 the after-turn check also carried your recent words. On 2026-11-05 that check read an
+(Before v0.7 the after-turn check also carried your recent words. On 2026-11-05 that check read an
 "option 2", typed for one item, against the next item's options, and recorded the opposite of what
 was chosen.)
 
@@ -239,7 +245,7 @@ else `~/.claude`:
   an item, written in turn so a write cut off halfway costs one save, never the docket. They hold the
   item text, the words of Claude's each item came from, your `/docket add` text and the
   AskUserQuestion questions Docket keeps out of the list, Claude's last message, and the
-  conversation's project folder path. Since v0.6 they also hold how each kept closed item closed:
+  conversation's project folder path. Since v0.7 they also hold how each kept closed item closed:
   the reply of yours that closed it (up to 200 characters, and the one an amend replaced), Docket's
   reading of it, and Claude's notes, closes and corrections, including a reply of yours a `user-asked`
   close cites (up to 200 characters). Only token-shaped strings (GitHub tokens, `sk-` keys, AWS key
