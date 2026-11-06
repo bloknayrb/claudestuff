@@ -161,7 +161,7 @@ test('review: amending back to the reply that closed the item drops the linked m
   const back = amend(once, 1, 'Option 2 after all.', 'option 2', 11)
   expect(back.session).not.toBe(once)
   const it = back.session.items.find(i => i.id === 1) as Item
-  expect(youPart(it).includes('linked by Claude')).toBe(false)
+  expect((youPart(it) ?? '').includes('linked by Claude')).toBe(false)
   expect(it.answer?.words).toBe('option 2')
 })
 
