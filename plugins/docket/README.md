@@ -67,16 +67,22 @@ Requires Claude Code 2.1.317 or newer (function-hook mods).
 
 ## Walking through the docket with Claude
 
-**Walk through these with Claude** at the foot of the panel, or `/docket walk`, asks Claude to take
-you through what's open one item at a time: it restates each, says what it recommends, and waits for
-your answer. Claude reads the list through a tool, `mcp__docket__list`, which it can also call
-whenever you ask about your docket.
+Decisions and to-dos are walked separately. Under the **Decide** section, **Walk through the N
+decisions with Claude** (or `/docket walk decisions`) asks Claude to take you through the open
+decisions one at a time. Under **Do**, **Walk through the N to-dos with Claude** (or
+`/docket walk todos`) does the same for the to-dos. Each walk covers every open item of its kind,
+carried ones included, so with carried sessions the button sits under the first section of its kind
+only. Claude restates each item, says what it recommends, waits for your answer, and stops when
+none of that kind remain. A bare `/docket walk` still takes you through everything. Claude reads
+the list through a tool, `mcp__docket__list`, which it can also call whenever you ask about your
+docket.
 
 - Answer as you would anyway. A bare "yes" or "do it" closes the item Claude just presented, as long
   as it presented only that one and restated it. "skip", "later", "next", "pass" or "not now" leaves
   the item open.
 - The panel marks the item being discussed with `▸` and says `walking with Claude`. A walk ends by
-  itself once Claude stops presenting items.
+  itself once a turn of Claude's ends without presenting an item; then the other kind's walk can
+  start. One walk runs at a time.
 - The tool is read-only: Claude can't close an item; your replies do, through the same checks as
   always.
 - If Claude Code asks permission for the tool on each item, allow it once for good with

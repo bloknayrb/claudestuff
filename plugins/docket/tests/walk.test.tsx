@@ -111,7 +111,7 @@ test('while walking the judge gets the walk note and the pane says so; it ends b
   expect(w.calls.at(-1)?.prompt.includes(WALK_NOTE)).toBe(true)
   const ui = await mountPane($, 'terminal')
   expect(await ui.find({ type: 'Text', text: '3 for you to decide or do · walking with Claude' })).toBeDefined()
-  expect(await ui.find({ key: 'docket-walk-start' })).toBeUndefined()
+  expect(await ui.find({ key: 'docket-walk-do' })).toBeUndefined()
   await ui.unmount()
   // Two turns with no presenting: the walk is over.
   await turn($, w, 't2', ['Something else.'])
@@ -142,13 +142,79 @@ test('the pane offers the walk only when something is open', async ($, on) => {
   const w = world(on)
   await start($)
   let ui = await mountPane($, 'terminal')
-  expect(await ui.find({ key: 'docket-walk-start' })).toBeUndefined()
+  expect(await ui.find({ key: 'docket-walk-do' })).toBeUndefined()
+  expect(await ui.find({ key: 'docket-walk-decide' })).toBeUndefined()
   await ui.unmount()
   await command($, 'add Renew the domain')
   ui = await mountPane($, 'terminal')
-  expect(await ui.find({ key: 'docket-walk-start' })).toBeDefined()
+  expect((await ui.find({ key: 'docket-walk-do' }))?.props.label).toBe('Walk through this to-do with Claude')
+  expect(await ui.find({ key: 'docket-walk-decide' })).toBeUndefined()
   await ui.unmount()
   void w
+})
+
+// --- a walk per kind (v0.6) ---
+
+const ASK = 'Should the cache use SQLite or Postgres?'
+const ADD_DECIDE = verdict({ add: [{ kind: 'decide', text: 'Choose SQLite or Postgres for the cache', quote: ASK, singleRec: false }] })
+
+async function bothKinds($: Engine, w: World) {
+  await start($)
+  await command($, 'add Renew the domain')
+  await command($, 'add Rotate the key')
+  w.replies.push(ADD_DECIDE)
+  await turn($, w, 't1', [ASK])
+}
+
+test('each section has its own walk button, with its count; each asks for its own kind', async ($, on) => {
+  const w = world(on)
+  await bothKinds($, w)
+  const ui = await mountPane($, 'terminal')
+  expect((await ui.find({ key: 'docket-walk-decide' }))?.props.label).toBe('Walk through this decision with Claude')
+  expect((await ui.find({ key: 'docket-walk-do' }))?.props.label).toBe('Walk through the 2 to-dos with Claude')
+  await ui.press({ key: 'docket-walk-decide' })
+  await ui.unmount()
+  await w.clock.settle()
+  const sent = w.submits.map(x => x.text)
+  expect(sent.length).toBe(1)
+  expect(sent[0]?.startsWith('Walk me through the decisions on my Docket (the items the list marks [decide])')).toBe(true)
+  expect(sent[0]?.includes('Leave the items marked [do] for another walk.')).toBe(true)
+  expect(sent[0]?.includes('When none marked [decide] remain, say so and stop.')).toBe(true)
+})
+
+test('/docket walk decisions|todos, their aliases, a kind with none open, and a bad argument', async ($, on) => {
+  const w = world(on)
+  await start($)
+  await command($, 'add Renew the domain')
+  expect((await command($, 'walk decisions')).text).toBe('Docket: no decisions open.')
+  expect((await command($, 'walk Decide')).text).toBe('Docket: no decisions open.')
+  expect((await command($, 'walk sideways')).text?.startsWith('Docket: /docket walk decisions, /docket walk todos')).toBe(true)
+  expect((await command($, 'walk to-dos')).text).toBe('Docket: asking Claude to walk you through the to-dos.')
+  await w.clock.settle()
+  expect(w.submits.at(-1)?.text.startsWith('Walk me through the to-dos on my Docket (the items the list marks [do])')).toBe(true)
+  // Bare walk is still the whole docket.
+  expect(w.submits.filter(x => x.text.startsWith('Walk me through my Docket')).length).toBe(0)
+})
+
+test('a turn that ends without presenting ends the walk: the other kind can start at once', async ($, on) => {
+  const w = world(on)
+  await bothKinds($, w)
+  await list($, '#3')
+  await turn($, w, 't2', ['Choose SQLite or Postgres for the cache: I recommend SQLite. OK?'])
+  let ui = await mountPane($, 'terminal')
+  expect(await ui.find({ key: 'docket-walk-do' })).toBeUndefined()
+  await ui.unmount()
+  expect((await command($, 'walk todos')).text?.includes('already walking')).toBe(true)
+  w.replies.push(verdict({ resolve: [{ id: 3, by: 'you', note: 'SQLite', evidence: 'yes' }] }))
+  await say($, w, 'yes')
+  // Claude's next turn says the decisions are done and presents nothing.
+  w.replies.push(verdict({}))
+  await turn($, w, 't3', ['That was the last decision.'])
+  ui = await mountPane($, 'terminal')
+  expect(await ui.find({ type: 'Text', text: '2 for you to decide or do' })).toBeDefined()
+  expect(await ui.find({ key: 'docket-walk-do' })).toBeDefined()
+  await ui.unmount()
+  expect((await command($, 'walk todos')).text).toBe('Docket: asking Claude to walk you through the to-dos.')
 })
 
 // --- the stamp, pure ---
