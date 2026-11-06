@@ -7,12 +7,12 @@ import { CARRY_MAX_AGE_MS, carryEnvelope, carryText, claimers, claimText, folder
 import type { CarryFile } from './carry'
 import { buildPrompt, parseVerdict, RULES } from './judge'
 import type { Mode } from './judge'
-import { addManual, addToolAsked, addTurn, addUser, applyVerdict, clearAll, closedForJudge, closeGroups, dismiss, freshSession, handOff, isWalking, markDone, normalize, openItems, present, reopen } from './ledger'
+import { addManual, addToolAsked, addTurn, addUser, applyVerdict, clearAll, closedForJudge, closeGroups, dismiss, freshSession, handOff, isWalking, isWalkLive, markDone, normalize, openItems, present, reopen } from './ledger'
 import { envelope, freshProc, freshWriter, isRealSid, isSafeSid, ledgerText, normProc, normWriter, parseSlot, pickSlot, restore, RETAIN_MS, slotName, tombstone, withKey, withoutKey, writeKey } from './persist'
 import { blankText, btwQuestion, contextBlock, HANDOFF_MAX_AGE_MS, isBtwText, isNonce, isRootSafe, label, launchScript, leadHere, leadNew, newNonce, parseHandoff, parseNewArgs, replyRefusal, tailAfter, takenText, waitingText, wtArgv } from './spawn'
 import { clip } from './text'
 import { ARM_DELAY_MS, indicatorText, indicatorTree, listText, PANE_COLUMNS, PANE_ID, PANE_TITLE, paneTree } from './ui'
-import type { Actions } from './ui'
+import type { Actions, WalkKind } from './ui'
 
 const MODELS = ['haiku', 'sonnet', 'opus'] as const
 const TIMEOUT_MS = 20000
@@ -1181,24 +1181,52 @@ const LIST_SCHEMA = {
   properties: { presenting: { type: 'string', description: 'The #id of the one item you are about to ask the user about (walk-throughs), e.g. "#4".' } },
   additionalProperties: false,
 }
-const WALK_PROMPT =
-  'Walk me through my Docket, one item at a time, in order. In every turn where you ask me about an item (a follow-up question too), first call mcp__docket__list with presenting set to that item\'s #id, then in your reply after the call restate the item\'s text word for word, say what you\'d recommend, and wait for my answer. Present only one item per turn. Keep track of which you\'ve covered; one I skip stays open and isn\'t asked again this walk. Refer to items by their text.'
+const WALK_STEPS =
+  'In every turn where you ask me about an item (a follow-up question too), first call mcp__docket__list with presenting set to that item\'s #id, then in your reply after the call restate the item\'s text word for word, say what you\'d recommend, and wait for my answer. Present only one item per turn. Keep track of which you\'ve covered; one I skip stays open and isn\'t asked again this walk. Refer to items by their text.'
+const WALK_NOUN: Record<WalkKind, string> = { decide: 'decisions', do: 'to-dos' }
+// v0.6: a walk through one kind names the tag the list marks it with, and when to stop.
+function walkPrompt(kind?: WalkKind): string {
+  if (kind === undefined) return `Walk me through my Docket, one item at a time, in order. ${WALK_STEPS}`
+  const other: WalkKind = kind === 'decide' ? 'do' : 'decide'
+  return `Walk me through the ${WALK_NOUN[kind]} on my Docket (the items the list marks [${kind}]), one item at a time, in order. Leave the items marked [${other}] for another walk. ${WALK_STEPS} When none marked [${kind}] remain, say so and stop.`
+}
 const RESOLVE_WAIT_MS = 5000
 
-async function walkCommand($: EngineInterface): Promise<string> {
+// `/docket walk <arg>`: the kind named, undefined for the whole docket, 'bad' for anything else.
+function walkArg(raw: string): WalkKind | undefined | 'bad' {
+  const a = raw.trim().toLowerCase().replace(/[\s-]+/g, '')
+  if (a === '' || a === 'all') return undefined
+  if (['decisions', 'decision', 'decide'].includes(a)) return 'decide'
+  if (['todos', 'todo', 'do', 'dos'].includes(a)) return 'do'
+  return 'bad'
+}
+
+// The session and turn count when a walk was last asked for (v0.6): until a turn of that session ends, a
+// second press would queue a second walk prompt before the first has presented anything. Keyed by sid,
+// since /clear or a resume starts another session whose turn count may match.
+let walkAskedAt: { sid: string; turn: number } | null = null
+
+async function walkCommand($: EngineInterface, kind?: WalkKind): Promise<string> {
   const s = await readSession($)
-  if (openItems(s).length === 0) return 'Docket: nothing open.'
-  if (isWalking(s)) return 'Docket: already walking; answer Claude, or tell it to stop.'
-  $.clock.after(0, () => void guard($, 'walk', submitWalk($)))
-  return 'Docket: asking Claude to walk you through the docket.'
+  const open = openItems(s).filter(i => kind === undefined || i.kind === kind)
+  if (open.length === 0) return kind === undefined ? 'Docket: nothing open.' : `Docket: no ${WALK_NOUN[kind]} open.`
+  const isAsked = walkAskedAt !== null && walkAskedAt.sid === s.sid && walkAskedAt.turn === s.turn
+  if (isWalkLive(s) || isAsked) return 'Docket: already walking; answer Claude, or tell it to stop.'
+  walkAskedAt = { sid: s.sid, turn: s.turn }
+  $.clock.after(0, () => void guard($, 'walk', submitWalk($, kind)))
+  return kind === undefined ? 'Docket: asking Claude to walk you through the docket.' : `Docket: asking Claude to walk you through the ${WALK_NOUN[kind]}.`
 }
 
 // Never awaited inside a hook: a plugin's submit starts its turn once the session is idle.
-async function submitWalk($: EngineInterface): Promise<void> {
+async function submitWalk($: EngineInterface, kind?: WalkKind): Promise<void> {
   try {
-    const sent = await $.prompt.submit({ text: WALK_PROMPT })
-    if (sent.drop !== undefined) $.ui.toast('Docket: Claude is busy; try the walk again when the turn ends.')
+    const sent = await $.prompt.submit({ text: walkPrompt(kind) })
+    if (sent.drop !== undefined) {
+      walkAskedAt = null
+      $.ui.toast('Docket: Claude is busy; try the walk again when the turn ends.')
+    }
   } catch (err) {
+    walkAskedAt = null
     $.ui.toast('Docket: Claude is busy; try the walk again when the turn ends.')
     await fail($, 'walk', err)
   }
@@ -1281,12 +1309,13 @@ function actions($: EngineInterface): Actions {
     reply: id => void guard($, 'reply', replyTo($, id)),
     replyNew: id => void guard($, 'reply', replyNewTo($, id)),
     btw: id => void guard($, 'btw', btwTo($, id)),
-    walk: () =>
+    walk: kind =>
       void guard(
         $,
         'walk',
-        walkCommand($).then(line => {
-          if (line.includes('nothing open') || line.includes('already walking')) $.ui.toast(line)
+        // Any refusal is said: a press that does nothing must not be silent.
+        walkCommand($, kind).then(line => {
+          if (!line.startsWith('Docket: asking')) $.ui.toast(line)
         }),
       ),
     done: id =>
@@ -1373,7 +1402,7 @@ export const register: Register = (on, options) => {
       await fail($, 'handoff env', err)
     }
     try {
-      await $.command.register({ name: 'docket', description: 'Docket: open or close the pane of what Claude left for you to decide or do (add <text>, clear, walk, carry on|off, forget)', immediate: true })
+      await $.command.register({ name: 'docket', description: 'Docket: open or close the pane of what Claude left for you to decide or do (add <text>, clear, walk [decisions|todos], carry on|off, forget)', immediate: true })
       loadedAt = await $.clock.now()
       const sid = await $.session.id()
       // A reload: any check the old module started is now stale.
@@ -1678,7 +1707,11 @@ export const register: Register = (on, options) => {
         return { text: 'Docket: added.' }
       }
       if (args === 'new' || /^new\s/.test(args)) return { text: await newCommand($, e.origin.kind, args.slice(3)) }
-      if (args === 'walk') return { text: await walkCommand($) }
+      if (args === 'walk' || /^walk\s/.test(args)) {
+        const kind = walkArg(args.slice(4))
+        if (kind === 'bad') return { text: 'Docket: /docket walk decisions, /docket walk todos, or /docket walk for everything open.' }
+        return { text: await walkCommand($, kind) }
+      }
       if (args === 'forget') return { text: await forget($) }
       if (args === 'carry' || args.startsWith('carry ')) return { text: await carryCommand($, args.slice(5).trim()) }
       if (args === 'clear') {
@@ -1687,7 +1720,7 @@ export const register: Register = (on, options) => {
         await change($, s => clearAll(s, now))
         return { text: before === 0 ? 'Docket: nothing open.' : `Docket: dismissed ${before}; Reopen all in the pane brings them back.` }
       }
-      if (args !== '') return { text: "Docket: /docket opens or closes the pane; /docket add <text>; /docket walk (Claude takes you through what's open); /docket clear; /docket carry on|off (send what is open to the next session here); /docket forget (erase the saved copy). Reply new on an item in the pane opens a new window." }
+      if (args !== '') return { text: "Docket: /docket opens or closes the pane; /docket add <text>; /docket walk decisions|todos (Claude takes you through the open decisions or to-dos; bare walk, everything open); /docket clear; /docket carry on|off (send what is open to the next session here); /docket forget (erase the saved copy). Reply new on an item in the pane opens a new window." }
       return { text: await togglePane($) }
     } catch (err) {
       await fail($, 'command', err)

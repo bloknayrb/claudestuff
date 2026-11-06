@@ -3,7 +3,7 @@ import type { Elements } from 'claude-code'
 import type { DocketSession, Item } from '../types'
 import { folderName, wallAge } from './carry'
 import type { CloseGroup } from './ledger'
-import { isWalking } from './ledger'
+import { isWalkLive } from './ledger'
 import { clip, sanitise } from './text'
 
 export const PANE_ID = 'docket'
@@ -17,11 +17,14 @@ export const ARM_DELAY_MS = 1100
 
 export type Els = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
 
+export type WalkKind = Item['kind']
+
 export type Actions = {
   reply: (id: number) => void
   replyNew: (id: number) => void
   btw: (id: number) => void
-  walk: () => void
+  // A walk through one kind (v0.6); none walks everything open.
+  walk: (kind?: WalkKind) => void
   done: (id: number) => void
   dismiss: (id: number) => void
   reopen: (closeSeq: number) => void
@@ -222,16 +225,26 @@ export function listText(s: DocketSession, open: readonly Item[], groups: readon
   return lines.join('\n')
 }
 
-function section(els: Els, title: string, items: readonly Item[], offset: number, s: DocketSession, live: Live, act: Actions, groupKey = 'this') {
-  const { Box, Text } = els
+// walkTotal (v0.6): this is the first section of its kind, so it carries the walk through every open
+// item of that kind, carried groups included; null when it carries none.
+function section(els: Els, title: string, kind: WalkKind, items: readonly Item[], offset: number, s: DocketSession, live: Live, act: Actions, groupKey: string, walkTotal: number | null) {
+  const { Box, Text, Button } = els
   if (items.length === 0) return null
-  const walking = isWalking(s)
+  const walking = isWalkLive(s)
   return (
     <Box key={`section-${groupKey}-${title}`} flexDirection="column" marginTop={1}>
       <Text bold color="warning">{title}</Text>
       {items.map((item, i) => row(els, item, offset + i, s.turn, act, s.view.focusedId === item.id, live, walking && s.walkFocus?.id === item.id))}
+      {walkTotal !== null && !walking && (
+        <Button key={`docket-walk-${kind}`} plain label={walkLabel(kind, walkTotal)} onPress={() => act.walk(kind)} />
+      )}
     </Box>
   )
+}
+
+function walkLabel(kind: WalkKind, n: number): string {
+  const what = kind === 'decide' ? (n === 1 ? 'this decision' : `the ${n} decisions`) : n === 1 ? 'this to-do' : `the ${n} to-dos`
+  return `Walk through ${what} with Claude`
 }
 
 // The carry switch, below the list: a setting sits under the content it is about.
@@ -258,14 +271,18 @@ export function paneTree(els: Els, s: DocketSession, open: readonly Item[], grou
   const grouped = originGroups(open, s.sid, live.now)
   const list = grouped.flatMap(g => [...g.decide, ...g.doItems])
   let offset = 0
+  const decideTotal = grouped.reduce((n, g) => n + g.decide.length, 0)
+  const doTotal = grouped.reduce((n, g) => n + g.doItems.length, 0)
+  const firstDecide = grouped.find(g => g.decide.length > 0)?.key
+  const firstDo = grouped.find(g => g.doItems.length > 0)?.key
   const body = grouped.map(g => {
     const start = offset
     offset += g.decide.length + g.doItems.length
     return (
       <Box key={`group-${g.key}`} flexDirection="column" marginTop={g.label === null ? 0 : 1}>
         {g.label !== null && <Text bold>{g.label}</Text>}
-        {section(els, 'Decide', g.decide, start, s, live, act, g.key)}
-        {section(els, 'Do', g.doItems, start + g.decide.length, s, live, act, g.key)}
+        {section(els, 'Decide', 'decide', g.decide, start, s, live, act, g.key, g.key === firstDecide ? decideTotal : null)}
+        {section(els, 'Do', 'do', g.doItems, start + g.decide.length, s, live, act, g.key, g.key === firstDo ? doTotal : null)}
       </Box>
     )
   })
@@ -284,7 +301,7 @@ export function paneTree(els: Els, s: DocketSession, open: readonly Item[], grou
       {list.length === 0 ? (
         <Text key="docket-empty" dimColor>Nothing waiting on you.</Text>
       ) : (
-        <Text key="docket-count" bold>{`${list.length} for you to decide or do${isWalking(s) ? ' · walking with Claude' : ''}`}</Text>
+        <Text key="docket-count" bold>{`${list.length} for you to decide or do${isWalkLive(s) ? ' · walking with Claude' : ''}`}</Text>
       )}
       {keys !== '' && <Text dimColor>{keys}</Text>}
       {body}
@@ -297,11 +314,6 @@ export function paneTree(els: Els, s: DocketSession, open: readonly Item[], grou
             onPress={() => act.toggleClosed()}
           />
           {s.view.showAllClosed && groups.map(g => closedRow(els, g, act))}
-        </Box>
-      )}
-      {list.length > 0 && !isWalking(s) && (
-        <Box key="docket-walk" marginTop={1}>
-          <Button key="docket-walk-start" plain label="Walk through these with Claude" onPress={() => act.walk()} />
         </Box>
       )}
       {carryRow(els, s, act)}

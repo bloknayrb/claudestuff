@@ -230,6 +230,11 @@ export function walkFocusFor(s: DocketSession): number | undefined {
 // A walk is going on: Claude presented an item this turn or the one before.
 export const isWalking = (s: DocketSession): boolean => s.walkFocus !== null && s.turn - s.walkFocus.turn <= 1
 
+// Claude is still on a walk: it presented an item in the turn running now or the one just ended. A turn
+// that ended without presenting means the walk is done, so the pane can offer the next one (v0.6). The
+// judge keeps isWalking's one-turn grace for replies to that last turn.
+export const isWalkLive = (s: DocketSession): boolean => s.walkFocus !== null && s.walkFocus.turn >= s.turn
+
 // Records a presenting call (v0.4) for the turn in progress, s.turn + 1 (turn counts ended turns).
 export function present(s: DocketSession, id: number): DocketSession {
   const turn = s.turn + 1
