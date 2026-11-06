@@ -1201,11 +1201,16 @@ function walkArg(raw: string): WalkKind | undefined | 'bad' {
   return 'bad'
 }
 
+// The turn count when a walk was last asked for (v0.6): until a turn ends, a second press would queue a
+// second walk prompt before the first has presented anything.
+let walkAskedAt: number | null = null
+
 async function walkCommand($: EngineInterface, kind?: WalkKind): Promise<string> {
   const s = await readSession($)
   const open = openItems(s).filter(i => kind === undefined || i.kind === kind)
   if (open.length === 0) return kind === undefined ? 'Docket: nothing open.' : `Docket: no ${WALK_NOUN[kind]} open.`
-  if (isWalkLive(s)) return 'Docket: already walking; answer Claude, or tell it to stop.'
+  if (isWalkLive(s) || walkAskedAt === s.turn) return 'Docket: already walking; answer Claude, or tell it to stop.'
+  walkAskedAt = s.turn
   $.clock.after(0, () => void guard($, 'walk', submitWalk($, kind)))
   return kind === undefined ? 'Docket: asking Claude to walk you through the docket.' : `Docket: asking Claude to walk you through the ${WALK_NOUN[kind]}.`
 }
@@ -1214,8 +1219,12 @@ async function walkCommand($: EngineInterface, kind?: WalkKind): Promise<string>
 async function submitWalk($: EngineInterface, kind?: WalkKind): Promise<void> {
   try {
     const sent = await $.prompt.submit({ text: walkPrompt(kind) })
-    if (sent.drop !== undefined) $.ui.toast('Docket: Claude is busy; try the walk again when the turn ends.')
+    if (sent.drop !== undefined) {
+      walkAskedAt = null
+      $.ui.toast('Docket: Claude is busy; try the walk again when the turn ends.')
+    }
   } catch (err) {
+    walkAskedAt = null
     $.ui.toast('Docket: Claude is busy; try the walk again when the turn ends.')
     await fail($, 'walk', err)
   }
@@ -1391,7 +1400,7 @@ export const register: Register = (on, options) => {
       await fail($, 'handoff env', err)
     }
     try {
-      await $.command.register({ name: 'docket', description: 'Docket: open or close the pane of what Claude left for you to decide or do (add <text>, clear, walk, carry on|off, forget)', immediate: true })
+      await $.command.register({ name: 'docket', description: 'Docket: open or close the pane of what Claude left for you to decide or do (add <text>, clear, walk [decisions|todos], carry on|off, forget)', immediate: true })
       loadedAt = await $.clock.now()
       const sid = await $.session.id()
       // A reload: any check the old module started is now stale.

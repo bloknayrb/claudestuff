@@ -323,6 +323,22 @@ test('the pane groups items by the session they came from: this session first, o
   expect(await openIds($)).toEqual([2, 1])
 })
 
+test('with carried groups, each walk button appears once, counting its kind across every group', async ($, on) => {
+  const w = world(on)
+  let old = source('old-1', ['Ancient do'])
+  const first = old.items[0]
+  if (first === undefined) throw new Error('no item')
+  old = { ...old, items: [...old.items, { ...first, id: 2, kind: 'decide', text: 'Ancient choice' }], nextId: 3 }
+  seedCarry(w, old)
+  w.sessionId = 'sess-9'
+  await freshProcess($, w)
+  await command($, 'add Here and now')
+  const ui = await mountPane($, 'terminal')
+  const buttons = (await ui.findAll({ type: 'Button' })).map(b => String(b.props.label ?? ''))
+  await ui.unmount()
+  expect(buttons.filter(l => l.startsWith('Walk through')).sort()).toEqual(['Walk through the 2 to-dos with Claude', 'Walk through this decision with Claude'])
+})
+
 test('with nothing carried there is no session heading', async ($, on) => {
   const w = world(on)
   await freshProcess($, w)

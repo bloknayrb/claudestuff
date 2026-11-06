@@ -192,8 +192,23 @@ test('/docket walk decisions|todos, their aliases, a kind with none open, and a 
   expect((await command($, 'walk to-dos')).text).toBe('Docket: asking Claude to walk you through the to-dos.')
   await w.clock.settle()
   expect(w.submits.at(-1)?.text.startsWith('Walk me through the to-dos on my Docket (the items the list marks [do])')).toBe(true)
-  // Bare walk is still the whole docket.
   expect(w.submits.filter(x => x.text.startsWith('Walk me through my Docket')).length).toBe(0)
+})
+
+test('the to-do aliases, "walking", and a second press before the walk has presented anything', async ($, on) => {
+  const w = world(on)
+  await start($)
+  await command($, 'add Renew the domain')
+  expect((await command($, 'walking')).text?.startsWith('Docket: /docket opens or closes the pane')).toBe(true)
+  expect((await command($, 'walk todo')).text).toBe('Docket: asking Claude to walk you through the to-dos.')
+  // Asked, not yet presented: a second walk is refused rather than queued behind the first.
+  expect((await command($, 'walk do')).text?.includes('already walking')).toBe(true)
+  await w.clock.settle()
+  expect(w.submits.length).toBe(1)
+  // Once a turn has ended without presenting, a new walk may be asked for.
+  w.replies.push(verdict({}))
+  await turn($, w, 't1', ['Nothing to walk after all.'])
+  expect((await command($, 'walk dos')).text).toBe('Docket: asking Claude to walk you through the to-dos.')
 })
 
 test('a turn that ends without presenting ends the walk: the other kind can start at once', async ($, on) => {
@@ -212,6 +227,7 @@ test('a turn that ends without presenting ends the walk: the other kind can star
   await turn($, w, 't3', ['That was the last decision.'])
   ui = await mountPane($, 'terminal')
   expect(await ui.find({ type: 'Text', text: '2 for you to decide or do' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '2 for you to decide or do · walking with Claude' })).toBeUndefined()
   expect(await ui.find({ key: 'docket-walk-do' })).toBeDefined()
   await ui.unmount()
   expect((await command($, 'walk todos')).text).toBe('Docket: asking Claude to walk you through the to-dos.')
