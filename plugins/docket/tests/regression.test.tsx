@@ -54,6 +54,33 @@ test('the exact case: an earlier reply is never read against the next item\'s op
   expect(await openIds($)).toEqual([2, 3])
 })
 
+test('a reply typed while its turn\'s full check runs is judged once, after it, alone; two replies, two checks', async ($, on) => {
+  const w = world(on)
+  await setUp($, w)
+  await list($, '#2')
+  let release: () => void = () => {}
+  w.gate = new Promise<void>(r => { release = r })
+  w.replies.push(verdict({}))
+  const ending = turn($, w, 't2', [MSG_41])
+  await w.clock.settle()
+  const before = w.calls.length
+  await say($, w, '1')
+  await say($, w, 'and keep the badge off')
+  // Both wait on the full check in flight; nothing else has run.
+  expect(w.calls.length).toBe(before)
+  w.replies.push(verdict({ resolve: [{ id: 2, by: 'you', note: 'x', evidence: '1' }] }), verdict({}))
+  release()
+  w.gate = null
+  await ending
+  await w.clock.settle()
+  const checks = w.calls.slice(before)
+  expect(checks.length).toBe(2)
+  expect(checks.every(c => c.prompt.includes('resolve-only'))).toBe(true)
+  expect(checks[0]?.prompt.includes('and keep the badge off')).toBe(false)
+  expect(checks[1]?.prompt.includes('and keep the badge off')).toBe(true)
+  expect(await openIds($)).toEqual([3])
+})
+
 test('the exact case: "1" closes #41 as option 1, its own label, whatever the judge wrote', async ($, on) => {
   const w = world(on)
   await setUp($, w)

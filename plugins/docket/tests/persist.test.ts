@@ -91,10 +91,11 @@ test('unknown keys and __proto__ are dropped; strings are sanitised on load', ()
   expect(item.text).toBe('Renew the domain')
 })
 
-test('closed items lose their note on disk; strings are redacted again as a backstop', () => {
+// v0.6 keeps a closed item's note (an amend's replaced reading must survive a resume), redacted.
+test('closed items keep their note on disk, redacted; strings are redacted again as a backstop', () => {
   const s = session()
-  const closed = { ...s, items: [{ ...s.items[0]!, status: 'resolved' as const, by: 'you' as const, note: 'with my card', closedAt: 1, closeSeq: 1 }] }
-  expect(ledgerText(closed).includes('with my card')).toBe(false)
+  const closed = { ...s, items: [{ ...s.items[0]!, status: 'resolved' as const, by: 'you' as const, note: 'with ghp_abcdefghijklmnopqrstuvwxyz0123', closedAt: 1, closeSeq: 1 }] }
+  expect(ledgerText(closed).includes('with [redacted]')).toBe(true)
   const leaky = { ...s, items: [{ ...s.items[0]!, quote: 'use ghp_abcdefghijklmnopqrstuvwxyz0123 now' }] }
   expect(ledgerText(leaky).includes('ghp_')).toBe(false)
   expect(toLedger(leaky).items[0]?.quote.includes('[redacted]')).toBe(true)

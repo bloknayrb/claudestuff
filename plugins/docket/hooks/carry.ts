@@ -35,7 +35,7 @@ export type CarryFile = { sid: string; root: string; gen: number; on: boolean; s
 export function carryText(s: DocketSession): string {
   const on = s.carry.on && !s.carryTaken
   const items = on
-    ? openItems(s).map(i => ({ ...i, text: redact(i.text), quote: redact(i.quote), origin: i.origin ?? `${s.sid}:${i.id}` }))
+    ? openItems(s).map(i => ({ ...i, text: redact(i.text), quote: redact(i.quote), origin: i.origin ?? `${s.sid}:${i.id}`, ...(i.notes === undefined ? {} : { notes: i.notes.map(n => ({ ...n, text: redact(n.text) })) }) }))
     : []
   return JSON.stringify({ gen: s.carry.gen, on, items })
 }

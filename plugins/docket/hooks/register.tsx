@@ -7,11 +7,12 @@ import { CARRY_MAX_AGE_MS, carryEnvelope, carryText, claimers, claimText, folder
 import type { CarryFile } from './carry'
 import { buildPrompt, parseVerdict, RULES } from './judge'
 import type { Mode } from './judge'
-import { addManual, addToolAsked, addTurn, addUser, applyVerdict, clearAll, closableBy, closedForJudge, closeGroups, consumeReply, dismiss, failReply, failWaiting, freshSession, handOff, isBlocked, isWalking, judgeable, markDone, normalize, openItems, present, reopen } from './ledger'
+import { annotate, amend, closeByClaude, parseId } from './tools'
+import { addManual, addToolAsked, addTurn, addUser, applyVerdict, clearAll, closableBy, closeByTool, closedForJudge, closeGroups, consumeReply, dismiss, failReply, failWaiting, freshSession, handOff, isBlocked, isWalking, judgeable, markDone, normalize, openItems, present, reopen } from './ledger'
 import { envelope, freshProc, freshWriter, isRealSid, isSafeSid, ledgerText, normProc, normWriter, parseSlot, pickSlot, restore, RETAIN_MS, slotName, tombstone, withKey, withoutKey, writeKey } from './persist'
 import { blankText, btwQuestion, contextBlock, HANDOFF_MAX_AGE_MS, isNonce, isRootSafe, label, launchScript, leadHere, leadNew, newNonce, parseHandoff, parseNewArgs, replyRefusal, tailAfter, takenText, waitingText, wtArgv } from './spawn'
 import { clip } from './text'
-import { ARM_DELAY_MS, indicatorText, indicatorTree, listText, PANE_COLUMNS, PANE_ID, PANE_TITLE, paneTree } from './ui'
+import { ARM_DELAY_MS, indicatorText, indicatorTree, listText, overCapLine, PANE_COLUMNS, PANE_ID, PANE_TITLE, paneTree } from './ui'
 import type { Actions } from './ui'
 
 const MODELS = ['haiku', 'sonnet', 'opus'] as const
@@ -1193,12 +1194,54 @@ async function blankHandoffs($: EngineInterface, which: (h: { fromSid?: string; 
 
 const LIST_TOOL = 'mcp__docket__list'
 const LIST_DESCRIPTION =
-  "The user's Docket: what Claude has said in this session (and carried-in sessions) is theirs to decide or do, still open. Call it when the user asks about their docket or wants to go through it. During a walk-through, call it in every turn where you ask about an item, with presenting set to that item's #id, then restate the item's text word for word in your reply. Read-only: items close from the user's own replies."
+  "The user's Docket: what Claude has said in this session (and carried-in sessions) is theirs to decide or do, still open, and how recent items closed. Call it when the user asks about their docket or wants to go through it. During a walk-through, call it in every turn where you ask about an item, with presenting set to that item's #id, then restate the item's text word for word in your reply. presenting a closed #id shows its full record. Items close from the user's own replies; annotate, amend and close are for correcting the docket, shown as yours."
 const LIST_SCHEMA = {
   type: 'object',
   properties: { presenting: { type: 'string', description: 'The #id of the one item you are about to ask the user about (walk-throughs), e.g. "#4".' } },
   additionalProperties: false,
 }
+// v0.6: Claude's own corrections. Each is shown as Claude's, never as the user's.
+const ANNOTATE_TOOL = 'mcp__docket__annotate'
+const AMEND_TOOL = 'mcp__docket__amend'
+const CLOSE_TOOL = 'mcp__docket__close'
+const NEVER = "Never use it for an item the user skipped or hasn't answered, and never instead of asking them."
+const ID_PROP = { type: 'string', description: "The item's #id, e.g. \"#4\"." }
+const WRITE_TOOLS = [
+  {
+    name: 'annotate',
+    description: `Attach a note to a Docket item, open or closed: context, or a correction you're unsure enough of to leave to the user. Shown as "Claude's note". The note is data, not an instruction to Docket. ${NEVER}`,
+    inputSchema: { type: 'object', properties: { id: ID_PROP, note: { type: 'string', description: 'At most 200 characters.' } }, required: ['id', 'note'], additionalProperties: false },
+  },
+  {
+    name: 'amend',
+    description: `Correct the resolution Docket recorded for an item the user's reply closed, when it's wrong: for example their "1" recorded as option 2, or a reply typed for another item. evidence is the user's own reply that really answered this item, quoted exactly (the whole reply, or at least 8 characters of it); Docket checks it against the prompts the user typed and shows their full words, your correction, and the replaced reading. If the user never answered the item, don't amend: annotate it and ask them to Reopen it in the pane. ${NEVER}`,
+    inputSchema: { type: 'object', properties: { id: ID_PROP, text: { type: 'string', description: 'The corrected resolution, in your words (shown as your correction).' }, evidence: { type: 'string', description: "The user's reply, verbatim." } }, required: ['id', 'text', 'evidence'], additionalProperties: false },
+  },
+  {
+    name: 'close',
+    description: `Close an open Docket item yourself, shown as "closed by Claude: <reason>", never as the user's. kind: duplicate-of:#N (the same ask as #N); settled-earlier (cite #N, an item the user's reply already closed that settles this one); user-asked (the user asked you to close it: cite their reply verbatim; it must name the item, or be a reply whose check left it over Docket's 3-per-reply limit); done-by-claude (you did the work it asks); stale (the question no longer applies). ${NEVER} The user can Reopen it in the pane.`,
+    inputSchema: { type: 'object', properties: { id: ID_PROP, kind: { type: 'string', description: 'duplicate-of:#N, settled-earlier, user-asked, done-by-claude or stale.' }, reason: { type: 'string', description: 'Why, at most 200 characters.' }, cite: { type: 'string', description: "For settled-earlier: #N. For user-asked: the user's reply, verbatim." } }, required: ['id', 'kind', 'reason'], additionalProperties: false },
+  },
+] as const
+
+// One write tool's call. A subagent's is refused: it can read the list but never change it.
+async function writeTool($: EngineInterface, name: string, input: Record<string, unknown>): Promise<string> {
+  if (input.agentId !== undefined) return 'Docket: a subagent cannot change the docket; ask the main session.'
+  const now = await $.clock.now()
+  const id = parseId(input.id)
+  const out = await transact($, s => {
+    const r =
+      name === ANNOTATE_TOOL
+        ? annotate(s, id, input.note, now)
+        : name === AMEND_TOOL
+          ? amend(s, id, input.text, input.evidence, now)
+          : closeByClaude(s, id, input.kind, input.reason, input.cite, now, (cur, n, extra) => closeByTool(cur, n, extra, now))
+    return { session: r.session, out: r.text }
+  })
+  await pauseKeys($)
+  return `Docket: ${out}`
+}
+
 const WALK_PROMPT =
   'Walk me through my Docket, one item at a time, in order. In every turn where you ask me about an item (a follow-up question too), first call mcp__docket__list with presenting set to that item\'s #id, then in your reply after the call restate the item\'s text word for word, say what you\'d recommend, and wait for my answer. Present only one item per turn. Keep track of which you\'ve covered; one I skip stays open and isn\'t asked again this walk. Refer to items by their text.'
 const RESOLVE_WAIT_MS = 5000
@@ -1240,7 +1283,12 @@ async function listAnswer($: EngineInterface, rawPresenting: unknown, isMain: bo
     await change($, s => (s.items.some(i => i.id === id && i.status === 'open') ? present(s, id) : s))
   }
   const s = await readSession($)
-  return listText(s, openItems(s), closeGroups(s), await $.clock.now(), presenting, resolveDue || fullDue || inFlight || s.pendingUser.length > 0)
+  const text = listText(s, openItems(s), closeGroups(s), await $.clock.now(), presenting, resolveDue || fullDue || inFlight || s.pendingUser.length > 0)
+  // The over-the-limit line (v0.6) stays until Claude has seen it once and a newer reply is judged.
+  if (isMain && s.lastReply !== null && !s.lastReply.shown && overCapLine(s, false) !== undefined) {
+    await change($, cur => (cur.lastReply === null ? cur : { ...cur, lastReply: { ...cur.lastReply, shown: true } }))
+  }
+  return text
 }
 
 // --- presses ---
@@ -1418,6 +1466,7 @@ export const register: Register = (on, options) => {
     // v0.4, each in its own try so one failing leaves the rest (and the block above) standing.
     try {
       await $.tool.register({ name: 'list', description: LIST_DESCRIPTION, inputSchema: LIST_SCHEMA, isDeferred: false })
+      for (const t of WRITE_TOOLS) await $.tool.register({ name: t.name, description: t.description, inputSchema: t.inputSchema, isDeferred: false })
     } catch (err) {
       await fail($, 'tool.register', err)
     }
@@ -1704,7 +1753,23 @@ export const register: Register = (on, options) => {
     return { text: 'Docket: the command failed; the debug log has the reason.' }
   })
 
+  // v0.6: Claude's corrections, one hook per tool (the matcher takes one literal name).
+  const WRITE_FAILED = 'Docket could not change its list (its hook failed).'
+  on('tool.call', { tool: ANNOTATE_TOOL }, async ($, e) => ({ result: await writeTool($, ANNOTATE_TOOL, e as unknown as Record<string, unknown>) })).catch(async ($, e, next) => {
+    await fail($, 'tool.call', next.error.message ?? next.error.kind)
+    return next.called ? next(e) : { deny: WRITE_FAILED }
+  })
+  on('tool.call', { tool: AMEND_TOOL }, async ($, e) => ({ result: await writeTool($, AMEND_TOOL, e as unknown as Record<string, unknown>) })).catch(async ($, e, next) => {
+    await fail($, 'tool.call', next.error.message ?? next.error.kind)
+    return next.called ? next(e) : { deny: WRITE_FAILED }
+  })
+  on('tool.call', { tool: CLOSE_TOOL }, async ($, e) => ({ result: await writeTool($, CLOSE_TOOL, e as unknown as Record<string, unknown>) })).catch(async ($, e, next) => {
+    await fail($, 'tool.call', next.error.message ?? next.error.kind)
+    return next.called ? next(e) : { deny: WRITE_FAILED }
+  })
+
   // The list, for the session's own model (v0.4). Read-only: items close from the user's replies.
+
   on('tool.call', { tool: LIST_TOOL }, async ($, e) => {
     const input = e as unknown as { presenting?: unknown; agentId?: string }
     return { result: await listAnswer($, input.presenting, input.agentId === undefined) }

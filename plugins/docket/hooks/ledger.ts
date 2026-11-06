@@ -307,6 +307,11 @@ export function handOff(s: DocketSession, id: number, now: number): DocketSessio
   return close(s, [id], 'you', new Map([[id, 'sent to a new window']]), now, undefined, { via: 'reply-new' })
 }
 
+// Claude's close tool (v0.6): its own close, with a kind and a reason, never the user's.
+export function closeByTool(s: DocketSession, id: number, extra: Partial<Item>, now: number): DocketSession {
+  return close(s, [id], 'claude-tool', new Map(), now, undefined, extra)
+}
+
 export function clearAll(s: DocketSession, now: number): DocketSession {
   const ids = openItems(s).map(i => i.id)
   if (ids.length === 0) return s

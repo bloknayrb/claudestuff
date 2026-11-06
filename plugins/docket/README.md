@@ -77,10 +77,42 @@ whenever you ask about your docket.
   the item open.
 - The panel marks the item being discussed with `▸` and says `walking with Claude`. A walk ends by
   itself once Claude stops presenting items.
-- The tool is read-only: Claude can't close an item; your replies do, through the same checks as
-  always.
+- Your replies close items, through the same checks as always. Claude can't close an item *as
+  yours*; see the next section for what it can do.
 - If Claude Code asks permission for the tool on each item, allow it once for good with
   `"mcp__docket__list"` under `permissions.allow` in your settings.
+
+## Claude's corrections
+
+Claude has three tools for fixing the docket. Whatever they do is shown as Claude's, never as yours,
+and you can Reopen anything Claude closed.
+
+- **`annotate`** puts a note on an item, open or closed: `Claude's note: …`.
+- **`amend`** corrects what Docket recorded for an item your reply closed. Claude has to quote your
+  own reply, the whole of it or at least 8 characters, and Docket checks the quote against the
+  prompts you typed this session. The row then shows your full words, Claude's correction, and the
+  reading it replaced. If the reply Claude quotes isn't the one that closed the item, the row says
+  `(linked by Claude)`, and the reply has to be tied to the item: you answered it in a walk, you
+  pressed Reply on it, or the message you answered was about it.
+- **`close`** closes an open item as `closed by Claude: <reason>`, with a kind:
+  - `duplicate-of:#N`;
+  - `settled-earlier`, citing an item your reply closed;
+  - `user-asked`, citing your reply. It has to name the item, or be a reply that Docket's
+    3-per-reply limit left the item open from, and a bare "yes" or "1" can't be cited;
+  - `done-by-claude`;
+  - `stale`.
+
+Claude can't add items. The judge reads asks out of Claude's own words, and `/docket add` is yours.
+
+How a closed item reads:
+
+| Shown | Meaning |
+|---|---|
+| `you chose option 1, "Stay silent (recommended)"` | You replied with an option's number or letter, and Docket read the option's own label from the message you were answering. |
+| `you said: "…"` | Your words as you typed them. Beside it, `Docket's reading: …` is what the judge model took them to mean. That reading is not yours. |
+| `you marked it done` / `you sent it to a new window` | You pressed Done or Reply new. |
+| `per Claude's report: …` | Claude's own text or tool calls showed it done. |
+| `closed by Claude: …` | Claude closed it with its tool. |
 
 ## Carrying the docket to the next session
 
@@ -106,11 +138,23 @@ that receives the items starts with carry on too, so the docket follows you unti
 ## How it decides
 
 After each turn Docket sends a judge model what Claude wrote that turn (its text and a one-line
-summary of each tool call), what you typed since the last check, and the open and recently closed
-items. The judge answers with items to add and items to close. When you submit a prompt while items
-are open, a smaller check sends your words, the open items and the end of Claude's latest message
-(so a reply like "2. done" can be read against its list), and an answer closes its item right away
-instead of a turn later. That latest message is context only: a close still has to quote your words.
+summary of each tool call) and the open and recently closed items. The judge answers with items to
+add, and with items that Claude's own work closed.
+
+Your replies are judged separately, one at a time. Each one goes with the message from Claude that
+was on screen when you typed it, so a "2" is read against that message's list and never against a
+later one. A reply waits until the check of the turn it answered has finished, so that any item it
+answers already exists.
+
+(Before v0.6 the after-turn check also carried your recent words. On 2026-11-05 that check read an
+"option 2", typed for one item, against the next item's options, and recorded the opposite of what
+was chosen.)
+
+When a reply is just an option ("1", "option 2", "b, with X"), code reads the option's label from
+that message rather than taking the judge's paraphrase. It does so only when the message is about
+the item and the number is unambiguous; otherwise it records your words as typed. A bare option can
+close only the item it is tied to: one Claude presented in a walk, one you pressed Reply on, or the
+only open item the message was about.
 
 Code checks the judge's answer before anything changes:
 
@@ -126,8 +170,10 @@ Code checks the judge's answer before anything changes:
   "yes" can still count for the presented item.
 - Only prompts you typed (or sent through Remote Control) count as your words, plus your `!` shell
   commands. Prompts from channels, other sessions, plugins and scheduled tasks never do.
-- At most 6 adds and 3 closes per check; what the judge returns is shown as plain text, with control
-  and invisible characters stripped.
+- At most 6 adds and 3 closes per check, and what the judge returns is shown as plain text, with
+  control and invisible characters stripped. When one reply would close more than 3 (say, "close the
+  settled ones"), the rest stay open, and both the panel and Claude's next `list` say which. Claude
+  can then close them with `close` (kind `user-asked`, citing your reply), or ask you.
 
 The judge model is a setting (`/config`, Docket → Judge model): `haiku` (the default), `sonnet` or
 `opus`. A check is about 2-8k tokens. Docket makes one check after each turn, plus one for each
