@@ -38,6 +38,9 @@ export function btwQuestion(item: Item): string {
   return `/btw can you remind me what this item is and give me more context for ${what}? "${item.text}"${quote}`
 }
 
+// Text that runs as /btw: whatever follows it is a side question, never an answer.
+export const isBtwText = (text: string): boolean => /^\/btw\b/.test(text.trimStart())
+
 // What follows `lead` at the start of the box (its trailing space optional), or undefined when the box
 // does not start with it.
 export function tailAfter(box: string, lead: string): string | undefined {
