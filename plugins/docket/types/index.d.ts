@@ -6,7 +6,19 @@ export type ItemKind = 'decide' | 'do'
 export type ItemStatus = 'open' | 'resolved' | 'dismissed'
 // you: the user's words decided or did it. claude: Claude's text or tool lines showed it done or moot.
 // dismiss: a digit key or button. clear: /docket clear (a batch).
-export type ClosedBy = 'you' | 'claude' | 'dismiss' | 'clear'
+// claude-tool (v0.6): Claude closed it through the close tool, on purpose, with a kind and a reason.
+export type ClosedBy = 'you' | 'claude' | 'dismiss' | 'clear' | 'claude-tool'
+
+// What the user said when a reply of theirs closed an item (v0.6): their words as typed (the Reply lead
+// stripped), and, for an option pick, the option code read by their key. linked: Claude's amend tied
+// these words to the item; they are not the reply that first closed it.
+export type Answer = { words: string; option?: { key: string; label: string }; linked?: true }
+export type CloseKind = 'duplicate' | 'settled-earlier' | 'user-asked' | 'done-by-claude' | 'stale'
+// Why Claude closed an item with the close tool. dupOf for a duplicate; cite: the #id or the user's words.
+export type Closure = { kind: CloseKind; reason: string; dupOf?: number; cite?: string }
+export type ClaudeNote = { text: string; at: number }
+// A resolution Claude's amend replaced, kept visible.
+export type Superseded = { note?: string; answer?: Answer; at: number; correction: string }
 
 export type Item = {
   id: number
@@ -36,6 +48,14 @@ export type Item = {
   firstSeenAt?: number
   // Set when the item arrived through a carry (v0.3).
   carriedAt?: number
+  // v0.6: see Answer. Set on every close by a judged reply of the user's.
+  answer?: Answer
+  // v0.6: a close by a button rather than a reply (Done, Reply new).
+  via?: 'done' | 'reply-new'
+  // v0.6: Claude's notes (annotate), its close (close), and what its amend replaced.
+  notes?: ClaudeNote[]
+  closure?: Closure
+  superseded?: Superseded
 }
 
 // The carry switch (v0.3). gen goes up each time it is turned on; { on: false, gen: 0 } until then.
@@ -44,7 +64,28 @@ export type CarryState = { on: boolean; gen: number }
 // One thing the user typed: a prompt, or a `!` shell command (text starts with '!').
 // v0.4, stamped when it was typed (see ledger.addUser): focusId, the walk item this reply answers;
 // inWalk, a walk was going on (so "skip" and the like never close an item).
-export type UserEntry = { seq: number; text: string; afterTurn: number; focusId?: number; inWalk?: true }
+// v0.6: words, the text with a Reply lead stripped (what the user typed); namedId, the item that lead
+// named; midTurn, typed while a turn ran; fails, checks of this reply that failed.
+// answered: Claude's final message on screen when it was typed, which the reply is judged against.
+export type UserEntry = {
+  seq: number
+  text: string
+  afterTurn: number
+  focusId?: number
+  inWalk?: true
+  words?: string
+  namedId?: number
+  midTurn?: true
+  fails?: number
+  answered?: Answered
+}
+// clipped: the message was longer than what was kept, so its option lists can't be trusted whole.
+export type Answered = { text: string; clipped: boolean }
+// One prompt the user typed, as Docket recorded it (v0.6): the only source amend and close cite from.
+// overCap: open items its check left by the per-reply limit; answered and the stamps tie it to items.
+export type LoggedReply = { seq: number; words: string; afterTurn: number; overCap?: number[]; focusId?: number; namedId?: number; answered?: Answered }
+// The latest judged reply whose verdict went over the per-reply limit (v0.6). shown: list has shown it.
+export type LastReply = { seq: number; words: string; closed: number[]; overCap: number[]; shown: boolean }
 // One assistant message's text, or one tool line, tagged with the main turn it came from.
 export type ClaudeEntry = { turn: number; text: string; isFinal: boolean }
 export type ToolLine = { turn: number; text: string }
@@ -107,6 +148,11 @@ export type DocketSession = {
   // Not saved (v0.4): the item Claude last presented in a walk, through the list tool's `presenting`.
   // turn is the main turn it was presented in; ids every distinct id presented in that turn.
   walkFocus: WalkFocus | null
+  // v0.6, not saved: the user's typed prompts, and the last reply that went over the limit.
+  userLog: LoggedReply[]
+  // v0.6: lastFinal came back from disk cut to the saved length, so its lists can't be read whole.
+  lastFinalClipped: boolean
+  lastReply: LastReply | null
 }
 
 export type WalkFocus = { id: number; turn: number; ids: number[] }

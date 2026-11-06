@@ -28,7 +28,7 @@ test('the list names items by #id and text, in the order the pane draws them, as
   const ids = [...text.matchAll(/^#(\d+) /gm)].map(m => Number(m[1]))
   expect(ids).toEqual(await openIds($))
   expect(text.includes('#1 [do] "Renew the domain"')).toBe(true)
-  expect(text.includes('there is no tool to close one')).toBe(true)
+  expect(text.includes("Items close from the user's own replies.")).toBe(true)
 })
 
 test('nothing open, an unknown #id and a closed #id each say so', async ($, on) => {
@@ -41,7 +41,7 @@ test('nothing open, an unknown #id and a closed #id each say so', async ($, on) 
   await ui.press({ key: 'done-1' })
   await ui.unmount()
   const closed = await list($, '#1')
-  expect(closed.startsWith('#1 is already closed (you: marked done); skip it.')).toBe(true)
+  expect(closed.startsWith('#1 "Renew the domain" is already closed (you marked it done); skip it.')).toBe(true)
   expect(closed.includes('Last closed: #1 "Renew the domain"')).toBe(true)
   expect((await list($, '#9')).startsWith("#9 isn't on the Docket.")).toBe(true)
   expect((await list($, 'the first one')).startsWith("That #id isn't on the Docket")).toBe(true)

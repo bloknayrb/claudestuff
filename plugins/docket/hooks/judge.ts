@@ -13,9 +13,11 @@ export const BUDGET_CHARS = 32000
 // The newest user text always kept, however large the rest.
 const USER_KEEP_CHARS = 4096
 // How much of Claude's latest message a resolve-only check carries (its tail, where asks sit).
-const LATEST_CHARS = 6000
+// v0.6: the message a reply answered rides whole as far as this, so the judge sees the item it names.
+const LATEST_CHARS = 16000
 export const MAX_ADDS = 6
-export const MAX_RESOLVES = 3
+// v0.6: how many resolves one reply may carry to the ledger, which applies the per-verdict limit.
+export const MAX_RESOLVE_ENTRIES = 20
 
 // Revised after the 2026-11-03 eval (98 turns and 2 whole sessions on Haiku): one ask is one item,
 // singleRec as a go-ahead on one proposed action, a narrow "moot", no deciding a neighbouring
@@ -50,7 +52,11 @@ Empty arrays when there is nothing.`
 // prompt, not RULES, so the cached system block stays the same.
 export const WALK_NOTE = `Claude is walking the user through their open items. Restating or recommending on an open item is not a new ask. ${SKIP_PHRASES.map(p => `'${p}'`).join(', ')} leaves an item open.`
 
-export const RESOLVE_NOTE = 'This is a resolve-only check: return "add": [] and only resolves. <claude_latest> is Claude\'s most recent message, for reading what a short or numbered reply answers.'
+// A full check (v0.6) carries no user words: it adds items and records only what Claude's own text or
+// tool lines show done.
+export const FULL_NOTE = 'This check carries none of the user\'s words: resolve only "by": "claude" items, from <claude_text> or <tool_lines>.'
+
+export const RESOLVE_NOTE ='This is a resolve-only check: return "add": [] and only resolves. <claude_latest> is Claude\'s most recent message, for reading what a short or numbered reply answers.'
 
 export type JudgeInput = {
   mode: Mode
@@ -93,6 +99,8 @@ function render(mode: Mode, claude: ClaudeEntry[], tools: ToolLine[], user: User
   if (mode === 'resolve') {
     parts.push(RESOLVE_NOTE)
     if (latest !== '') parts.push(`<claude_latest>\n${latest}\n</claude_latest>`)
+  } else {
+    parts.push(FULL_NOTE)
   }
   parts.push(`<open_items>\n${open.map(i => itemLine(i, withQuotes)).join('\n')}\n</open_items>`)
   if (mode === 'full') {
@@ -103,8 +111,12 @@ function render(mode: Mode, claude: ClaudeEntry[], tools: ToolLine[], user: User
   }
   // A walk reply carries which item it answers (v0.4): a check that runs after the walk has moved on
   // still knows, from the reply itself rather than Claude's latest message.
-  const userLine = (u: UserEntry) => (u.focusId === undefined ? u.text : `(This reply answers open item ${u.focusId}.) ${u.text}`)
-  parts.push(`<user_text>\n${user.map(userLine).join('\n\n')}\n</user_text>`)
+  // v0.6: only a resolve check carries the user's words (one reply), never a full check: on 2026-11-05 a
+  // full check read a reply typed for one item against the next item's options, written after it.
+  if (mode === 'resolve') {
+    const userLine = (u: UserEntry) => (u.focusId === undefined ? u.text : `(This reply answers open item ${u.focusId}.) ${u.text}`)
+    parts.push(`<user_text>\n${user.map(userLine).join('\n\n')}\n</user_text>`)
+  }
   return parts.join('\n\n')
 }
 
@@ -116,7 +128,7 @@ const userChars = (user: readonly UserEntry[]): number => user.reduce((n, u) => 
 export function buildPrompt(input: JudgeInput): Built {
   let claude = input.mode === 'full' ? input.claude.map(c => ({ ...c, text: redact(c.text) })) : []
   let tools = input.mode === 'full' ? input.tools.map(t => ({ ...t, text: redact(clip(t.text, 160)) })) : []
-  let user = input.user.map(u => ({ ...u, text: redact(u.text) }))
+  let user = input.mode === 'resolve' ? input.user.map(u => ({ ...u, text: redact(u.text) })) : []
   let withQuotes = true
   // The latest message rides only with a resolve-only check, redacted and held to a tail.
   const latest = input.mode === 'resolve' ? redact(input.latest ?? '').slice(-LATEST_CHARS) : ''
@@ -144,7 +156,7 @@ export function buildPrompt(input: JudgeInput): Built {
       tools,
       user,
       openIds: input.open.map(i => i.id),
-      consumedSeq: input.user.reduce((m, u) => Math.max(m, u.seq), 0),
+      consumedSeq: input.mode === 'resolve' ? input.user.reduce((m, u) => Math.max(m, u.seq), 0) : 0,
       consumedTurn: Math.max(0, ...input.claude.map(c => c.turn), ...input.tools.map(t => t.turn)),
     },
   }
@@ -209,23 +221,24 @@ export function parseVerdict(reply: string, snap: Snapshot): Parsed {
       const note = isString(res?.note) ? clip(normalise(res.note), 80) : ''
       const isOpen = snap.openIds.includes(id)
       const isDup = resolves.some(x => x.id === id)
-      if (!isOpen || isDup || resolves.length >= MAX_RESOLVES) {
+      if (!isOpen || isDup) {
         dropped += 1
         continue
       }
+      let checked: CheckedResolve | undefined
+      // A full check has no user words (v0.6): its "you" resolves find no entry and drop here.
       if (res.by === 'you') {
         const entry = snap.user.find(u => occursIn(evidence, u.text))
-        if (entry === undefined) { dropped += 1; continue }
-        resolves.push({ id, by: 'you', note, evidence: normalise(evidence), entry })
+        if (entry !== undefined) checked = { id, by: 'you', note, evidence: normalise(evidence), entry }
       } else if (res.by === 'claude' && snap.mode === 'full') {
         const inText = snap.claude.find(c => occursIn(evidence, c.text))
         const inTools = snap.tools.find(t => occursIn(evidence, t.text))
         const turn = inText?.turn ?? inTools?.turn
-        if (turn === undefined) { dropped += 1; continue }
-        resolves.push({ id, by: 'claude', note, evidence: normalise(evidence), turn })
-      } else {
-        dropped += 1
+        if (turn !== undefined) checked = { id, by: 'claude', note, evidence: normalise(evidence), turn }
       }
+      if (checked === undefined) { dropped += 1; continue }
+      if (resolves.length >= MAX_RESOLVE_ENTRIES) { dropped += 1; continue }
+      resolves.push(checked)
     }
   }
   return { ok: true, verdict: { adds, resolves }, dropped }

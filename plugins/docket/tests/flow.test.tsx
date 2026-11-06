@@ -105,17 +105,20 @@ test('a full check due during a resolve check runs after it, never mid-turn', as
   expect(w.calls[2]?.prompt.includes('Still waiting on the cache choice.')).toBe(true)
 })
 
-test('an answer carried in the same check as its ask still closes it (a resolve check follows)', async ($, on) => {
+test('an answer to an ask whose check failed: the check is retried at the reply, then the reply is judged alone (v0.6)', async ($, on) => {
   const w = world(on)
   await start($)
-  // The check after t1 fails; the user answers; the retry after t2 adds the ask from t1 and sees the
-  // answer, which it cannot resolve in the verdict that adds the item.
+  // The check after t1 fails. The user answers: the reply waits on t1's full check, which is retried at
+  // once, adds the ask, and then the reply is judged by itself.
   w.replies.push({ fail: 'api-error' })
   await turn($, w, 't1', [ASK])
-  await say($, w, 'use sqlite')
   w.replies.push(ADD_ASK, verdict({ resolve: [{ id: 1, by: 'you', note: 'SQLite', evidence: 'use sqlite' }] }))
-  await turn($, w, 't2', ['Noted.'])
-  expect(w.calls.at(-1)?.prompt.includes('resolve-only')).toBe(true)
+  await say($, w, 'use sqlite')
+  await w.clock.settle()
+  expect(w.calls.length).toBe(3)
+  expect(w.calls[1]?.prompt.includes('use sqlite')).toBe(false)
+  expect(w.calls[2]?.prompt.includes('resolve-only')).toBe(true)
+  expect(w.calls[2]?.prompt.includes('use sqlite')).toBe(true)
   expect(await openIds($)).toEqual([])
 })
 
@@ -243,7 +246,8 @@ test('Done closes an item as yours; the closed list says so', async ($, on) => {
   await ui.press({ key: 'done-1' })
   expect(await ui.find({ key: 'item-1' })).toBeUndefined()
   await ui.press({ key: 'docket-show-closed' })
-  expect(await ui.find({ type: 'Text', text: 'Renew the domain — you: marked done' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Renew the domain' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '↳ you marked it done' })).toBeDefined()
   await ui.unmount()
   expect(w.calls.length).toBe(0)
 })

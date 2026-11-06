@@ -7,7 +7,7 @@ import { CARRY_MAX_AGE_MS, carryEnvelope, carryText, claimers, claimText, folder
 import type { CarryFile } from './carry'
 import { buildPrompt, parseVerdict, RULES } from './judge'
 import type { Mode } from './judge'
-import { addManual, addToolAsked, addTurn, addUser, applyVerdict, clearAll, closedForJudge, closeGroups, dismiss, freshSession, handOff, isWalking, markDone, normalize, openItems, present, reopen } from './ledger'
+import { addManual, addToolAsked, addTurn, addUser, applyVerdict, clearAll, closableBy, closedForJudge, closeGroups, consumeReply, dismiss, failReply, failWaiting, freshSession, handOff, isBlocked, isWalking, judgeable, markDone, normalize, openItems, present, reopen } from './ledger'
 import { envelope, freshProc, freshWriter, isRealSid, isSafeSid, ledgerText, normProc, normWriter, parseSlot, pickSlot, restore, RETAIN_MS, slotName, tombstone, withKey, withoutKey, writeKey } from './persist'
 import { blankText, btwQuestion, contextBlock, HANDOFF_MAX_AGE_MS, isNonce, isRootSafe, label, launchScript, leadHere, leadNew, newNonce, parseHandoff, parseNewArgs, replyRefusal, tailAfter, takenText, waitingText, wtArgv } from './spawn'
 import { clip } from './text'
@@ -839,13 +839,10 @@ async function runNext($: EngineInterface, model: string): Promise<void> {
   if (inFlight) return
   const mode: Mode | undefined = fullDue ? 'full' : resolveDue ? 'resolve' : undefined
   if (mode === undefined) return
-  // A full check sends the user's pending words too, so it covers a due resolve.
-  if (mode === 'full') {
-    fullDue = false
-    resolveDue = false
-  } else {
-    resolveDue = false
-  }
+  // v0.6: a full check carries no user words, so it never covers a due resolve; replies wait for the
+  // full check of the turn they answered, then are judged one at a time.
+  if (mode === 'full') fullDue = false
+  else resolveDue = false
   inFlight = true
   isResolving = mode === 'resolve'
   redraw($)
@@ -859,9 +856,18 @@ async function runNext($: EngineInterface, model: string): Promise<void> {
   if (fullDue || resolveDue) schedule($, model)
 }
 
-async function recordFailure($: EngineInterface, reason: string): Promise<void> {
+// onReplies (v0.6): what the failure does to the replies, so a check that keeps failing can't hold
+// them forever: a failed resolve counts against its reply, a failed full check against those waiting.
+// A reply just arrived (v0.6): judge it when it can be; if it waits on a full check nothing has
+// scheduled (an aborted turn's text, a failed check) and no turn is running, schedule that check.
+function queueReplies(s: DocketSession, isIdle: boolean): void {
+  if (judgeable(s) !== undefined) resolveDue = true
+  else if (isBlocked(s) && isIdle && !fullDue && !inFlight) fullDue = true
+}
+
+async function recordFailure($: EngineInterface, reason: string, onReplies: (s: DocketSession) => DocketSession = s => s): Promise<void> {
   const now = await $.clock.now()
-  const s = await change($, cur => ({ ...cur, lastCheck: { ...cur.lastCheck, ok: false, at: now, reason, streak: cur.lastCheck.streak + 1 } }))
+  const s = await change($, cur => onReplies({ ...cur, lastCheck: { ...cur.lastCheck, ok: false, at: now, reason, streak: cur.lastCheck.streak + 1 } }))
   $.ui.log(`docket: check failed (${reason})`, { to: 'debug' })
   if (s.lastCheck.streak === 1) $.ui.toast(FAIL_TOAST(reason))
 }
@@ -871,10 +877,22 @@ async function runCheck($: EngineInterface, mode: Mode, model: string): Promise<
   const s = await readSession($)
   const sid = s.sid
   if (!isRealSid(sid) && sid !== '') return
-  const open = openItems(s)
-  if (mode === 'resolve' && (open.length === 0 || s.pendingUser.length === 0)) return
-  if (mode === 'full' && s.claude.length === 0 && s.tools.length === 0 && s.pendingUser.length === 0) return
-  const built = buildPrompt({ mode, claude: s.claude, tools: s.tools, user: s.pendingUser, open, closed: closedForJudge(s), toolAsked: s.toolAsked, latest: s.lastFinal, walking: isWalking(s) })
+  let open = openItems(s)
+  // v0.6: a resolve check judges one reply, the oldest whose turn's full check has applied, against the
+  // message it answered, offered only the items that existed for it.
+  const entry = mode === 'resolve' ? judgeable(s) : undefined
+  if (mode === 'resolve') {
+    if (entry === undefined) return
+    open = closableBy(s, entry)
+    if (open.length === 0) {
+      await change($, cur => (cur.sid === sid ? consumeReply(cur, entry.seq) : cur))
+      if (judgeable(await readSession($)) !== undefined) resolveDue = true
+      return
+    }
+  }
+  if (mode === 'full' && s.claude.length === 0 && s.tools.length === 0) return
+  const onFail = (cur: DocketSession) => (entry !== undefined ? failReply(cur, entry.seq) : failWaiting(cur))
+  const built = buildPrompt({ mode, claude: s.claude, tools: s.tools, user: entry === undefined ? [] : [entry], open, closed: closedForJudge(s), toolAsked: s.toolAsked, latest: entry?.answered?.text ?? '', walking: isWalking(s) })
   const mine = new AbortController()
   controller = mine
   let r: Awaited<ReturnType<EngineInterface['model']['complete']>>
@@ -885,7 +903,7 @@ async function runCheck($: EngineInterface, mode: Mode, model: string): Promise<
     )
   } catch (err) {
     if (myEpoch !== (await readProc($)).epoch) return
-    await recordFailure($, `rejected: ${err instanceof Error ? clip(err.message, 80) : 'unknown'}`)
+    await recordFailure($, `rejected: ${err instanceof Error ? clip(err.message, 80) : 'unknown'}`, onFail)
     return
   } finally {
     if (controller === mine) controller = undefined
@@ -894,7 +912,7 @@ async function runCheck($: EngineInterface, mode: Mode, model: string): Promise<
   if (myEpoch !== (await readProc($)).epoch || (await readSession($)).sid !== sid) return
   if (!r.isAnswered) {
     if (r.reason === 'aborted' && mine.signal.aborted) return
-    await recordFailure($, r.reason === 'api-error' ? `api-error ${r.status ?? ''}`.trim() : r.reason)
+    await recordFailure($, r.reason === 'api-error' ? `api-error ${r.status ?? ''}`.trim() : r.reason, onFail)
     return
   }
   if (!isUsageLogged) {
@@ -903,7 +921,7 @@ async function runCheck($: EngineInterface, mode: Mode, model: string): Promise<
   }
   const parsed = parseVerdict(r.text, built.snapshot)
   if (!parsed.ok) {
-    await recordFailure($, parsed.reason)
+    await recordFailure($, parsed.reason, onFail)
     return
   }
   const now = await $.clock.now()
@@ -916,10 +934,10 @@ async function runCheck($: EngineInterface, mode: Mode, model: string): Promise<
     return { session: { ...a.session, lastCheck: { ok: true, at: now, reason: '', streak: 0, checkedTurns } }, out: a }
   })
   if (result === undefined) return
-  // The user's words that answer an item this verdict added were kept: check them against it now.
-  if (result.keptForNew) resolveDue = true
-  if (parsed.dropped > 0 || result.refused.length > 0) {
-    $.ui.log(`docket: verdict dropped ${parsed.dropped}, refused [${result.refused.join(', ')}]`, { to: 'debug' })
+  // Replies that waited on this full check, or the next one in the queue, are judged now.
+  if (judgeable(await readSession($)) !== undefined) resolveDue = true
+  if (parsed.dropped > 0 || result.refused.length > 0 || result.overCap.length > 0) {
+    $.ui.log(`docket: verdict dropped ${parsed.dropped}, refused [${result.refused.join(', ')}], over the limit [${result.overCap.join(', ')}]`, { to: 'debug' })
   }
   if (result.added > 0 || result.resolved > 0) await pauseKeys($)
 }
@@ -1208,7 +1226,7 @@ async function submitWalk($: EngineInterface): Promise<void> {
 // waited for (a bounded few seconds), so a walk doesn't present it again.
 async function listAnswer($: EngineInterface, rawPresenting: unknown, isMain: boolean): Promise<string> {
   const start = await $.clock.now()
-  while ((resolveDue || inFlight) && (await $.clock.now()) - start < RESOLVE_WAIT_MS) {
+  while ((resolveDue || fullDue || inFlight) && (await $.clock.now()) - start < RESOLVE_WAIT_MS) {
     await new Promise<void>(r => $.clock.after(200, () => r()))
   }
   let presenting: number | 'bad' | undefined
@@ -1222,7 +1240,7 @@ async function listAnswer($: EngineInterface, rawPresenting: unknown, isMain: bo
     await change($, s => (s.items.some(i => i.id === id && i.status === 'open') ? present(s, id) : s))
   }
   const s = await readSession($)
-  return listText(s, openItems(s), closeGroups(s), await $.clock.now(), presenting, resolveDue || inFlight)
+  return listText(s, openItems(s), closeGroups(s), await $.clock.now(), presenting, resolveDue || fullDue || inFlight || s.pendingUser.length > 0)
 }
 
 // --- presses ---
@@ -1512,10 +1530,8 @@ export const register: Register = (on, options) => {
       if (isUser && e.text.trim() !== '') {
         if (e.turnId !== undefined) midTurn.add(e.text.trim())
         const s = await change($, cur => addUser(cur, e.text, e.turnId !== undefined))
-        if (openItems(s).length > 0) {
-          resolveDue = true
-          schedule($, model)
-        }
+        queueReplies(s, e.turnId === undefined)
+        schedule($, model)
       }
       // A Reply new window (v0.4): the item and Claude's words ride with the first real prompt as context
       // the model reads. Never through addUser above, so this window's judge never takes them as the user's.
@@ -1544,10 +1560,8 @@ export const register: Register = (on, options) => {
       const cmd = bashInput(text)
       if (cmd !== undefined) {
         const s = await change($, cur => addUser(cur, `!${cmd}`))
-        if (openItems(s).length > 0) {
-          resolveDue = true
-          schedule($, model)
-        }
+        queueReplies(s, false)
+        schedule($, model)
       }
     } catch (err) {
       await fail($, 'session.append', err)
@@ -1584,7 +1598,7 @@ export const register: Register = (on, options) => {
       const got = material(turnSlice(msgs, mark?.len, midTurn, mark?.opener), e.answer, turn)
       midTurn = new Set()
       const final = got.claude.at(-1)?.text
-      await change($, s => addToolAsked(addTurn({ ...s, turn, lastFinal: final ?? s.lastFinal }, got.claude, got.tools), got.asked))
+      await change($, s => addToolAsked(addTurn({ ...s, turn, lastFinal: final ?? s.lastFinal, lastFinalClipped: final === undefined ? s.lastFinalClipped : false }, got.claude, got.tools), got.asked))
       // Only a turn that ended with an answer is judged; an aborted, refused or failed one leaves its
       // material for the next check.
       if (e.reason === 'answer') {

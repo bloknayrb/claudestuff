@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { CheckedResolve, Snapshot, Verdict } from '../hooks/judge'
-import { addManual, addUser, applyVerdict, clearAll, closedForJudge, closeGroups, dismiss, freshSession, KEEP_CLOSES, KEEP_USER, openItems, reopen } from '../hooks/ledger'
+import { addManual, addTurn, addUser, applyVerdict, clearAll, closedForJudge, closeGroups, dismiss, freshSession, isBlocked, judgeable, KEEP_CLOSES, KEEP_USER, openItems, reopen } from '../hooks/ledger'
 import { isBare } from '../hooks/text'
 import type { DocketSession, Item } from '../types'
 
@@ -80,19 +80,16 @@ test("Claude's later short report may share words with the ask", async () => {
   expect(applyVerdict(s, v([claude(1, 'merged', 3)]), snap(), 0).refused).toEqual([])
 })
 
-test('words written after a new item opened are kept for the resolve check that follows', async () => {
-  let s = { ...freshSession(), turn: 3 }
-  s = addUser(s, 'earlier words')
-  s = { ...s, turn: 4 }
+test('a reply waits for the full check of the turn it answered, then is judgeable (v0.6, replaces keptForNew)', async () => {
+  let s = { ...freshSession(), turn: 4 }
+  s = addTurn(s, [{ turn: 4, text: 'SQLite or Postgres?', isFinal: true }], [])
   s = addUser(s, 'use sqlite')
+  expect(judgeable(s)).toBe(undefined)
+  expect(isBlocked(s)).toBe(true)
   const add = { kind: 'decide' as const, text: 'Choose the cache', quote: 'q', singleRec: false, turn: 4 }
-  const r = applyVerdict(s, v([], [add]), snap({ consumedSeq: 2 }), 0)
-  expect(r.keptForNew).toBe(true)
+  const r = applyVerdict(s, v([], [add]), snap({ consumedTurn: 4 }), 0)
   expect(r.session.pendingUser.map(u => u.text)).toEqual(['use sqlite'])
-  // With no add, the same words are consumed.
-  const none = applyVerdict(s, v([]), snap({ consumedSeq: 2 }), 0)
-  expect(none.keptForNew).toBe(false)
-  expect(none.session.pendingUser.length).toBe(0)
+  expect(judgeable(r.session)?.text).toBe('use sqlite')
 })
 
 test('the backlog is capped while checks fail', async () => {
@@ -134,15 +131,16 @@ test('a reopen sticks against the evidence that closed it, for both sides', asyn
   expect(applyVerdict(later, v([you(1, 'use A', 2, 2)]), snap(), 0).refused).toEqual([])
 })
 
-test('a full verdict consumes what it was handed; a resolve-only one consumes nothing', async () => {
+test('a full verdict consumes Claude text and tool lines, never replies; a resolve verdict consumes its one reply (v0.6)', async () => {
   let s = withItems([{}])
   s = addUser(addUser(s, 'a'), 'b')
   s = { ...s, claude: [{ turn: 1, text: 'x', isFinal: true }], tools: [{ turn: 1, text: 'Bash: ls' }] }
-  const kept = applyVerdict(s, v([]), snap({ mode: 'resolve', consumedSeq: 2, consumedTurn: 1 }), 0).session
-  expect(kept.pendingUser.length).toBe(2)
-  const used = applyVerdict(s, v([]), snap({ consumedSeq: 1, consumedTurn: 1 }), 0).session
-  expect(used.pendingUser.map(u => u.text)).toEqual(['b'])
-  expect(used.claude.length + used.tools.length).toBe(0)
+  const full = applyVerdict(s, v([]), snap({ consumedTurn: 1 }), 0).session
+  expect(full.pendingUser.map(u => u.text)).toEqual(['a', 'b'])
+  expect(full.claude.length + full.tools.length).toBe(0)
+  const first = s.pendingUser[0]
+  const resolved = applyVerdict(s, v([]), snap({ mode: 'resolve', user: first === undefined ? [] : [first], consumedSeq: 1 }), 0).session
+  expect(resolved.pendingUser.map(u => u.text)).toEqual(['b'])
 })
 
 test('an add that repeats a held item, open or closed, is skipped', async () => {
