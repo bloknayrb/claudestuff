@@ -39,6 +39,12 @@ let resolveDue = false
 let fullDue = false
 let inFlight = false
 let isResolving = false
+// v0.6: the check just run changed something (applied a verdict, recorded a failure, let a reply go).
+// Only then is a waiting reply queued again, so a check that can't run (no session yet) never spins.
+let progressed = false
+// This module instance, claimed in proc at session.start: after a hot reload, an old instance's runner
+// stops queueing, so two runners never judge the same reply.
+const RUNNER = Math.floor(Math.random() * 1e9) + 1
 let controller: AbortController | undefined
 // Writes run one after another on this chain, so no two share a slot.
 let saveChain: Promise<void> = Promise.resolve()
@@ -846,6 +852,7 @@ async function runNext($: EngineInterface, model: string): Promise<void> {
   else resolveDue = false
   inFlight = true
   isResolving = mode === 'resolve'
+  progressed = false
   redraw($)
   try {
     await runCheck($, mode, model)
@@ -854,10 +861,10 @@ async function runNext($: EngineInterface, model: string): Promise<void> {
     isResolving = false
     redraw($)
   }
-  // v0.6: whatever the check came to (applied, failed, aborted, thrown away), a reply still waiting is
+  // v0.6: when the check changed something (applied, failed, let a reply go), a reply still waiting is
   // queued again rather than left for the next prompt. Bounded: each failure counts against the reply.
   try {
-    queueReplies(await readSession($), turnStartLen === undefined)
+    if (progressed && (await readProc($)).runner === RUNNER) queueReplies(await readSession($), turnStartLen === undefined)
   } catch (err) {
     await fail($, 'judge', err)
   }
@@ -876,6 +883,7 @@ function queueReplies(s: DocketSession, isIdle: boolean): void {
 async function recordFailure($: EngineInterface, reason: string, onReplies: (s: DocketSession) => DocketSession = s => s): Promise<void> {
   const now = await $.clock.now()
   const s = await change($, cur => onReplies({ ...cur, lastCheck: { ...cur.lastCheck, ok: false, at: now, reason, streak: cur.lastCheck.streak + 1 } }))
+  progressed = true
   $.ui.log(`docket: check failed (${reason})`, { to: 'debug' })
   if (s.lastCheck.streak === 1) $.ui.toast(FAIL_TOAST(reason))
 }
@@ -894,6 +902,7 @@ async function runCheck($: EngineInterface, mode: Mode, model: string): Promise<
     open = closableBy(s, entry)
     if (open.length === 0) {
       await change($, cur => (cur.sid === sid ? consumeReply(cur, entry.seq) : cur))
+      progressed = true
       if (judgeable(await readSession($)) !== undefined) resolveDue = true
       return
     }
@@ -942,6 +951,7 @@ async function runCheck($: EngineInterface, mode: Mode, model: string): Promise<
     return { session: { ...a.session, lastCheck: { ok: true, at: now, reason: '', streak: 0, checkedTurns } }, out: a }
   })
   if (result === undefined) return
+  progressed = true
   // Replies that waited on this full check, or the next one in the queue, are judged now.
   if (judgeable(await readSession($)) !== undefined) resolveDue = true
   if (parsed.dropped > 0 || result.refused.length > 0 || result.overCap.length > 0) {
@@ -1443,7 +1453,7 @@ export const register: Register = (on, options) => {
       loadedAt = await $.clock.now()
       const sid = await $.session.id()
       // A reload: any check the old module started is now stale.
-      await changeProc($, p => ({ ...p, isInteractive: e.isInteractive, epoch: p.epoch + 1, startupSid: p.startupSid ?? (isSafeSid(sid) ? sid : null), handoffNonce: p.handoffNonce ?? handoffNonce }))
+      await changeProc($, p => ({ ...p, runner: RUNNER, isInteractive: e.isInteractive, epoch: p.epoch + 1, startupSid: p.startupSid ?? (isSafeSid(sid) ? sid : null), handoffNonce: p.handoffNonce ?? handoffNonce }))
       // Not inherited by the Bash tool's children (or read again by a reload).
       if (handoffNonce !== null) {
         try {

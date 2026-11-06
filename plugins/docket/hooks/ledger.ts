@@ -381,11 +381,10 @@ export function present(s: DocketSession, id: number): DocketSession {
 // closed items too, since an earlier reply may close the item before this one is sent.
 export function stripLead(s: DocketSession, text: string): { words: string; namedId?: number } {
   const t = text.trimStart()
-  for (const item of s.items) {
-    const lead = leadHere(item).trimEnd()
-    if (t.startsWith(lead)) return { words: t.slice(lead.length).trim(), namedId: item.id }
-  }
-  return { words: text.trim() }
+  // Open items first, then the longest lead: an item "X" must not take a reply to "X - or Y?".
+  const byLead = [...s.items].sort((a, b) => Number(b.status === 'open') - Number(a.status === 'open') || leadHere(b).length - leadHere(a).length)
+  const hit = byLead.find(item => t.startsWith(leadHere(item).trimEnd()))
+  return hit === undefined ? { words: text.trim() } : { words: t.slice(leadHere(hit).trimEnd().length).trim(), namedId: hit.id }
 }
 
 export function addUser(s: DocketSession, text: string, isMidTurn = false): DocketSession {
@@ -397,7 +396,9 @@ export function addUser(s: DocketSession, text: string, isMidTurn = false): Dock
   // Which items that message is about, open or closed, as of now: a later close must not make it look
   // about one item only, and an item closed wrongly before this reply must still be one it is about
   // (the case amend corrects).
-  const aboutIds = answered === undefined ? [] : s.items.filter(i => names(answered.text, i)).map(i => i.id)
+  // Dismissed, cleared and Claude-closed items don't count: a near-duplicate dropped earlier must not
+  // make a message about one open item look like a message about two.
+  const aboutIds = answered === undefined ? [] : s.items.filter(i => (i.status === 'open' || i.status === 'resolved') && names(answered.text, i)).map(i => i.id)
   const stamps = {
     ...(focusId === undefined ? {} : { focusId }),
     ...(namedId === undefined ? {} : { namedId }),

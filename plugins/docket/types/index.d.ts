@@ -198,6 +198,8 @@ export type DocketProc = {
   handoffPicked: boolean
   handoffContext: HandoffContext | null
   canReplyNew: boolean
+  // v0.6: the module instance whose judge runner may queue replies (the newest to run session.start).
+  runner: number | null
 }
 
 export type WriteKind = 'snap' | 'carry'

@@ -36,6 +36,7 @@ export const freshProc = (): DocketProc => ({
   handoffPicked: false,
   handoffContext: null,
   canReplyNew: false,
+  runner: null,
 })
 export const freshWriter = (): DocketWriter => ({ seqBy: {}, lastText: {}, pending: {}, rootBy: {}, closed: {}, forgotten: {} })
 export const normProc = (v: Partial<DocketProc> | undefined): DocketProc => ({ ...freshProc(), ...(v ?? {}) })

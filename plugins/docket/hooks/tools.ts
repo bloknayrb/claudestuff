@@ -69,11 +69,13 @@ export function amend(s: DocketSession, id: number | undefined, correction: unkn
   if (!isSame && !tiedTo(s, asEntry(reply), item)) {
     return { session: s, text: `That reply isn't about #${item.id}: it wasn't presented, replied to, or named in the message the user answered. Annotate instead.` }
   }
-  const answer = { ...answerFor(s, asEntry(reply), item), ...(isSame ? {} : { linked: true as const }) }
+  // A second amend keeps the mark: the words are still ones Claude linked, not the reply that closed it.
+  const isLinked = !isSame || item.answer.linked === true
+  const answer = { ...answerFor(s, asEntry(reply), item), ...(isLinked ? { linked: true as const } : {}) }
   const superseded = item.superseded !== undefined
     ? { ...item.superseded, correction: text, at: now }
     : { at: now, correction: text, answer: item.answer, ...(item.note === undefined || item.note === '' ? {} : { note: item.note }) }
-  return { session: put(s, { ...item, answer, note: '', superseded }), text: `Amended #${item.id}: the user's words now shown are "${sanitise(reply.words, 120)}"${isSame ? '' : ' (linked by Claude)'}; your correction and the replaced reading are shown beside them.` }
+  return { session: put(s, { ...item, answer, note: '', superseded }), text: `Amended #${item.id}: the user's words now shown are "${sanitise(reply.words, 120)}"${isLinked ? ' (linked by Claude)' : ''}; your correction and the replaced reading are shown beside them.` }
 }
 
 type Kind = { kind: CloseKind; dupOf?: number }

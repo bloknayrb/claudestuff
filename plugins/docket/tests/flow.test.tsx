@@ -158,6 +158,14 @@ test('v0.6: a failed check is retried for a waiting reply without another prompt
   expect(await openIds($)).toEqual([])
 })
 
+test('v0.6: a reply before the session is known waits without spinning, and makes no call', async ($, on) => {
+  const w = world(on)
+  // No session.start: the docket's session is still pending.
+  await say($, w, 'use sqlite')
+  await w.clock.settle()
+  expect(w.calls.length).toBe(0)
+})
+
 test('failures: api-error and non-JSON mark the band; the first of a streak toasts once', async ($, on) => {
   const w = world(on)
   await start($)
