@@ -74,6 +74,20 @@ test('/btw fills an empty box, replaces the item\'s own empty lead, and refuses 
   await ui.press({ key: 'replynew-1' })
   expect(b.draft).toBe(btwQuestion(base))
   expect(w.toasts.some(t => t.includes('Reply new needs an empty box'))).toBe(true)
+  // Its own question with a trailing newline is still its own: /btw takes it, no refusal.
+  const refusals = w.toasts.filter(t => t.includes('/btw needs an empty box')).length
+  b.draft = `${btwQuestion(base)}\n`
+  await ui.press({ key: 'btw-1' })
+  expect(b.draft).toBe(btwQuestion(base))
+  expect(w.toasts.filter(t => t.includes('/btw needs an empty box')).length).toBe(refusals)
+  // Reply here over any other /btw draft (another item's question, or words typed after this one's)
+  // refuses: the lead appended after it would send the answer as a side question.
+  for (const draft of [btwQuestion(two), `${btwQuestion(base)} and also`]) {
+    b.draft = draft
+    await ui.press({ key: 'reply-1' })
+    expect(b.draft).toBe(draft)
+  }
+  expect(w.toasts.filter(t => t.includes('the box holds a /btw question')).length).toBe(2)
   await ui.unmount()
   // Nothing closed.
   expect(await openIds($)).toEqual([1, 2])

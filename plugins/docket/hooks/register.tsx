@@ -10,7 +10,7 @@ import type { Mode } from './judge'
 import { annotate, amend, closeByClaude, parseId } from './tools'
 import { addManual, addToolAsked, addTurn, addUser, applyVerdict, clearAll, closableBy, closeByTool, closedForJudge, closeGroups, consumeReply, dismiss, failReply, failWaiting, freshSession, handOff, isBlocked, isWalking, judgeable, markDone, normalize, openItems, present, reopen } from './ledger'
 import { envelope, freshProc, freshWriter, isRealSid, isSafeSid, ledgerText, normProc, normWriter, parseSlot, pickSlot, restore, RETAIN_MS, slotName, tombstone, withKey, withoutKey, writeKey } from './persist'
-import { blankText, btwQuestion, contextBlock, HANDOFF_MAX_AGE_MS, isNonce, isRootSafe, label, launchScript, leadHere, leadNew, newNonce, parseHandoff, parseNewArgs, replyRefusal, tailAfter, takenText, waitingText, wtArgv } from './spawn'
+import { blankText, btwQuestion, contextBlock, HANDOFF_MAX_AGE_MS, isBtwText, isNonce, isRootSafe, label, launchScript, leadHere, leadNew, newNonce, parseHandoff, parseNewArgs, replyRefusal, tailAfter, takenText, waitingText, wtArgv } from './spawn'
 import { clip } from './text'
 import { ARM_DELAY_MS, indicatorText, indicatorTree, listText, overCapLine, PANE_COLUMNS, PANE_ID, PANE_TITLE, paneTree } from './ui'
 import type { Actions } from './ui'
@@ -1327,7 +1327,14 @@ async function replyTo($: EngineInterface, id: number): Promise<void> {
   const lead = leadHere(item)
   const box = await $.prompt.read()
   // This item's /btw question still in the box: replaced, or the reply typed after it would run as /btw.
-  const swapped = box.text.trim() === btwQuestion(item) ? '' : tailAfter(box.text, leadNew(item))
+  const isOwnBtw = box.text.trim() === btwQuestion(item)
+  // Any other /btw draft (another item's question, or words typed after this one's): appending the lead
+  // would send the reply as a side question that never closes the item.
+  if (!isOwnBtw && isBtwText(box.text)) {
+    $.ui.toast('Docket: the box holds a /btw question; send or clear it first.')
+    return
+  }
+  const swapped = isOwnBtw ? '' : tailAfter(box.text, leadNew(item))
   const filled =
     swapped !== undefined
       ? await $.prompt.fill({ text: `${lead}${swapped}` })
@@ -1347,7 +1354,7 @@ async function btwTo($: EngineInterface, id: number): Promise<void> {
   const question = btwQuestion(item)
   const box = (await $.prompt.read()).text
   const isOurs = (lead: string) => tailAfter(box, lead)?.trim() === ''
-  if (box.trim() !== '' && box !== question && !isOurs(leadHere(item)) && !isOurs(leadNew(item))) {
+  if (box.trim() !== '' && box.trim() !== question && !isOurs(leadHere(item)) && !isOurs(leadNew(item))) {
     $.ui.toast('Docket: /btw needs an empty box; send or clear your draft first.')
     return
   }
@@ -1605,10 +1612,11 @@ export const register: Register = (on, options) => {
       }
       // A /btw side question is never an answer, even if a build hands it here without `command` set, and
       // never the prompt a Reply new window's context rides on (below).
-      const isBtw = /^\/btw\b/.test(e.text.trimStart())
-      const isUser = (e.origin.kind === 'composer' || e.origin.kind === 'bridge') && e.isMeta !== true && e.command === undefined && !isBtw
-      if (isUser && e.text.trim() !== '') {
-        if (e.turnId !== undefined) midTurn.add(e.text.trim())
+      const isBtw = isBtwText(e.text)
+      const isTyped = (e.origin.kind === 'composer' || e.origin.kind === 'bridge') && e.isMeta !== true && e.command === undefined && e.text.trim() !== ''
+      // Mid-turn text never opens a turn, a /btw included, should a build put its row in the transcript.
+      if (isTyped && e.turnId !== undefined) midTurn.add(e.text.trim())
+      if (isTyped && !isBtw) {
         const s = await change($, cur => addUser(cur, e.text, e.turnId !== undefined))
         queueReplies(s, e.turnId === undefined)
         schedule($, model)
