@@ -3,11 +3,11 @@ import { expect, test } from 'claude-code/testing'
 import { closedHead, closedLine, youPart } from '../hooks/attribution'
 import { buildPrompt } from '../hooks/judge'
 import type { Snapshot, Verdict } from '../hooks/judge'
-import { addTurn, addUser, applyVerdict, freshSession, judgeable, markDone, handOff, MAX_REPLY_FAILS, failWaiting, names, openItems, stripLead, tiedTo } from '../hooks/ledger'
+import { addTurn, addUser, applyVerdict, freshSession, judgeable, markDone, handOff, MAX_REPLY_FAILS, failWaiting, names, normalize, openItems, stripLead, tiedTo } from '../hooks/ledger'
 import { parseSlot, toLedger, envelope, restore } from '../hooks/persist'
 import { amend, annotate, closeByClaude } from '../hooks/tools'
 import { optionPick } from '../hooks/options'
-import { closeByTool } from '../hooks/ledger'
+import { closeByTool, present } from '../hooks/ledger'
 import { leadHere } from '../hooks/spawn'
 import type { DocketSession, Item } from '../types'
 import { ITEM_41, ITEM_42, MSG_41, MSG_42 } from './fixtures'
@@ -156,6 +156,19 @@ test('amend fixes the #41 mislabel by the user\'s later "1": linked by Claude, t
   expect(line.startsWith('you chose option 1')).toBe(true)
 })
 
+test('review: a bare "yes" for the walk item never closes another, even the only single-rec one raised', async () => {
+  let s = session([item(1, { text: 'Renew the domain' }), item(2, { text: 'Rotate the key', singleRec: true, openedTurn: 2 })], 1)
+  s = { ...present(s, 1), turn: 2, lastFinal: 'Next: Renew the domain. I recommend two years. OK?' }
+  s = addUser(s, 'yes')
+  expect(s.pendingUser.at(-1)?.focusId).toBe(1)
+  const r = resolveWith(s, [{ id: 2, evidence: 'yes' }])
+  expect(r.refused).toEqual(['bare-other-item'])
+  expect(openItems(r.session).map(i => i.id)).toEqual([1, 2])
+  // The same "yes" with no walk stamp still closes the only single-rec item, as before.
+  const plain = addUser({ ...session(s.items, 2), lastFinal: 'Rotate the key? I recommend today.' }, 'yes')
+  expect(openItems(resolveWith(plain, [{ id: 2, evidence: 'yes' }]).session).map(i => i.id)).toEqual([1])
+})
+
 test('review: amending back to the reply that closed the item drops the linked mark', async () => {
   const once = amend(the41Mislabel(), 1, 'Option 1.', '1', 10).session
   const back = amend(once, 1, 'Option 2 after all.', 'option 2', 11)
@@ -172,6 +185,24 @@ test('review: an item Claude closed still counts for what a message is about; a 
   expect(addUser(stale, 'yes').pendingUser.at(-1)?.aboutIds).toEqual([1, 2])
   const dup = closeByClaude(base, 2, 'duplicate-of:#1', 'same ask', undefined, 9, closeFn).session
   expect(addUser(dup, 'yes').pendingUser.at(-1)?.aboutIds).toEqual([1])
+})
+
+test('review: a sibling Claude closed keeps a bare "yes" ambiguous; a duplicate it closed does not', async () => {
+  const base = session([item(1, { text: 'Merge the docs PR', openedTurn: 2, singleRec: true }), item(2, { text: 'Renew the domain', openedTurn: 2 })], 2)
+  const stale = addUser(closeByClaude(base, 2, 'stale', 'no longer relevant', undefined, 9, closeFn).session, 'yes')
+  expect(resolveWith(stale, [{ id: 1, evidence: 'yes' }]).refused).toEqual(['bare-reply-ambiguous'])
+  const dup = addUser(closeByClaude(base, 2, 'duplicate-of:#1', 'same ask', undefined, 9, closeFn).session, 'yes')
+  expect(resolveWith(dup, [{ id: 1, evidence: 'yes' }]).refused).toEqual([])
+})
+
+test('review: only a v0.5 value has its pending replies stamped with the last final', async () => {
+  // A v0.6 reply typed before any final answered nothing; the final that later arrives is Claude's reply to it.
+  const typed = addUser(session([item(1)], 0), 'hello')
+  expect(typed.pendingUser[0]?.answered).toBe(undefined)
+  const later = { ...typed, lastFinal: 'Hi! Should I merge the docs PR?' }
+  expect(normalize(later).pendingUser[0]?.answered).toBe(undefined)
+  const { userLog: _log, ...v05 } = later
+  expect(normalize(v05).pendingUser[0]?.answered).toEqual({ text: 'Hi! Should I merge the docs PR?', clipped: true })
 })
 
 test('review: the longest lead wins over an open item whose lead it starts with', async () => {

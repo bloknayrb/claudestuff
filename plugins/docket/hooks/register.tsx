@@ -8,7 +8,7 @@ import type { CarryFile } from './carry'
 import { buildPrompt, parseVerdict, RULES } from './judge'
 import type { Mode } from './judge'
 import { annotate, amend, closeByClaude, parseId } from './tools'
-import { addManual, addToolAsked, addTurn, addUser, applyVerdict, clearAll, closableBy, closeByTool, closedForJudge, closeGroups, consumeReply, dismiss, failReply, failWaiting, freshSession, handOff, isBlocked, isWalking, judgeable, markDone, normalize, openItems, present, reopen } from './ledger'
+import { addManual, addToolAsked, addTurn, addUser, applyVerdict, clearAll, closableBy, closeByTool, closedForJudge, closeGroups, consumeReply, dismiss, failReply, failWaiting, freshSession, handOff, isBlocked, isWalking, judgeable, markDone, MAX_RESOLVES, normalize, openItems, present, reopen } from './ledger'
 import { envelope, freshProc, freshWriter, isRealSid, isSafeSid, ledgerText, normProc, normWriter, parseSlot, pickSlot, restore, RETAIN_MS, slotName, tombstone, withKey, withoutKey, writeKey } from './persist'
 import { blankText, btwQuestion, contextBlock, HANDOFF_MAX_AGE_MS, isBtwText, isNonce, isRootSafe, label, launchScript, leadHere, leadNew, newNonce, parseHandoff, parseNewArgs, replyRefusal, tailAfter, takenText, waitingText, wtArgv } from './spawn'
 import { clip } from './text'
@@ -910,8 +910,8 @@ async function runCheck($: EngineInterface, mode: Mode, model: string): Promise<
     open = closableBy(s, entry)
     if (open.length === 0) {
       await change($, cur => (cur.sid === sid ? consumeReply(cur, entry.seq) : cur))
+      // runNext queues the next reply, now that this one is gone.
       progressed = true
-      if (judgeable(await readSession($)) !== undefined) resolveDue = true
       return
     }
   }
@@ -959,9 +959,8 @@ async function runCheck($: EngineInterface, mode: Mode, model: string): Promise<
     return { session: { ...a.session, lastCheck: { ok: true, at: now, reason: '', streak: 0, checkedTurns } }, out: a }
   })
   if (result === undefined) return
+  // Replies that waited on this full check, or the next one in the queue: runNext queues them.
   progressed = true
-  // Replies that waited on this full check, or the next one in the queue, are judged now.
-  if (judgeable(await readSession($)) !== undefined) resolveDue = true
   if (parsed.dropped > 0 || result.refused.length > 0 || result.overCap.length > 0) {
     $.ui.log(`docket: verdict dropped ${parsed.dropped}, refused [${result.refused.join(', ')}], over the limit [${result.overCap.join(', ')}]`, { to: 'debug' })
   }
@@ -1244,7 +1243,7 @@ const WRITE_TOOLS = [
   },
   {
     name: 'close',
-    description: `Close an open Docket item yourself, shown as "closed by Claude: <reason>", never as the user's. kind: duplicate-of:#N (the same ask as #N); settled-earlier (cite #N, an item the user's reply already closed that settles this one); user-asked (the user asked you to close it: cite their reply verbatim; it must name the item, or be a reply whose check left it over Docket's 3-per-reply limit); done-by-claude (you did the work it asks); stale (the question no longer applies). ${NEVER} The user can Reopen it in the pane.`,
+    description: `Close an open Docket item yourself, shown as "closed by Claude: <reason>", never as the user's. kind: duplicate-of:#N (the same ask as #N); settled-earlier (cite #N, an item the user's reply already closed that settles this one); user-asked (the user asked you to close it: cite their reply verbatim; it must name the item, or be a reply whose check left it over Docket's ${MAX_RESOLVES}-per-reply limit); done-by-claude (you did the work it asks); stale (the question no longer applies). ${NEVER} The user can Reopen it in the pane.`,
     inputSchema: { type: 'object', properties: { id: ID_PROP, kind: { type: 'string', description: 'duplicate-of:#N, settled-earlier, user-asked, done-by-claude or stale.' }, reason: { type: 'string', description: 'Why, at most 200 characters.' }, cite: { type: 'string', description: "For settled-earlier: #N. For user-asked: the user's reply, verbatim." } }, required: ['id', 'kind', 'reason'], additionalProperties: false },
   },
 ] as const
@@ -1794,21 +1793,14 @@ export const register: Register = (on, options) => {
 
   // v0.6: Claude's corrections, one hook per tool (the matcher takes one literal name).
   const WRITE_FAILED = 'Docket could not change its list (its hook failed).'
-  on('tool.call', { tool: ANNOTATE_TOOL }, async ($, e) => ({ result: await writeTool($, ANNOTATE_TOOL, e as unknown as Record<string, unknown>) })).catch(async ($, e, next) => {
-    await fail($, 'tool.call', next.error.message ?? next.error.kind)
-    return next.called ? next(e) : { deny: WRITE_FAILED }
-  })
-  on('tool.call', { tool: AMEND_TOOL }, async ($, e) => ({ result: await writeTool($, AMEND_TOOL, e as unknown as Record<string, unknown>) })).catch(async ($, e, next) => {
-    await fail($, 'tool.call', next.error.message ?? next.error.kind)
-    return next.called ? next(e) : { deny: WRITE_FAILED }
-  })
-  on('tool.call', { tool: CLOSE_TOOL }, async ($, e) => ({ result: await writeTool($, CLOSE_TOOL, e as unknown as Record<string, unknown>) })).catch(async ($, e, next) => {
-    await fail($, 'tool.call', next.error.message ?? next.error.kind)
-    return next.called ? next(e) : { deny: WRITE_FAILED }
-  })
+  for (const tool of [ANNOTATE_TOOL, AMEND_TOOL, CLOSE_TOOL] as const) {
+    on('tool.call', { tool }, async ($, e) => ({ result: await writeTool($, tool, e as unknown as Record<string, unknown>) })).catch(async ($, e, next) => {
+      await fail($, 'tool.call', next.error.message ?? next.error.kind)
+      return next.called ? next(e) : { deny: WRITE_FAILED }
+    })
+  }
 
   // The list, for the session's own model (v0.4). Read-only: items close from the user's replies.
-
   on('tool.call', { tool: LIST_TOOL }, async ($, e) => {
     const input = e as unknown as { presenting?: unknown; agentId?: string }
     return { result: await listAnswer($, input.presenting, input.agentId === undefined) }

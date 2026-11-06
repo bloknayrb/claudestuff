@@ -115,7 +115,8 @@ export function closeByClaude(s: DocketSession, id: number | undefined, rawKind:
     const isLeft = reply.overCap?.includes(item.id) === true
     const isNamed = reply.namedId === item.id || names(reply.words, item)
     if (!isLeft && !isNamed) return { session: s, text: `That reply doesn't name #${item.id}, and its check didn't leave #${item.id} over the limit. Ask the user.` }
-    cite = reply.words
+    // Held to what the pane shows (200): the cite is saved to disk, and the whole prompt needn't be.
+    cite = sanitise(reply.words, 200)
   }
   const closure = { kind: k.kind, reason, ...(k.dupOf === undefined ? {} : { dupOf: k.dupOf }), ...(cite === undefined ? {} : { cite }) }
   return { session: close(s, item.id, { closure }), text: `Closed #${item.id}, shown as closed by Claude. The user can Reopen it in the pane.` }

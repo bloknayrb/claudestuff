@@ -239,10 +239,13 @@ else `~/.claude`:
   an item, written in turn so a write cut off halfway costs one save, never the docket. They hold the
   item text, the words of Claude's each item came from, your `/docket add` text and the
   AskUserQuestion questions Docket keeps out of the list, Claude's last message, and the
-  conversation's project folder path. Only token-shaped strings (GitHub tokens, `sk-` keys, AWS key
+  conversation's project folder path. Since v0.6 they also hold how each kept closed item closed:
+  the reply of yours that closed it (up to 200 characters, and the one an amend replaced), Docket's
+  reading of it, and Claude's notes, closes and corrections, including a reply of yours a `user-asked`
+  close cites (up to 200 characters). Only token-shaped strings (GitHub tokens, `sk-` keys, AWS key
   ids, JWTs, `Bearer` values, PEM keys) are replaced by `[redacted]`; a password or connection string
-  in one of those texts is saved as written. They don't hold what you typed, Claude's earlier turn
-  text, or tool lines. A closed item's note is dropped.
+  in one of those texts is saved as written. They don't hold your other prompts, Claude's earlier
+  turn text, or tool lines.
 - **`roots/<folder-key>/carry/<session-id>.a.json` and `.b.json`** (carry on only): the handoff for
   the next session in that folder: the open items, with the same fields and redaction as above, and
   the folder path. `<folder-key>` is a short hash of the folder path.

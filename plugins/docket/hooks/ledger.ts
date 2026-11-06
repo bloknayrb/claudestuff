@@ -16,12 +16,22 @@ export const MAX_REPLY_FAILS = 3
 
 // Whether a message is about an item: its text, or the start of its quote, appears in it. Not its #id:
 // "#12" in Claude's prose is as often a PR or an issue. One definition for every rule that asks.
-export function names(message: string, item: Item): boolean {
+// namer flattens the message once, for a caller testing it against every item.
+export function namer(message: string): (item: Item) => boolean {
   const msg = normalise(redact(message)).toLowerCase()
   const has = (t: string) => t !== '' && msg.includes(normalise(redact(t)).toLowerCase())
-  const quote = item.quote.replace(/…$/, '').slice(0, 120)
-  return has(item.text) || (quote.length >= 12 && has(quote))
+  return item => {
+    const quote = item.quote.replace(/…$/, '').slice(0, 120)
+    return has(item.text) || (quote.length >= 12 && has(quote))
+  }
 }
+
+export const names = (message: string, item: Item): boolean => namer(message)(item)
+
+// Whether a closed item still counts as asked, for which items a message is about and whether a bare
+// reply is ambiguous: not one the user dismissed or cleared, nor a duplicate Claude closed. Claude's
+// other closes count: one Claude closed wrongly must not let a bare "yes" tie to the item beside it.
+export const stillAsked = (i: Item): boolean => i.status === 'open' || i.status === 'resolved' || (i.closure !== undefined && i.closure.kind !== 'duplicate')
 
 // The user's typed words: the text with a Reply lead stripped (entries from before v0.6 have none).
 export const wordsOf = (e: UserEntry): string => e.words ?? e.text
@@ -119,8 +129,10 @@ export function normalize(value: Partial<DocketSession> | undefined): DocketSess
     lastCheck: { ...fresh.lastCheck, ...(value.lastCheck ?? {}) },
     view: { ...fresh.view, ...(value.view ?? {}) },
     // v0.6 fields a live v0.5 value lacks. Its pending replies answered the last final; marked clipped,
-    // since which part of it they saw is unknown, so they tie by message but are never labelled.
-    pendingUser: (value.pendingUser ?? []).map(u => (u.answered !== undefined || (value.lastFinal ?? '') === '' ? u : { ...u, answered: { text: redact(value.lastFinal ?? '').slice(-ANSWERED_CHARS), clipped: true } })),
+    // since which part of it they saw is unknown, so they tie by message but are never labelled. Only a
+    // v0.5 value (no userLog): a v0.6 reply typed before any final has no answered on purpose, and must
+    // not later be stamped with the reply Claude gave it.
+    pendingUser: (value.pendingUser ?? []).map(u => (value.userLog !== undefined || u.answered !== undefined || (value.lastFinal ?? '') === '' ? u : { ...u, answered: { text: redact(value.lastFinal ?? '').slice(-ANSWERED_CHARS), clipped: true } })),
     lastFinalClipped: value.lastFinalClipped ?? false,
     userLog: value.userLog ?? [],
     lastReply: value.lastReply ?? null,
@@ -168,7 +180,7 @@ type Tie = { focusId?: number; namedId?: number; answered?: { text: string }; ab
 
 // The items the message a reply answered is about: recorded when it was typed, against the items open
 // then (a sibling closed since must still count), or worked out now for an entry from before v0.6.
-const aboutOf = (s: DocketSession, e: Tie): number[] => e.aboutIds ?? (e.answered === undefined ? [] : openItems(s).filter(i => names((e.answered as { text: string }).text, i)).map(i => i.id))
+const aboutOf = (s: DocketSession, e: Tie): number[] => e.aboutIds ?? (e.answered === undefined ? [] : openItems(s).filter(namer(e.answered.text)).map(i => i.id))
 
 // The message a reply answered is about this item and about no other.
 export const isAboutOnly = (s: DocketSession, e: Tie, item: Item): boolean => {
@@ -208,20 +220,20 @@ export function refusal(s: DocketSession, item: Item, r: CheckedResolve): string
     // The item Claude presented, alone and restated, in the turn this reply answers (stamped at addUser).
     const isFocused = e.focusId === item.id
     const isNamed = namesItem || e.namedId === item.id
-    // v0.6, option picks ("1", "option 2"): a pick stamped for another item never closes this one; a
-    // pick closes only an item it is tied to; typed mid-turn, only one its lead or focus names.
+    // v0.6, option picks ("1", "option 2") and bare replies ("yes", or a bare span the judge quoted): one
+    // stamped for another item (walk focus or Reply lead) never closes this one; a pick closes only an
+    // item it is tied to; typed mid-turn, only one its lead or focus names.
     const words = wordsOf(e)
     const isPick = optionPick(words) !== undefined
-    if (isPick || isBare(words)) {
-      if ((e.focusId !== undefined && !isFocused) || (e.namedId !== undefined && e.namedId !== item.id)) {
-        if (isPick) return 'option-other-item'
-      }
-      if (e.midTurn === true && !isNamed && !isFocused) return 'mid-turn-unnamed'
-    }
+    const isBareReply = isBare(words) || isBare(r.evidence)
+    const isForOther = (e.focusId !== undefined && !isFocused) || (e.namedId !== undefined && e.namedId !== item.id)
+    if ((isPick || isBareReply) && isForOther && !isNamed) return isPick ? 'option-other-item' : 'bare-other-item'
+    if ((isPick || isBare(words)) && e.midTurn === true && !isNamed && !isFocused) return 'mid-turn-unnamed'
     if (isPick && !tiedTo(s, e, item)) return 'pick-not-tied'
     if ((isBare(r.evidence) || isBare(words)) && !isNamed && !isFocused) {
-      // A dismissed sibling no longer makes the reply ambiguous.
-      const openedThen = s.items.filter(i => i.source === 'judge' && i.openedTurn === e.afterTurn && i.status !== 'dismissed')
+      // A sibling the user dismissed, or a duplicate Claude closed, no longer makes the reply ambiguous;
+      // one Claude closed for another reason still does (the same rule as addUser's aboutIds).
+      const openedThen = s.items.filter(i => i.source === 'judge' && i.openedTurn === e.afterTurn && stillAsked(i))
       const isOnly = openedThen.length === 1 && openedThen[0]?.id === item.id
       if (!item.singleRec || item.openedTurn !== e.afterTurn || !isOnly) return 'bare-reply-ambiguous'
     }
@@ -235,7 +247,6 @@ export function refusal(s: DocketSession, item: Item, r: CheckedResolve): string
   return ''
 }
 
-// keptForNew: some of the user's words were kept for a resolve check on items this verdict added.
 // overCap: resolves that passed every check past the per-verdict limit, left open (v0.6).
 export type Applied = { session: DocketSession; added: number; resolved: number; refused: string[]; overCap: number[] }
 
@@ -374,8 +385,6 @@ export function present(s: DocketSession, id: number): DocketSession {
   return { ...s, walkFocus: { id, turn, ids } }
 }
 
-// isMidTurn: typed while a turn ran. Such a reply answers whatever that turn is saying, which the
-// last presented item may no longer be: it gets no focus stamp.
 // The Reply button's lead (v0.6): the item whose "Re: <item> — " the text starts with, and what the user
 // typed after it. Matched against the items' own leads, since an item's text may hold a dash; against
 // closed items too, since an earlier reply may close the item before this one is sent.
@@ -387,6 +396,8 @@ export function stripLead(s: DocketSession, text: string): { words: string; name
   return hit === undefined ? { words: text.trim() } : { words: t.slice(leadHere(hit).trimEnd().length).trim(), namedId: hit.id }
 }
 
+// isMidTurn: typed while a turn ran. Such a reply answers whatever that turn is saying, which the
+// last presented item may no longer be: it gets no focus stamp.
 export function addUser(s: DocketSession, text: string, isMidTurn = false): DocketSession {
   const focusId = isMidTurn ? undefined : walkFocusFor(s)
   const { words, namedId } = stripLead(s, text)
@@ -395,12 +406,10 @@ export function addUser(s: DocketSession, text: string, isMidTurn = false): Dock
   const answered = final === '' ? undefined : { text: final.slice(-ANSWERED_CHARS), clipped: s.lastFinalClipped || final.length > ANSWERED_CHARS }
   // Which items that message is about, open or closed, as of now: a later close must not make it look
   // about one item only, and an item closed wrongly before this reply must still be one it is about
-  // (the case amend corrects).
-  // Items the user dismissed or cleared, and duplicates Claude closed, don't count: a near-duplicate
-  // dropped earlier must not make a message about one open item look like a message about two. Claude's
-  // other closes do: one Claude closed wrongly must not let a bare "yes" tie to the item beside it.
-  const counts = (i: Item) => i.status === 'open' || i.status === 'resolved' || (i.closure !== undefined && i.closure.kind !== 'duplicate')
-  const aboutIds = answered === undefined ? [] : s.items.filter(i => counts(i) && names(answered.text, i)).map(i => i.id)
+  // (the case amend corrects). Only items stillAsked count: a near-duplicate dropped earlier must not
+  // make a message about one open item look like a message about two.
+  const isNamed = answered === undefined ? undefined : namer(answered.text)
+  const aboutIds = isNamed === undefined ? [] : s.items.filter(i => stillAsked(i) && isNamed(i)).map(i => i.id)
   const stamps = {
     ...(focusId === undefined ? {} : { focusId }),
     ...(namedId === undefined ? {} : { namedId }),

@@ -3,7 +3,7 @@ import type { Elements } from 'claude-code'
 import type { DocketSession, Item } from '../types'
 import { folderName, wallAge } from './carry'
 import type { CloseGroup } from './ledger'
-import { isWalking } from './ledger'
+import { isWalking, MAX_RESOLVES } from './ledger'
 import { closedDetails, closedHead, closedLine } from './attribution'
 import { clip, sanitise } from './text'
 
@@ -208,9 +208,9 @@ export function overCapLine(s: DocketSession, forUser: boolean): string | undefi
   const left = r.overCap.filter(id => s.items.some(i => i.id === id && i.status === 'open'))
   if (left.length === 0) return undefined
   const ids = left.map(id => `#${id}`).join(', ')
-  if (forUser) return `Your last reply closed ${r.closed.length}; Docket left ${ids} open (it closes at most 3 per reply).`
+  if (forUser) return `Your last reply closed ${r.closed.length}; Docket left ${ids} open (it closes at most ${MAX_RESOLVES} per reply).`
   const closed = r.closed.length === 0 ? 'closed nothing' : `closed ${r.closed.map(id => `#${id}`).join(', ')}`
-  return `The user's last reply (${q(r.words, 80)}) ${closed}. Left open by the 3-per-reply limit: ${ids}. Ask the user about these, or close one with kind user-asked citing that reply.`
+  return `The user's last reply (${q(r.words, 80)}) ${closed}. Left open by the ${MAX_RESOLVES}-per-reply limit: ${ids}. Ask the user about these, or close one with kind user-asked citing that reply.`
 }
 const q = (t: string, max: number): string => `"${sanitise(t, max)}"`
 

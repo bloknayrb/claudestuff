@@ -56,7 +56,7 @@ export const WALK_NOTE = `Claude is walking the user through their open items. R
 // tool lines show done.
 export const FULL_NOTE = 'This check carries none of the user\'s words: resolve only "by": "claude" items, from <claude_text> or <tool_lines>.'
 
-export const RESOLVE_NOTE ='This is a resolve-only check: return "add": [] and only resolves. <claude_latest> is Claude\'s most recent message, for reading what a short or numbered reply answers.'
+export const RESOLVE_NOTE = 'This is a resolve-only check: return "add": [] and only resolves. <claude_latest> is Claude\'s most recent message, for reading what a short or numbered reply answers.'
 
 export type JudgeInput = {
   mode: Mode
