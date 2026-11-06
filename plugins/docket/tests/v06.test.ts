@@ -169,6 +169,23 @@ test('review: a bare "yes" for the walk item never closes another, even the only
   expect(openItems(resolveWith(plain, [{ id: 2, evidence: 'yes' }]).session).map(i => i.id)).toEqual([1])
 })
 
+test('review: a lead for "Ship it — now" never closes "Ship it", though its lead occurs in the text', async () => {
+  const s = addUser(session([item(1, { text: 'Ship it — now' }), item(2, { text: 'Ship it', singleRec: true, openedTurn: 2 })], 2), `${leadHere(item(1, { text: 'Ship it — now' }))}yes`)
+  expect(s.pendingUser.at(-1)?.namedId).toBe(1)
+  const r = resolveWith(s, [{ id: 2, evidence: 'yes' }])
+  expect(r.refused).toEqual(['bare-other-item'])
+  expect(openItems(r.session).map(i => i.id)).toEqual([1, 2])
+})
+
+test('review: words that name the item are not a bare reply to it, whatever span the judge quoted', async () => {
+  let s = session([item(1, { text: 'Renew the domain' }), item(2, { text: 'Rotate the key', singleRec: true, openedTurn: 2 })], 1)
+  s = { ...present(s, 1), turn: 2, lastFinal: 'Next: Renew the domain. I recommend two years. OK?' }
+  s = addUser(s, 'yes, and rotate the key too: ok')
+  const r = resolveWith(s, [{ id: 2, evidence: 'ok' }])
+  expect(r.refused).toEqual([])
+  expect(openItems(r.session).map(i => i.id)).toEqual([1])
+})
+
 test('review: amending back to the reply that closed the item drops the linked mark', async () => {
   const once = amend(the41Mislabel(), 1, 'Option 1.', '1', 10).session
   const back = amend(once, 1, 'Option 2 after all.', 'option 2', 11)

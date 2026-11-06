@@ -219,13 +219,17 @@ export function refusal(s: DocketSession, item: Item, r: CheckedResolve): string
     if (e.inWalk === true && isSkip(wordsOf(e))) return 'skip-in-walk'
     // The item Claude presented, alone and restated, in the turn this reply answers (stamped at addUser).
     const isFocused = e.focusId === item.id
-    const isNamed = namesItem || e.namedId === item.id
+    // A lead stripLead stamped wins over a text match: "Re: Ship it — now — yes" names "Ship it — now",
+    // not "Ship it", though both leads occur in it. The text match is for entries with no stamp.
+    const isNamed = e.namedId !== undefined ? e.namedId === item.id : namesItem
     // v0.6, option picks ("1", "option 2") and bare replies ("yes", or a bare span the judge quoted): one
     // stamped for another item (walk focus or Reply lead) never closes this one; a pick closes only an
     // item it is tied to; typed mid-turn, only one its lead or focus names.
     const words = wordsOf(e)
     const isPick = optionPick(words) !== undefined
-    const isBareReply = isBare(words) || isBare(r.evidence)
+    // A bare quoted span from words that name this item ("yes, and rotate the key too: ok") is not a
+    // bare reply to it.
+    const isBareReply = isBare(words) || (isBare(r.evidence) && !names(words, item))
     const isForOther = (e.focusId !== undefined && !isFocused) || (e.namedId !== undefined && e.namedId !== item.id)
     if ((isPick || isBareReply) && isForOther && !isNamed) return isPick ? 'option-other-item' : 'bare-other-item'
     if ((isPick || isBare(words)) && e.midTurn === true && !isNamed && !isFocused) return 'mid-turn-unnamed'
