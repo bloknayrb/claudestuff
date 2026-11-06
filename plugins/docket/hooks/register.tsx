@@ -1201,16 +1201,18 @@ function walkArg(raw: string): WalkKind | undefined | 'bad' {
   return 'bad'
 }
 
-// The turn count when a walk was last asked for (v0.6): until a turn ends, a second press would queue a
-// second walk prompt before the first has presented anything.
-let walkAskedAt: number | null = null
+// The session and turn count when a walk was last asked for (v0.6): until a turn of that session ends, a
+// second press would queue a second walk prompt before the first has presented anything. Keyed by sid,
+// since /clear or a resume starts another session whose turn count may match.
+let walkAskedAt: { sid: string; turn: number } | null = null
 
 async function walkCommand($: EngineInterface, kind?: WalkKind): Promise<string> {
   const s = await readSession($)
   const open = openItems(s).filter(i => kind === undefined || i.kind === kind)
   if (open.length === 0) return kind === undefined ? 'Docket: nothing open.' : `Docket: no ${WALK_NOUN[kind]} open.`
-  if (isWalkLive(s) || walkAskedAt === s.turn) return 'Docket: already walking; answer Claude, or tell it to stop.'
-  walkAskedAt = s.turn
+  const isAsked = walkAskedAt !== null && walkAskedAt.sid === s.sid && walkAskedAt.turn === s.turn
+  if (isWalkLive(s) || isAsked) return 'Docket: already walking; answer Claude, or tell it to stop.'
+  walkAskedAt = { sid: s.sid, turn: s.turn }
   $.clock.after(0, () => void guard($, 'walk', submitWalk($, kind)))
   return kind === undefined ? 'Docket: asking Claude to walk you through the docket.' : `Docket: asking Claude to walk you through the ${WALK_NOUN[kind]}.`
 }

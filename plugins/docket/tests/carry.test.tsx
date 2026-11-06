@@ -339,6 +339,18 @@ test('with carried groups, each walk button appears once, counting its kind acro
   expect(buttons.filter(l => l.startsWith('Walk through')).sort()).toEqual(['Walk through the 2 to-dos with Claude', 'Walk through this decision with Claude'])
 })
 
+test('a walk asked for just before /clear never blocks one in the next session at the same turn count', async ($, on) => {
+  const w = world(on)
+  await freshProcess($, w)
+  await command($, 'add Alpha')
+  expect((await command($, 'walk todos')).text).toBe('Docket: asking Claude to walk you through the to-dos.')
+  await $.session.end(endAs('clear', 'sess-1'))
+  w.sessionId = 'sess-2'
+  await classic($, w, 'clear', 'sess-2')
+  await command($, 'add Beta')
+  expect((await command($, 'walk todos')).text).toBe('Docket: asking Claude to walk you through the to-dos.')
+})
+
 test('with nothing carried there is no session heading', async ($, on) => {
   const w = world(on)
   await freshProcess($, w)
