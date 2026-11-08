@@ -1,5 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
+import { batchLine } from '../hooks/ui'
+
 import { BAND_PROPS, command, mountBand, mountPane, openIds, say, slotPath, start, SURFACES, turn, verdict, world } from './world'
 
 const ASK = 'Your call: SQLite or Postgres for the cache?'
@@ -325,6 +327,15 @@ test('a reopen clears an arm made before the close', async ($, on) => {
   await ui.unmount()
 })
 
+test('a cleared batch names whole ids within 40 columns, then how many more', () => {
+  const items = (ids: number[]) => ids.map(id => ({ id }) as never)
+  expect(batchLine(items([1, 2]))).toBe('cleared 2 items: #1, #2')
+  const long = batchLine(items([12, 13, 14, 15, 16, 17, 18, 19]))
+  expect(long).toBe('cleared 8 items: #12, #13, #14, +5 more')
+  expect(long.length).toBeLessThanOrEqual(40)
+  expect(batchLine(items([101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111]))).toBe('cleared 11 items: #101, #102, +9 more')
+})
+
 test('decisions are listed before actions, and the digit keys follow that order', async ($, on) => {
   const w = world(on)
   await start($)
@@ -375,7 +386,7 @@ test('Done closes an item as yours; the closed list says so', async ($, on) => {
   await ui.press({ key: 'done-1' })
   expect(await ui.find({ key: 'item-1' })).toBeUndefined()
   await ui.press({ key: 'docket-show-closed' })
-  expect(await ui.find({ type: 'Text', text: 'Renew the domain' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '#1 Renew the domain' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '↳ you marked it done' })).toBeDefined()
   await ui.unmount()
   expect(w.calls.length).toBe(0)
@@ -420,6 +431,7 @@ test('/docket toggles the pane; add and clear work; clear is one Reopen all', as
   await ui.press({ key: 'docket-show-closed' })
   const btn = (await ui.findAll({ type: 'Button' })).find(b => b.props.label === 'Reopen all (2)')
   expect(btn).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'cleared 2 items: #1, #2' })).toBeDefined()
   await ui.press({ key: btn?.key ?? '' })
   await ui.unmount()
   expect(await openIds($)).toEqual([1, 2])
