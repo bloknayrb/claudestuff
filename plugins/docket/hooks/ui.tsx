@@ -128,7 +128,9 @@ function closedRow(els: Els, g: CloseGroup, act: Actions) {
   const label = isBatch ? `Reopen all (${g.items.length})` : 'Reopen'
   // v0.6: the item on one line, who closed it on the next, and Claude's own lines after that, so the
   // user's words and Claude's never share a line at 56 columns.
-  const line = isBatch ? `cleared ${g.items.length} items` : clip(first.text, 40)
+  // The #id leads, because Claude names items by id and an open row shows only its digit key.
+  const ids = g.items.map(i => `#${i.id}`).join(', ')
+  const line = isBatch ? clip(`cleared ${g.items.length} items: ${ids}`, 48) : `#${first.id} ${clip(first.text, 40)}`
   const details = isBatch ? [] : [closedHead(first), ...closedDetails(first)]
   return (
     <Box key={`closed-${g.closeSeq}`} flexDirection="column">
