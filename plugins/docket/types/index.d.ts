@@ -106,6 +106,9 @@ export type ViewState = {
   // After any change to the list, digit keys ignore presses until this time (a debounce).
   keysPausedUntil: number | null
   showAllClosed: boolean
+  // v0.7.2: a dismiss takes two presses. The first arms the item until this time; a second press of the
+  // same item's ✕ (or digit) before then dismisses it.
+  armedDismiss: { id: number; at: number; until: number } | null
   // The item whose button holds the pane's focus ring: its Claude quote is shown.
   focusedId: number | null
 }

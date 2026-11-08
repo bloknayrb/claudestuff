@@ -230,6 +230,10 @@ test('a digit dismisses its row; the keys pause after a change; Reopen brings it
   await ui.press({ key: 'dismiss-1' })
   expect(await ids(ui)).toEqual([1, 2])
   await w.clock.advance(1200)
+  // The first press that counts only arms the row; the second dismisses it.
+  await ui.press({ key: 'dismiss-1' })
+  expect(await ids(ui)).toEqual([1, 2])
+  await w.clock.advance(1200)
   await ui.press({ key: 'dismiss-1' })
   expect(await ids(ui)).toEqual([2])
   await w.clock.advance(1200)
@@ -238,6 +242,43 @@ test('a digit dismisses its row; the keys pause after a change; Reopen brings it
   expect(reopenBtn).toBeDefined()
   await ui.press({ key: reopenBtn?.key ?? '' })
   expect(await ids(ui)).toEqual([1, 2])
+  await ui.unmount()
+})
+
+test('a dismiss takes two presses: a fast repeat, a lapsed arm or another row never confirms', async ($, on) => {
+  const w = world(on)
+  await start($)
+  await command($, 'add Renew the domain')
+  await command($, 'add Rotate the key')
+  const ui = await mountPane($, 'terminal')
+  const label = async (id: number) => (await ui.find({ key: `dismiss-${id}` }))?.props.label
+  const open = async () => (await ui.findAll({ type: 'Box' })).map(b => b.key ?? '').filter(k => k.startsWith('item-')).map(k => Number(k.slice(5)))
+  expect(await label(1)).toBe('✕')
+  // One stray press: armed, nothing closed, the row says what the next press does.
+  await ui.press({ key: 'dismiss-1' })
+  expect(await open()).toEqual([1, 2])
+  expect(await label(1)).toBe('✕ press 1 again')
+  // A double-tap or a held key: too soon, it only restarts the arm.
+  await w.clock.advance(300)
+  await ui.press({ key: 'dismiss-1' })
+  await w.clock.advance(300)
+  await ui.press({ key: 'dismiss-1' })
+  expect(await open()).toEqual([1, 2])
+  // The arm lapses: a later press arms again rather than dismissing.
+  await w.clock.advance(5100)
+  expect(await label(1)).toBe('✕')
+  await ui.press({ key: 'dismiss-1' })
+  expect(await open()).toEqual([1, 2])
+  // Another row's key moves the arm; it does not confirm the first.
+  await w.clock.advance(1200)
+  await ui.press({ key: 'dismiss-2' })
+  expect(await open()).toEqual([1, 2])
+  expect(await label(1)).toBe('✕')
+  expect(await label(2)).toBe('✕ press 2 again')
+  await w.clock.advance(1200)
+  await ui.press({ key: 'dismiss-2' })
+  expect(await open()).toEqual([1])
+  expect(await label(1)).toBe('✕')
   await ui.unmount()
 })
 

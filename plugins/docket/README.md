@@ -47,6 +47,9 @@ Requires Claude Code 2.1.317 or newer (function-hook mods).
   a Reopen button each. Reopen is the undo for a wrong close.
 - After any change to the list the digit keys pause for 1.1 s, and each press during the pause
   restarts it, so a list that just reordered cannot turn a press into the wrong dismiss.
+- Since v0.7.2 a dismiss takes two presses. The first arms the row (its ✕ reads `✕ press 2 again`);
+  a second press of the same key between 1.1 s and 5 s later dismisses it. A quicker repeat or a held
+  key only restarts the arm, another row's key moves it, and after 5 s it lapses.
 
 ## Reply new: answer an item in a new window
 
