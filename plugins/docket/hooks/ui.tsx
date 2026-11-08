@@ -16,6 +16,11 @@ export const PANE_COLUMNS = 56
 // cannot dismiss the next row. 1100 ms is above Windows' largest key-repeat delay (1000 ms), as Bridge.
 export const ARM_DELAY_MS = 1100
 
+// v0.7.2: a dismiss takes two presses of the same item, so one stray digit closes nothing. The second
+// must come at least ARM_DELAY_MS after the last press, or it only restarts the arm: a double-tap or a
+// held key (Windows repeats from 250 ms) never confirms. The arm lapses after CONFIRM_MS.
+export const CONFIRM_MS = 5000
+
 export type Els = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
 
 export type WalkKind = Item['kind']
@@ -70,7 +75,13 @@ export function indicatorTree(els: Pick<Els, 'Box' | 'Button' | 'Text'>, below: 
   )
 }
 
-function row(els: Els, item: Item, n: number, turn: number, act: Actions, isFocusedItem: boolean, live: Live, isWalkItem: boolean) {
+function armOf(s: DocketSession, id: number, now: number): 'off' | 'wait' | 'ready' {
+  const a = s.view.armedDismiss
+  if (a === null || a.id !== id || a.until <= now) return 'off'
+  return a.ready ? 'ready' : 'wait'
+}
+
+function row(els: Els, item: Item, n: number, turn: number, act: Actions, isFocusedItem: boolean, live: Live, isWalkItem: boolean, arm: 'off' | 'wait' | 'ready') {
   const { Box, Text, Button } = els
   const { isResolving, now } = live
   const isKeyed = n < 9
@@ -78,6 +89,9 @@ function row(els: Els, item: Item, n: number, turn: number, act: Actions, isFocu
   const digit = isKeyed ? String(n + 1) : '·'
   const pos = isWalkItem ? `▸${digit}` : digit
   const showQuote = isFocusedItem || isWalkItem
+  // Short: a plain Button draws its hotkey before the label (`1: ✕ again?`), and the row is 56 columns.
+  // Until a second press would count it says wait, so a quick press doesn't look ignored.
+  const armedLabel = arm === 'ready' ? '✕ again?' : '✕ wait…'
   // A carried item's age is wall-clock from when it first appeared, wherever it was raised.
   const ageLabel = item.carriedAt !== undefined ? `↪ ${wallAge(now - (item.firstSeenAt ?? item.carriedAt))}` : age(turn - item.openedTurn)
   return (
@@ -94,7 +108,13 @@ function row(els: Els, item: Item, n: number, turn: number, act: Actions, isFocu
         {live.canReplyNew && <Button key={`replynew-${item.id}`} plain label="Reply new" onPress={() => act.replyNew(item.id)} />}
         <Button key={`btw-${item.id}`} plain label="/btw" onPress={() => act.btw(item.id)} />
         <Button key={`done-${item.id}`} plain label="Done" onPress={() => act.done(item.id)} />
-        <Button key={`dismiss-${item.id}`} plain label="✕" {...(isKeyed ? { hotkey: String(n + 1) } : {})} onPress={() => act.dismiss(item.id)} />
+        {arm !== 'off' ? (
+          <Button key={`dismiss-${item.id}`} plain label={armedLabel} {...(isKeyed ? { hotkey: String(n + 1) } : {})} onPress={() => act.dismiss(item.id)}>
+            <Text color="warning">{armedLabel}</Text>
+          </Button>
+        ) : (
+          <Button key={`dismiss-${item.id}`} plain label="✕" {...(isKeyed ? { hotkey: String(n + 1) } : {})} onPress={() => act.dismiss(item.id)} />
+        )}
       </Box>
       {showQuote && item.quote !== '' && (
         <Box paddingLeft={2}>
@@ -274,7 +294,7 @@ function section(els: Els, title: string, kind: WalkKind, items: readonly Item[]
   return (
     <Box key={`section-${groupKey}-${title}`} flexDirection="column" marginTop={1}>
       <Text bold color="warning">{title}</Text>
-      {items.map((item, i) => row(els, item, offset + i, s.turn, act, s.view.focusedId === item.id, live, walking && s.walkFocus?.id === item.id))}
+      {items.map((item, i) => row(els, item, offset + i, s.turn, act, s.view.focusedId === item.id, live, walking && s.walkFocus?.id === item.id, armOf(s, item.id, live.now)))}
       {walkTotal !== null && !walking && (
         <Button key={`docket-walk-${kind}`} plain label={walkLabel(kind, walkTotal)} onPress={() => act.walk(kind)} />
       )}
@@ -332,7 +352,7 @@ export function paneTree(els: Els, s: DocketSession, open: readonly Item[], grou
     : isPaused
       ? 'keys paused a moment: the list changed'
       : list.length > 0
-        ? `${list.length === 1 ? '1' : `1-${Math.min(9, list.length)}`} dismiss · Tab moves`
+        ? `${list.length === 1 ? '1' : `1-${Math.min(9, list.length)}`} dismiss, then again to confirm · Tab moves`
         : ''
   // The footer only speaks when there is something to know.
   const footer = !s.lastCheck.ok ? `last check failed: ${s.lastCheck.reason}` : live.isChecking ? 'checking…' : (overCapLine(s, true) ?? '')

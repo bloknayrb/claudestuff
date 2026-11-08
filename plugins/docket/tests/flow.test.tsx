@@ -232,6 +232,10 @@ test('a digit dismisses its row; the keys pause after a change; Reopen brings it
   await ui.press({ key: 'dismiss-1' })
   expect(await ids(ui)).toEqual([1, 2])
   await w.clock.advance(1200)
+  // The first press that counts only arms the row; the second dismisses it.
+  await ui.press({ key: 'dismiss-1' })
+  expect(await ids(ui)).toEqual([1, 2])
+  await w.clock.advance(1200)
   await ui.press({ key: 'dismiss-1' })
   expect(await ids(ui)).toEqual([2])
   await w.clock.advance(1200)
@@ -240,6 +244,86 @@ test('a digit dismisses its row; the keys pause after a change; Reopen brings it
   expect(reopenBtn).toBeDefined()
   await ui.press({ key: reopenBtn?.key ?? '' })
   expect(await ids(ui)).toEqual([1, 2])
+  await ui.unmount()
+})
+
+test('a dismiss takes two presses: a fast repeat, a lapsed arm or another row never confirms', async ($, on) => {
+  const w = world(on)
+  await start($)
+  await command($, 'add Renew the domain')
+  await command($, 'add Rotate the key')
+  const ui = await mountPane($, 'terminal')
+  const btn = async (id: number) => (await ui.find({ key: `dismiss-${id}` }))?.props
+  const label = async (id: number) => (await btn(id))?.label
+  const open = async () => (await ui.findAll({ type: 'Box' })).map(b => b.key ?? '').filter(k => k.startsWith('item-')).map(k => Number(k.slice(5)))
+  expect(await label(1)).toBe('✕')
+  // One stray press: armed, nothing closed; the row says wait until a second press would count.
+  await ui.press({ key: 'dismiss-1' })
+  expect(await open()).toEqual([1, 2])
+  expect(await label(1)).toBe('✕ wait…')
+  expect((await btn(1))?.hotkey).toBe('1')
+  // A double-tap: too soon, it only restarts the arm.
+  await w.clock.advance(300)
+  await ui.press({ key: 'dismiss-1' })
+  expect(await open()).toEqual([1, 2])
+  // A held key: repeats 100 ms apart for 2 s each restart the arm, so none confirms.
+  for (let t = 0; t < 20; t++) {
+    await w.clock.advance(100)
+    await ui.press({ key: 'dismiss-1' })
+  }
+  expect(await open()).toEqual([1, 2])
+  // Released: once the gap passes the row invites the second press.
+  await w.clock.advance(1200)
+  expect(await label(1)).toBe('✕ again?')
+  // The arm lapses: a later press arms again rather than dismissing.
+  await w.clock.advance(4000)
+  expect(await label(1)).toBe('✕')
+  await ui.press({ key: 'dismiss-1' })
+  expect(await open()).toEqual([1, 2])
+  // Another row's key moves the arm; it does not confirm the first.
+  await w.clock.advance(1200)
+  await ui.press({ key: 'dismiss-2' })
+  expect(await open()).toEqual([1, 2])
+  expect(await label(1)).toBe('✕')
+  await w.clock.advance(1200)
+  expect(await label(2)).toBe('✕ again?')
+  await ui.press({ key: 'dismiss-2' })
+  expect(await open()).toEqual([1])
+  expect(await label(1)).toBe('✕')
+  await ui.unmount()
+})
+
+test("a re-arm outlives the earlier arm's lapse timer", async ($, on) => {
+  const w = world(on)
+  await start($)
+  await command($, 'add Renew the domain')
+  const ui = await mountPane($, 'terminal')
+  await ui.press({ key: 'dismiss-1' })
+  // A quick repeat re-arms at 300, to lapse at 5300.
+  await w.clock.advance(300)
+  await ui.press({ key: 'dismiss-1' })
+  // The first arm's timer fires at 5000 and must leave the re-arm live for a confirm at 5200.
+  await w.clock.advance(4900)
+  await ui.press({ key: 'dismiss-1' })
+  expect(await ui.find({ key: 'item-1' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a reopen clears an arm made before the close', async ($, on) => {
+  const w = world(on)
+  await start($)
+  await command($, 'add Renew the domain')
+  const ui = await mountPane($, 'terminal')
+  await ui.press({ key: 'dismiss-1' })
+  await w.clock.advance(100)
+  await ui.press({ key: 'done-1' })
+  await ui.press({ key: 'docket-show-closed' })
+  const reopenBtn = (await ui.findAll({ type: 'Button' })).find(b => (b.key ?? '').startsWith('reopen-'))
+  await ui.press({ key: reopenBtn?.key ?? '' })
+  await w.clock.advance(1200)
+  expect((await ui.find({ key: 'dismiss-1' }))?.props.label).toBe('✕')
+  await ui.press({ key: 'dismiss-1' })
+  expect(await ui.find({ key: 'item-1' })).toBeDefined()
   await ui.unmount()
 })
 

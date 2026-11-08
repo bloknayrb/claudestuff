@@ -12,7 +12,7 @@ import { addManual, addToolAsked, addTurn, addUser, applyVerdict, clearAll, clos
 import { envelope, freshProc, freshWriter, isRealSid, isSafeSid, ledgerText, normProc, normWriter, parseSlot, pickSlot, restore, RETAIN_MS, slotName, tombstone, withKey, withoutKey, writeKey } from './persist'
 import { blankText, btwQuestion, contextBlock, HANDOFF_MAX_AGE_MS, isBtwText, isNonce, isRootSafe, label, launchScript, leadHere, leadNew, newNonce, parseHandoff, parseNewArgs, replyRefusal, tailAfter, takenText, waitingText, wtArgv } from './spawn'
 import { clip } from './text'
-import { ARM_DELAY_MS, indicatorText, indicatorTree, listText, overCapLine, PANE_COLUMNS, PANE_ID, PANE_TITLE, paneTree } from './ui'
+import { ARM_DELAY_MS, CONFIRM_MS, indicatorText, indicatorTree, listText, overCapLine, PANE_COLUMNS, PANE_ID, PANE_TITLE, paneTree } from './ui'
 import type { Actions, WalkKind } from './ui'
 
 const MODELS = ['haiku', 'sonnet', 'opus'] as const
@@ -821,6 +821,18 @@ async function pauseKeys($: EngineInterface): Promise<void> {
   startKeysPause($, until)
 }
 
+async function readyArm($: EngineInterface, until: number): Promise<void> {
+  await change($, s => {
+    const a = s.view.armedDismiss
+    return a === null || a.until !== until || a.ready ? s : { ...s, view: { ...s.view, armedDismiss: { ...a, ready: true } } }
+  })
+}
+
+// Lapses an unconfirmed dismiss, unless a later press re-armed it.
+async function disarm($: EngineInterface, until: number): Promise<void> {
+  await change($, s => (s.view.armedDismiss?.until === until ? { ...s, view: { ...s.view, armedDismiss: null } } : s))
+}
+
 // True when the press was swallowed (and the pause restarted).
 async function isDebounced($: EngineInterface): Promise<boolean> {
   const until = (await $.clock.now()) + ARM_DELAY_MS
@@ -1425,8 +1437,23 @@ function actions($: EngineInterface): Actions {
         (async () => {
           if (await isDebounced($)) return
           const now = await $.clock.now()
-          await change($, s => dismiss(s, id, now))
-          await pauseKeys($)
+          // Confirmed only by a second press of the same item, after the gap and before the arm lapses;
+          // anything else (re)arms this item. The armed state and the dismiss are one transaction.
+          const step = await transact<'dismissed' | { until: number }>($, s => {
+            const a = s.view.armedDismiss
+            if (a !== null && a.id === id && now - a.at >= ARM_DELAY_MS && now < a.until) {
+              return { session: dismiss({ ...s, view: { ...s.view, armedDismiss: null } }, id, now), out: 'dismissed' as const }
+            }
+            const armed = { id, at: now, until: now + CONFIRM_MS, ready: false }
+            return { session: { ...s, view: { ...s.view, armedDismiss: armed } }, out: armed }
+          })
+          if (step === 'dismissed') {
+            await pauseKeys($)
+            return
+          }
+          // The row invites the second press only once one would count, then the arm lapses.
+          $.clock.after(ARM_DELAY_MS, () => void guard($, 'arm', readyArm($, step.until)))
+          $.clock.after(CONFIRM_MS, () => void guard($, 'disarm', disarm($, step.until)))
         })(),
       ),
     reopen: closeSeq =>
@@ -1434,7 +1461,8 @@ function actions($: EngineInterface): Actions {
         $,
         'reopen',
         (async () => {
-          await change($, s => reopen(s, closeSeq))
+          // An arm from before the close must not let one press dismiss the reopened item.
+          await change($, s => reopen({ ...s, view: { ...s.view, armedDismiss: null } }, closeSeq))
           await pauseKeys($)
         })(),
       ),
@@ -1475,7 +1503,7 @@ async function togglePane($: EngineInterface): Promise<string> {
   await setPaneUp($, opened.isPlaced)
   if (!opened.isPlaced) return `Docket: the pane could not be placed (${opened.reason}).`
   const count = openItems(await readSession($)).length
-  return count === 0 ? 'Docket: nothing waiting on you.' : `Docket: ${count} open. Digits dismiss; Reopen undoes.`
+  return count === 0 ? 'Docket: nothing waiting on you.' : `Docket: ${count} open. A digit dismisses, then again to confirm; Reopen undoes.`
 }
 
 export const register: Register = (on, options) => {
@@ -1525,7 +1553,7 @@ export const register: Register = (on, options) => {
       // it. The indicator lives above the prompt now.
       $.ui.status(undefined)
       const isUp = (await $.ui.panes()).some(p => p.id === PANE_ID)
-      await change($, cur => ({ ...cur, view: { ...cur.view, keysPausedUntil: null, isPaneUp: isUp } }))
+      await change($, cur => ({ ...cur, view: { ...cur.view, keysPausedUntil: null, armedDismiss: null, isPaneUp: isUp } }))
     } catch (err) {
       await fail($, 'session.start', err)
     }

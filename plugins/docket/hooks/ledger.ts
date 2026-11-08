@@ -98,7 +98,7 @@ export function freshSession(): DocketSession {
     toolAsked: [],
     lastFinal: '',
     lastCheck: { ok: true, at: 0, reason: '', streak: 0, checkedTurns: 0 },
-    view: { isPaneUp: false, keysPausedUntil: null, showAllClosed: false, focusedId: null },
+    view: { isPaneUp: false, keysPausedUntil: null, showAllClosed: false, armedDismiss: null, focusedId: null },
     sid: 'pending',
     root: '',
     everHadItem: false,
