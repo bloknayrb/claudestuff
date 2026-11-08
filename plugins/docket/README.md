@@ -43,7 +43,7 @@ Requires Claude Code 2.1.317 or newer (function-hook mods).
   - **✕** dismisses it. The digit keys `1`-`9` do the same, in the order shown, while the panel has
     the keys (`ctrl+x tab`).
 - Tab onto an item to see the words of Claude's it came from.
-- **`N closed · show`** at the bottom lists recent closes with the reason (you, Claude, dismissed) and
+- **`N closed · show`** at the bottom lists recent closes, each with its #number and the reason (you, Claude, dismissed) and
   a Reopen button each. Reopen is the undo for a wrong close.
 - After any change to the list the digit keys pause for 1.1 s, and each press during the pause
   restarts it, so a list that just reordered cannot turn a press into the wrong dismiss.

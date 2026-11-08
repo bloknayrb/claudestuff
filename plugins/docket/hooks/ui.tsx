@@ -120,6 +120,20 @@ function row(els: Els, item: Item, n: number, turn: number, act: Actions, isFocu
   )
 }
 
+// A cleared batch's ids, whole ones only, within `width` columns: a cut never turns #12 into #1.
+export function batchLine(items: readonly Item[], width = 40): string {
+  const head = `cleared ${items.length} items: `
+  let line = head
+  for (const [n, i] of items.entries()) {
+    const rest = items.length - n - 1
+    const next = `${n === 0 ? '' : ', '}#${i.id}`
+    const tail = rest === 0 ? '' : `, +${rest} more`
+    if ((line + next + tail).length > width) return n === 0 ? `cleared ${items.length} items` : `${line}, +${items.length - n} more`
+    line += next
+  }
+  return line
+}
+
 function closedRow(els: Els, g: CloseGroup, act: Actions) {
   const { Box, Text, Button } = els
   const first = g.items[0]
@@ -128,7 +142,9 @@ function closedRow(els: Els, g: CloseGroup, act: Actions) {
   const label = isBatch ? `Reopen all (${g.items.length})` : 'Reopen'
   // v0.6: the item on one line, who closed it on the next, and Claude's own lines after that, so the
   // user's words and Claude's never share a line at 56 columns.
-  const line = isBatch ? `cleared ${g.items.length} items` : clip(first.text, 40)
+  // The #id leads, because Claude names items by id and an open row shows only its digit key.
+  // The batch text gets what the button and its one-column gap leave of the pane.
+  const line = isBatch ? batchLine(g.items, PANE_COLUMNS - 1 - label.length) : `#${first.id} ${clip(first.text, 40)}`
   const details = isBatch ? [] : [closedHead(first), ...closedDetails(first)]
   return (
     <Box key={`closed-${g.closeSeq}`} flexDirection="column">
