@@ -40,15 +40,15 @@ Requires Claude Code 2.1.317 or newer (function-hook mods).
     answers on the side, even mid-turn, and the answer neither enters the conversation nor closes the
     item. It needs an empty box, or that item's own Reply lead with nothing typed after it.
   - **Done** closes it as handled by you, for things you did outside the chat.
-  - **✕** dismisses it. The digit keys `1`-`9` do the same, in the order shown, while the panel has
-    the keys (`ctrl+x tab`).
+  - **✕** dismisses it, after a second press to confirm. The digit keys `1`-`9` do the same, in the
+    order shown, while the panel has the keys (`ctrl+x tab`).
 - Tab onto an item to see the words of Claude's it came from.
 - **`N closed · show`** at the bottom lists recent closes with the reason (you, Claude, dismissed) and
   a Reopen button each. Reopen is the undo for a wrong close.
 - After any change to the list the digit keys pause for 1.1 s, and each press during the pause
   restarts it, so a list that just reordered cannot turn a press into the wrong dismiss.
-- Since v0.7.2 a dismiss takes two presses. The first arms the row (its ✕ reads `✕ press 2 again`);
-  a second press of the same key between 1.1 s and 5 s later dismisses it. A quicker repeat or a held
+- Since v0.7.2 a dismiss takes two presses. The first arms the row: its ✕ reads `✕ wait…`, then
+  `✕ again?` once a second press of the same key would count (1.1 s to 5 s later) and dismiss it. A quicker repeat or a held
   key only restarts the arm, another row's key moves it, and after 5 s it lapses.
 
 ## Reply new: answer an item in a new window

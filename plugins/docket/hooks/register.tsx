@@ -821,6 +821,13 @@ async function pauseKeys($: EngineInterface): Promise<void> {
   startKeysPause($, until)
 }
 
+async function readyArm($: EngineInterface, until: number): Promise<void> {
+  await change($, s => {
+    const a = s.view.armedDismiss
+    return a === null || a.until !== until || a.ready ? s : { ...s, view: { ...s.view, armedDismiss: { ...a, ready: true } } }
+  })
+}
+
 // Lapses an unconfirmed dismiss, unless a later press re-armed it.
 async function disarm($: EngineInterface, until: number): Promise<void> {
   await change($, s => (s.view.armedDismiss?.until === until ? { ...s, view: { ...s.view, armedDismiss: null } } : s))
@@ -1437,13 +1444,15 @@ function actions($: EngineInterface): Actions {
             if (a !== null && a.id === id && now - a.at >= ARM_DELAY_MS && now < a.until) {
               return { session: dismiss({ ...s, view: { ...s.view, armedDismiss: null } }, id, now), out: 'dismissed' as const }
             }
-            const armed = { id, at: now, until: now + CONFIRM_MS }
+            const armed = { id, at: now, until: now + CONFIRM_MS, ready: false }
             return { session: { ...s, view: { ...s.view, armedDismiss: armed } }, out: armed }
           })
           if (step === 'dismissed') {
             await pauseKeys($)
             return
           }
+          // The row invites the second press only once one would count, then the arm lapses.
+          $.clock.after(ARM_DELAY_MS, () => void guard($, 'arm', readyArm($, step.until)))
           $.clock.after(CONFIRM_MS, () => void guard($, 'disarm', disarm($, step.until)))
         })(),
       ),
@@ -1452,7 +1461,8 @@ function actions($: EngineInterface): Actions {
         $,
         'reopen',
         (async () => {
-          await change($, s => reopen(s, closeSeq))
+          // An arm from before the close must not let one press dismiss the reopened item.
+          await change($, s => reopen({ ...s, view: { ...s.view, armedDismiss: null } }, closeSeq))
           await pauseKeys($)
         })(),
       ),
@@ -1493,7 +1503,7 @@ async function togglePane($: EngineInterface): Promise<string> {
   await setPaneUp($, opened.isPlaced)
   if (!opened.isPlaced) return `Docket: the pane could not be placed (${opened.reason}).`
   const count = openItems(await readSession($)).length
-  return count === 0 ? 'Docket: nothing waiting on you.' : `Docket: ${count} open. Press a digit twice to dismiss; Reopen undoes.`
+  return count === 0 ? 'Docket: nothing waiting on you.' : `Docket: ${count} open. A digit dismisses, then again to confirm; Reopen undoes.`
 }
 
 export const register: Register = (on, options) => {
