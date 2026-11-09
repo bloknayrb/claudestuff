@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { command, mountPane, start, world } from './world'
+import { command, mountPane, say, start, world } from './world'
 
 // v0.9: vim keys in the pane (Bryan: "use vim keybindings in the docket panel to move the selection
 // around"; dismiss by "dd or moving the selection over the the delete button and hitting o twice or enter
@@ -157,7 +157,7 @@ test('o presses the selected button; o or d after the selection was lost only la
 })
 
 test('after Reply here fills the box the letter keys are off until the next prompt or the keys button', async ($, on) => {
-  world(on)
+  const w = world(on)
   focusLog(on)
   on('prompt.read', () => ({ value: { text: '', cursor: 0 } as never }))
   on('prompt.fill', () => ({ isFilled: true, cursor: 0 }) as never)
@@ -171,8 +171,48 @@ test('after Reply here fills the box the letter keys are off until the next prom
   await ui.press({ key: 'reply-1' })
   expect(await ui.find({ key: 'vim-o' })).toBeUndefined()
   await ui.unmount()
-  await $.prompt.submit({ text: 'Re: Renew the domain — yes' })
+  await say($, w, 'Re: Renew the domain — yes')
   const again = await mountPane($, 'terminal')
   expect(await again.find({ key: 'vim-o' })).toBeDefined()
+  // A desktop pane drawn without the keys leaves them off; the terminal's losing the keys (the Esc)
+  // brings them back.
+  await again.press({ key: 'reply-1' })
   await again.unmount()
+  const desk = await mountPane($, 'desktop', false)
+  await desk.unmount()
+  await w.clock.advance(10)
+  const term = await mountPane($, 'terminal')
+  expect(await term.find({ key: 'vim-o' })).toBeUndefined()
+  await term.unmount()
+  const esc = await mountPane($, 'terminal', false)
+  await esc.unmount()
+  await w.clock.advance(10)
+  const back = await mountPane($, 'terminal')
+  expect(await back.find({ key: 'vim-o' })).toBeDefined()
+  await back.unmount()
+})
+
+test('dd on one row, then d on the next inside the hold check: the first goes now, the d is swallowed', async ($, on) => {
+  const w = world(on)
+  const ui = await setUp($)
+  await vim(ui, 'd')
+  await w.clock.advance(100)
+  await vim(ui, 'd')
+  await w.clock.advance(50)
+  await vim(ui, 'j')
+  await vim(ui, 'd')
+  expect(await open(ui)).toEqual([2, 3])
+  expect((await ui.find({ key: 'dismiss-2' }))?.props.label).toBe('✕')
+  await ui.unmount()
+})
+
+test('after the selected item closes, d only lands on the row that took its place', async ($, on) => {
+  const w = world(on)
+  const ui = await setUp($)
+  await ui.press({ key: 'done-1' })
+  await w.clock.advance(1200)
+  await vim(ui, 'd')
+  expect(await marked(ui)).toEqual(['›#2'])
+  expect((await ui.find({ key: 'dismiss-2' }))?.props.label).toBe('✕')
+  await ui.unmount()
 })

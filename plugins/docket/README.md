@@ -53,6 +53,8 @@ Requires Claude Code 2.1.317 or newer (function-hook mods).
     there, so they never act on a row that just moved under the marker.
   - `dd` dismisses the selected item: the first `d` arms it (`✕ again?`), the second confirms, at any
     speed. A held `d` never confirms. ✕ pressed with `o`, Enter or the mouse keeps the 0.5 s rule below.
+    After a dismiss, `d` and `o` pause for 1.1 s (the list just changed), so a quick `dd j dd` dismisses
+    only the first; the second `dd` needs the pause to pass.
   - After Reply here, Reply new or /btw fills your prompt box, the letter keys switch off (`Esc to type
     your reply`) so your reply can't fire them. They come back when you send it, press `keys`, or the
     panel loses the keys.
