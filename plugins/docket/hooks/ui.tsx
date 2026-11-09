@@ -99,7 +99,10 @@ export function indicatorTree(els: Pick<Els, 'Box' | 'Button' | 'Text'>, below: 
 
 function armOf(s: DocketSession, id: number, now: number): 'off' | 'wait' | 'ready' {
   const a = s.view.armedDismiss
-  if (a === null || a.id !== id || a.until <= now) return 'off'
+  if (a === null || a.id !== id) return 'off'
+  // A confirm in its hold check still dismisses, even past the lapse.
+  if (a.pending !== undefined) return 'ready'
+  if (a.until <= now) return 'off'
   return a.ready ? 'ready' : 'wait'
 }
 

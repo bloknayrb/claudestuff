@@ -834,7 +834,10 @@ async function confirmDismiss($: EngineInterface, id: number, pending: number): 
   const isDone = await transact($, s => {
     const a = s.view.armedDismiss
     if (a === null || a.id !== id || a.pending !== pending) return { session: s, out: false }
-    return { session: dismiss({ ...s, view: { ...s.view, armedDismiss: null } }, id, now), out: true }
+    const cleared = { ...s, view: { ...s.view, armedDismiss: null } }
+    // Closed meanwhile (Done, a clear, a verdict): nothing to dismiss, and no reason to pause the keys.
+    if (!s.items.some(i => i.id === id && i.status === 'open')) return { session: cleared, out: false }
+    return { session: dismiss(cleared, id, now), out: true }
   })
   if (isDone) await pauseKeys($)
 }
@@ -848,9 +851,13 @@ async function disarm($: EngineInterface, until: number): Promise<void> {
 // True when the press was swallowed (and the pause restarted).
 async function isDebounced($: EngineInterface): Promise<boolean> {
   const until = (await $.clock.now()) + ARM_DELAY_MS
-  const isPaused = await transact($, s =>
-    s.view.keysPausedUntil === null ? { session: s, out: false } : { session: { ...s, view: { ...s.view, keysPausedUntil: until } }, out: true },
-  )
+  // v0.8.1: a press swallowed while a confirm is in its hold check is still the key held down, so it
+  // cancels the confirm (the arm goes; the row reads ✕ again) rather than letting it go through unseen.
+  const isPaused = await transact($, s => {
+    if (s.view.keysPausedUntil === null) return { session: s, out: false }
+    const armedDismiss = s.view.armedDismiss?.pending !== undefined ? null : s.view.armedDismiss
+    return { session: { ...s, view: { ...s.view, keysPausedUntil: until, armedDismiss } }, out: true }
+  })
   if (isPaused) startKeysPause($, until)
   return isPaused
 }
@@ -1463,14 +1470,25 @@ function actions($: EngineInterface): Actions {
           // A second press of the same item, after the gap and before the arm lapses, confirms once no
           // further press follows within HOLD_CHECK_MS; a press while one is pending is a held key, and
           // anything else (re)arms this item. The armed state is changed in one transaction.
-          const step = await transact<{ pending: number } | { until: number }>($, s => {
+          const step = await transact<{ pending: number } | { until: number } | 'settled'>($, s => {
             const a = s.view.armedDismiss
+            // Another row's key during a confirm's hold check: the first key was released, so that
+            // dismiss stands now, and this press is swallowed as the pause after a change would.
+            if (a !== null && a.pending !== undefined && a.id !== id) {
+              const cleared = { ...s, view: { ...s.view, armedDismiss: null } }
+              const isOpen = s.items.some(i => i.id === a.id && i.status === 'open')
+              return { session: isOpen ? dismiss(cleared, a.id, now) : cleared, out: 'settled' as const }
+            }
             if (a !== null && a.id === id && a.pending === undefined && now - a.at >= CONFIRM_GAP_MS && now < a.until) {
               return { session: { ...s, view: { ...s.view, armedDismiss: { ...a, pending: now } } }, out: { pending: now } }
             }
             const armed = { id, at: now, until: now + CONFIRM_MS, ready: false }
             return { session: { ...s, view: { ...s.view, armedDismiss: armed } }, out: { until: armed.until } }
           })
+          if (step === 'settled') {
+            await pauseKeys($)
+            return
+          }
           if ('pending' in step) {
             $.clock.after(HOLD_CHECK_MS, () => void guard($, 'dismiss', confirmDismiss($, id, step.pending)))
             return
