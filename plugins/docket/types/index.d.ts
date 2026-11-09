@@ -3,6 +3,8 @@
 // docket.writer are process-scoped bookkeeping a switch never replaces.
 
 export type ItemKind = 'decide' | 'do'
+// v0.9: a row's buttons, as their element keys start (`reply-12`).
+export type ButtonKind = 'reply' | 'replynew' | 'btw' | 'done' | 'dismiss' | 'keep'
 export type ItemStatus = 'open' | 'resolved' | 'dismissed'
 // you: the user's words decided or did it. claude: Claude's text or tool lines showed it done or moot.
 // dismiss: a digit key or button. clear: /docket clear (a batch).
@@ -123,7 +125,15 @@ export type ViewState = {
   // v0.7.2: a dismiss takes two presses. The first arms the item at `at` until `until`; a second press of
   // the same item's ✕ (or digit) in between, once `ready` (CONFIRM_GAP_MS after `at`), dismisses it.
   // v0.8.1: that press sets `pending` and dismisses HOLD_CHECK_MS later unless the key is still held.
-  armedDismiss: { id: number; at: number; until: number; ready: boolean; pending?: number } | null
+  // v0.9: an arm by the `d` key (viaD) counts a second d at once; a d during `pending` marks it held, and
+  // while held a d under HOLD_CHECK_MS after the last (lastD) is the key still down, never a confirm.
+  armedDismiss: { id: number; at: number; until: number; ready: boolean; pending?: number; viaD?: true; held?: true; lastD?: number } | null
+  // v0.9: the vim selection: the item and which of its buttons, and its row's index in display order
+  // (where the selection lands when that item closes). keysOff: a fill left the keys in the pane, so the
+  // letter keys are not drawn until the next prompt, the keys button, or the pane losing the keys.
+  selected: { id: number; kind: ButtonKind } | null
+  selectedIdx: number
+  keysOff: boolean
   // The item whose button holds the pane's focus ring: its Claude quote is shown.
   focusedId: number | null
 }
