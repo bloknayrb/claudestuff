@@ -387,6 +387,10 @@ export function paneTree(els: Els, s: DocketSession, open: readonly Item[], grou
   const { Box, Text, Button } = els
   const grouped = originGroups(open, s.sid, live.now)
   const list = grouped.flatMap(g => [...g.decide, ...g.doItems])
+  // v0.9: the › row: the selected item, or, once it closed, the row now at its index (where j/k go from).
+  const sel = s.view.selected
+  const markedId = sel === null || list.length === 0 ? null : list.some(i => i.id === sel.id) ? sel.id : (list[Math.min(Math.max(s.view.selectedIdx, 0), list.length - 1)] as Item).id
+  const drawn: DocketSession = markedId === null || sel === null ? s : { ...s, view: { ...s.view, selected: { id: markedId, kind: sel.kind } } }
   let offset = 0
   const decideTotal = grouped.reduce((n, g) => n + g.decide.length, 0)
   const doTotal = grouped.reduce((n, g) => n + g.doItems.length, 0)
@@ -398,8 +402,8 @@ export function paneTree(els: Els, s: DocketSession, open: readonly Item[], grou
     return (
       <Box key={`group-${g.key}`} flexDirection="column" marginTop={g.label === null ? 0 : 1}>
         {g.label !== null && <Text bold>{g.label}</Text>}
-        {section(els, 'Decide', 'decide', g.decide, start, s, live, act, g.key, g.key === firstDecide ? decideTotal : null)}
-        {section(els, 'Do', 'do', g.doItems, start + g.decide.length, s, live, act, g.key, g.key === firstDo ? doTotal : null)}
+        {section(els, 'Decide', 'decide', g.decide, start, drawn, live, act, g.key, g.key === firstDecide ? decideTotal : null)}
+        {section(els, 'Do', 'do', g.doItems, start + g.decide.length, drawn, live, act, g.key, g.key === firstDo ? doTotal : null)}
       </Box>
     )
   })

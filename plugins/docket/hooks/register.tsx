@@ -1460,6 +1460,8 @@ async function select($: EngineInterface, id: number, kind: ButtonKind): Promise
 }
 
 let keysOnQueued = false
+// v0.9: vim keys run one after another, so "jo" presses on the row j moved to.
+let vimQueue: Promise<unknown> = Promise.resolve()
 
 // When the last g came (gg keeps the top; a lone g on the top row goes to the end).
 let lastG = 0
@@ -1474,16 +1476,19 @@ async function vimKey($: EngineInterface, key: VimKey): Promise<void> {
   if (list.length === 0) return
   const canNew = (await readProc($)).canReplyNew
   const cur = s.view.selected
-  let idx = cur === null ? -1 : list.findIndex(i => i.id === cur.id)
+  const kindsAt = (i: number) => rowKinds(list[i] as Item, canNew)
+  // No selection (a fresh pane, a resume): any key only lands on the top row.
+  if (cur === null) return moveTo($, (list[0] as Item).id, 0, 'reply')
+  let idx = list.findIndex(i => i.id === cur.id)
+  // The selected item closed: the row now at its index is the selection, as the pane draws it.
   const isLost = idx < 0
   if (isLost) idx = Math.min(Math.max(s.view.selectedIdx, 0), list.length - 1)
-  let kind: ButtonKind = !isLost && cur !== null ? cur.kind : 'reply'
-  const kindsAt = (i: number) => rowKinds(list[i] as Item, canNew)
+  let kind: ButtonKind = isLost ? 'reply' : cur.kind
   if (!kindsAt(idx).includes(kind)) kind = 'reply'
   if (key === 'o' || key === 'd') {
     const item = list[idx] as Item
-    // A lost or empty selection only lands; the next press acts, so a key never hits a row unseen.
-    if (cur === null || isLost) return void (await moveTo($, item.id, idx, kind))
+    // On a lost selection o and d only land: the item they would act on just moved under the marker.
+    if (isLost) return moveTo($, item.id, idx, kind)
     if (key === 'd') return dismissByD($, item.id)
     if (await isDebounced($, item.id)) return
     const a = actions($)
@@ -1501,7 +1506,7 @@ async function vimKey($: EngineInterface, key: VimKey): Promise<void> {
   else if (key === 'g') {
     const isGg = now - lastG < GG_MS
     lastG = now
-    next = !isGg && idx === 0 && !isLost && cur !== null ? list.length - 1 : 0
+    next = !isGg && idx === 0 && !isLost ? list.length - 1 : 0
   } else {
     const kinds = kindsAt(idx)
     const at = Math.max(kinds.indexOf(kind), 0)
@@ -1523,8 +1528,15 @@ async function moveTo($: EngineInterface, id: number, idx: number, kind: ButtonK
 async function dismissByD($: EngineInterface, id: number): Promise<void> {
   if (await isDebounced($, id)) return
   const now = await $.clock.now()
-  const step = await transact<{ pending: number } | { until: number } | 'held'>($, s => {
+  const step = await transact<{ pending: number } | { until: number } | 'held' | 'settled'>($, s => {
     const a = s.view.armedDismiss
+    // Another row's confirm in its hold check: that key was released, so its dismiss stands now, and
+    // this press is swallowed by the pause that follows, as with ✕.
+    if (a !== null && a.pending !== undefined && a.id !== id) {
+      const cleared = { ...s, view: { ...s.view, armedDismiss: null } }
+      const isOpen = s.items.some(i => i.id === a.id && i.status === 'open')
+      return { session: isOpen ? dismiss(cleared, a.id, now) : cleared, out: 'settled' as const }
+    }
     const fresh = { id, at: now, until: now + CONFIRM_MS, ready: true, viaD: true as const, lastD: now }
     const put = (armedDismiss: NonNullable<typeof a>) => ({ ...s, view: { ...s.view, armedDismiss } })
     if (a !== null && a.id === id) {
@@ -1538,6 +1550,7 @@ async function dismissByD($: EngineInterface, id: number): Promise<void> {
     return { session: put(fresh), out: { until: fresh.until } }
   })
   if (step === 'held') return
+  if (step === 'settled') return pauseKeys($)
   if ('pending' in step) {
     $.clock.after(HOLD_CHECK_MS, () => void guard($, 'dismiss', confirmDismiss($, id, step.pending)))
     return
@@ -1550,7 +1563,9 @@ function actions($: EngineInterface): Actions {
     reply: id => void guard($, 'reply', fillThen($, id, 'reply', replyTo($, id))),
     replyNew: id => void guard($, 'reply', fillThen($, id, 'replynew', replyNewTo($, id))),
     btw: id => void guard($, 'btw', fillThen($, id, 'btw', btwTo($, id))),
-    vim: key => void guard($, 'vim', vimKey($, key)),
+    vim: key => {
+      vimQueue = vimQueue.then(() => guard($, 'vim', vimKey($, key)))
+    },
     keysOn: () => void guard($, 'keys', change($, s => ({ ...s, view: { ...s.view, keysOff: false } })).then(() => undefined)),
     walk: kind =>
       void guard(
@@ -1682,7 +1697,7 @@ async function togglePane($: EngineInterface): Promise<string> {
     return s.view.selected !== null || first === undefined ? s : { ...s, view: { ...s.view, selected: { id: first.id, kind: 'reply' }, selectedIdx: 0 } }
   })
   const count = openItems(await readSession($)).length
-  return count === 0 ? 'Docket: nothing waiting on you.' : `Docket: ${count} open. A digit dismisses, then again to confirm; Reopen undoes.`
+  return count === 0 ? 'Docket: nothing waiting on you.' : `Docket: ${count} open. ctrl+x tab for keys: j/k move, dd dismisses; Reopen undoes.`
 }
 
 export const register: Register = (on, options) => {
@@ -1941,7 +1956,7 @@ export const register: Register = (on, options) => {
       const live = { isChecking: inFlight, isResolving, isFocused: e.props.isFocused, now: await $.clock.now(), canReplyNew: (await readProc($)).canReplyNew }
       // v0.9: once the pane has lost the keys after a fill, the letter keys come back (scheduled, never
       // written from inside the drawing).
-      if (s.view.keysOff && !e.props.isFocused && !keysOnQueued) {
+      if (s.view.keysOff && e.surface === 'terminal' && !e.props.isFocused && !keysOnQueued) {
         keysOnQueued = true
         $.clock.after(0, () => void guard($, 'keys', change($, x => ({ ...x, view: { ...x.view, keysOff: false } })).then(() => undefined).finally(() => { keysOnQueued = false })))
       }

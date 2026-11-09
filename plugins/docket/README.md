@@ -47,8 +47,10 @@ Requires Claude Code 2.1.317 or newer (function-hook mods).
     selected row's buttons.
   - `g` goes to the top row; `gg` stays there; a lone `g` on the top row goes to the bottom. (Keys are
     lowercase only, so there is no `G`.)
-  - `o` presses the selected button (Enter presses the one the focus ring is on, which is the same unless
-    you moved it with Tab).
+  - `o` presses the selected button; Enter presses the one the focus ring is on. Tab moves the ring, and
+    the selection with it where the engine reports the move.
+  - When the selected item closes, `›` moves to the row that took its place; `o` and `d` then only land
+    there, so they never act on a row that just moved under the marker.
   - `dd` dismisses the selected item: the first `d` arms it (`✕ again?`), the second confirms, at any
     speed. A held `d` never confirms. ✕ pressed with `o`, Enter or the mouse keeps the 0.5 s rule below.
   - After Reply here, Reply new or /btw fills your prompt box, the letter keys switch off (`Esc to type
