@@ -52,8 +52,11 @@ Requires Claude Code 2.1.317 or newer (function-hook mods).
 - After any change to the list the digit keys pause for 1.1 s, and each press during the pause
   restarts it, so a list that just reordered cannot turn a press into the wrong dismiss.
 - Since v0.7.2 a dismiss takes two presses. The first arms the row: its ✕ reads `✕ wait…`, then
-  `✕ again?` once a second press of the same key would count (1.1 s to 5 s later) and dismiss it. A quicker repeat or a held
-  key only restarts the arm, another row's key moves it, and after 5 s it lapses.
+  `✕ again?` once a second press of the same key would count (0.5 s to 5 s later, since v0.8.1) and
+  dismiss it. A quicker repeat only restarts the arm, another row's key moves it, and after 5 s it
+  lapses. The confirming press takes effect 0.15 s later, unless the key is still being held (it
+  repeats), which re-arms instead. On the slowest Windows repeat-rate settings a held key can still
+  confirm.
 
 ## Reply new: answer an item in a new window
 

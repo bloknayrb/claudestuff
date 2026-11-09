@@ -12,7 +12,7 @@ import { addManual, addToolAsked, addTurn, addUser, applyVerdict, clearAll, clos
 import { envelope, freshProc, freshWriter, isRealSid, isSafeSid, ledgerText, normProc, normWriter, parseSlot, pickSlot, restore, RETAIN_MS, slotName, tombstone, withKey, withoutKey, writeKey } from './persist'
 import { blankText, btwQuestion, contextBlock, HANDOFF_MAX_AGE_MS, isBtwText, isNonce, isRootSafe, label, launchScript, leadHere, leadNew, newNonce, parseHandoff, parseNewArgs, replyRefusal, tailAfter, takenText, waitingText, wtArgv } from './spawn'
 import { clip } from './text'
-import { ARM_DELAY_MS, CONFIRM_MS, indicatorText, indicatorTree, listText, overCapLine, PANE_COLUMNS, PANE_ID, PANE_TITLE, paneTree } from './ui'
+import { ARM_DELAY_MS, CONFIRM_GAP_MS, CONFIRM_MS, HOLD_CHECK_MS, indicatorText, indicatorTree, listText, overCapLine, PANE_COLUMNS, PANE_ID, PANE_TITLE, paneTree } from './ui'
 import type { Actions, WalkKind } from './ui'
 
 const MODELS = ['haiku', 'sonnet', 'opus'] as const
@@ -828,9 +828,21 @@ async function readyArm($: EngineInterface, until: number): Promise<void> {
   })
 }
 
+// The confirming press, HOLD_CHECK_MS on: dismisses unless another press re-armed it meanwhile.
+async function confirmDismiss($: EngineInterface, id: number, pending: number): Promise<void> {
+  const now = await $.clock.now()
+  const isDone = await transact($, s => {
+    const a = s.view.armedDismiss
+    if (a === null || a.id !== id || a.pending !== pending) return { session: s, out: false }
+    return { session: dismiss({ ...s, view: { ...s.view, armedDismiss: null } }, id, now), out: true }
+  })
+  if (isDone) await pauseKeys($)
+}
+
 // Lapses an unconfirmed dismiss, unless a later press re-armed it.
 async function disarm($: EngineInterface, until: number): Promise<void> {
-  await change($, s => (s.view.armedDismiss?.until === until ? { ...s, view: { ...s.view, armedDismiss: null } } : s))
+  // A confirming press made before the lapse is still settled by confirmDismiss, not dropped here.
+  await change($, s => (s.view.armedDismiss?.until === until && s.view.armedDismiss.pending === undefined ? { ...s, view: { ...s.view, armedDismiss: null } } : s))
 }
 
 // True when the press was swallowed (and the pause restarted).
@@ -1448,22 +1460,23 @@ function actions($: EngineInterface): Actions {
         (async () => {
           if (await isDebounced($)) return
           const now = await $.clock.now()
-          // Confirmed only by a second press of the same item, after the gap and before the arm lapses;
-          // anything else (re)arms this item. The armed state and the dismiss are one transaction.
-          const step = await transact<'dismissed' | { until: number }>($, s => {
+          // A second press of the same item, after the gap and before the arm lapses, confirms once no
+          // further press follows within HOLD_CHECK_MS; a press while one is pending is a held key, and
+          // anything else (re)arms this item. The armed state is changed in one transaction.
+          const step = await transact<{ pending: number } | { until: number }>($, s => {
             const a = s.view.armedDismiss
-            if (a !== null && a.id === id && now - a.at >= ARM_DELAY_MS && now < a.until) {
-              return { session: dismiss({ ...s, view: { ...s.view, armedDismiss: null } }, id, now), out: 'dismissed' as const }
+            if (a !== null && a.id === id && a.pending === undefined && now - a.at >= CONFIRM_GAP_MS && now < a.until) {
+              return { session: { ...s, view: { ...s.view, armedDismiss: { ...a, pending: now } } }, out: { pending: now } }
             }
             const armed = { id, at: now, until: now + CONFIRM_MS, ready: false }
-            return { session: { ...s, view: { ...s.view, armedDismiss: armed } }, out: armed }
+            return { session: { ...s, view: { ...s.view, armedDismiss: armed } }, out: { until: armed.until } }
           })
-          if (step === 'dismissed') {
-            await pauseKeys($)
+          if ('pending' in step) {
+            $.clock.after(HOLD_CHECK_MS, () => void guard($, 'dismiss', confirmDismiss($, id, step.pending)))
             return
           }
           // The row invites the second press only once one would count, then the arm lapses.
-          $.clock.after(ARM_DELAY_MS, () => void guard($, 'arm', readyArm($, step.until)))
+          $.clock.after(CONFIRM_GAP_MS, () => void guard($, 'arm', readyArm($, step.until)))
           $.clock.after(CONFIRM_MS, () => void guard($, 'disarm', disarm($, step.until)))
         })(),
       ),
