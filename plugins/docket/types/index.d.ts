@@ -12,7 +12,9 @@ export type ClosedBy = 'you' | 'claude' | 'dismiss' | 'clear' | 'claude-tool'
 // What the user said when a reply of theirs closed an item (v0.6): their words as typed (the Reply lead
 // stripped), and, for an option pick, the option code read by their key. linked: Claude's amend tied
 // these words to the item; they are not the reply that first closed it. seq: that reply's.
-export type Answer = { words: string; option?: { key: string; label: string }; linked?: true; seq?: number }
+// aimed (v0.8): the reply was aimed at this item (its Reply lead, the walk focus, or it names the item).
+// Missing on an answer recorded before v0.8, which Claude's reopen treats as aimed.
+export type Answer = { words: string; option?: { key: string; label: string }; linked?: true; seq?: number; aimed?: boolean }
 export type CloseKind = 'duplicate' | 'settled-earlier' | 'user-asked' | 'done-by-claude' | 'stale'
 // Why Claude closed an item with the close tool. dupOf for a duplicate; cite: the #id or the user's words.
 export type Closure = { kind: CloseKind; reason: string; dupOf?: number; cite?: string }
@@ -56,7 +58,19 @@ export type Item = {
   notes?: ClaudeNote[]
   closure?: Closure
   superseded?: Superseded
+  // v0.8: the last user seq when the item closed; a reply cited to reopen it must be newer.
+  closedAtSeq?: number
+  // v0.8: Claude's reopen tool reopened it (cleared by any later close), and how often Claude has
+  // reopened it in this session (kept through closes: only the first can be uncited).
+  reopened?: Reopened
+  claudeReopens?: number
 }
+
+// What the close Claude undid recorded, so Keep closed can put it back.
+export type ReopenPrior = { by: ClosedBy; note?: string; answer?: Answer; via?: 'done' | 'reply-new'; closure?: Closure; superseded?: Superseded }
+// was: how the close read before the reopen. cite: the user's whole reply, when one was cited.
+// seen: the user has had the pane open or typed a prompt since.
+export type Reopened = { reason: string; was: string; at: number; cite?: string; seen: boolean; prior: ReopenPrior }
 
 // The carry switch (v0.3). gen goes up each time it is turned on; { on: false, gen: 0 } until then.
 export type CarryState = { on: boolean; gen: number }

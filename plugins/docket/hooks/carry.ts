@@ -35,7 +35,11 @@ export type CarryFile = { sid: string; root: string; gen: number; on: boolean; s
 export function carryText(s: DocketSession): string {
   const on = s.carry.on && !s.carryTaken
   const items = on
-    ? openItems(s).map(i => ({ ...i, text: redact(i.text), quote: redact(i.quote), origin: i.origin ?? `${s.sid}:${i.id}`, ...(i.notes === undefined ? {} : { notes: i.notes.map(n => ({ ...n, text: redact(n.text) })) }) }))
+    ? openItems(s).map(item => {
+        // v0.8: Claude's reopen belongs to this session (takeInto starts an item fresh): not written.
+        const { reopened: _re, claudeReopens: _n, closedAtSeq: _cs, ...i } = item
+        return { ...i, text: redact(i.text), quote: redact(i.quote), origin: i.origin ?? `${s.sid}:${i.id}`, ...(i.notes === undefined ? {} : { notes: i.notes.map(n => ({ ...n, text: redact(n.text) })) }) }
+      })
     : []
   return JSON.stringify({ gen: s.carry.gen, on, items })
 }

@@ -7,7 +7,8 @@
 
 import type { CloseKind, DocketSession, Item, LoggedReply, UserEntry } from '../types'
 import { MAX_NOTES } from './persist'
-import { answerFor, names, tiedTo } from './ledger'
+import { answerFor, names, reopenOne, tiedTo } from './ledger'
+import { closedHead } from './attribution'
 import { optionPick } from './options'
 import { isBare, normalise, redact, sanitise } from './text'
 
@@ -56,7 +57,7 @@ export function amend(s: DocketSession, id: number | undefined, correction: unkn
   if (item === undefined) return { session: s, text: `#${id ?? '?'} isn't on the Docket.` }
   if (item.status === 'open') return { session: s, text: `${state(item)}; amend is for a resolution Docket recorded.` }
   if (item.by !== 'you' || item.answer === undefined || item.via !== undefined) {
-    return { session: s, text: `#${item.id} wasn't closed by a reply Docket recorded, so it can't be amended. Annotate it, or ask the user to Reopen it in the pane.` }
+    return { session: s, text: `#${item.id} wasn't closed by a reply Docket recorded, so it can't be amended. Annotate it, or reopen it (the reopen tool) and ask the user.` }
   }
   const text = typeof correction === 'string' ? sanitise(redact(correction), 200) : ''
   if (text === '') return { session: s, text: 'amend needs the corrected resolution as text.' }
@@ -120,4 +121,52 @@ export function closeByClaude(s: DocketSession, id: number | undefined, rawKind:
   }
   const closure = { kind: k.kind, reason, ...(k.dupOf === undefined ? {} : { dupOf: k.dupOf }), ...(cite === undefined ? {} : { cite }) }
   return { session: close(s, item.id, { closure }), text: `Closed #${item.id}, shown as closed by Claude. The user can Reopen it in the pane.` }
+}
+
+// Claude's reopen tool (v0.8). Without the user's words, only the #42 shape (a bare reply or a plain pick,
+// not aimed at this item, never amended) and Claude's own non-user closes, and only once per item.
+// Anything else needs `cite`: the user's own reply, typed after the close, naming the item. What is
+// stored and shown is that whole reply, never the string Claude passed.
+export function reopenByClaude(s: DocketSession, id: number | undefined, rawReason: unknown, rawCite: unknown, isPaneUp: boolean, now: number): ToolOut {
+  const item = s.items.find(i => i.id === id)
+  if (item === undefined) return { session: s, text: `#${id ?? '?'} isn't on the Docket.` }
+  if (item.status === 'open') return { session: s, text: `#${item.id} is open; nothing to reopen.` }
+  const reason = typeof rawReason === 'string' ? sanitise(redact(rawReason), 200) : ''
+  if (reason === '') return { session: s, text: 'reopen needs a reason.' }
+  const ASK = " Ask the user; don't search for an older reply to cite."
+  const hasCite = typeof rawCite === 'string' && rawCite.trim() !== ''
+  let cite: string | undefined
+  if (hasCite) {
+    if (item.closedAtSeq === undefined) return { session: s, text: `#${item.id} closed before Docket recorded when; ask the user to Reopen it in the pane.` }
+    const reply = findReply(s, rawCite as string, item.openedTurn)
+    const ok = reply !== undefined && reply.seq > item.closedAtSeq && !isBare(reply.words) && optionPick(reply.words) === undefined && (reply.namedId === item.id || names(reply.words, item))
+    if (!ok || reply === undefined) return { session: s, text: `That isn't the user's own reply, typed after #${item.id} closed, naming the item (its text, or through its Reply button).${ASK}` }
+    cite = sanitise(reply.words, 200)
+  } else {
+    if ((item.claudeReopens ?? 0) > 0) return { session: s, text: `You already reopened #${item.id} once; reopening it again needs the user's reply asking for it back.${ASK}` }
+    const why = uncitedRefusal(item)
+    if (why !== '') return { session: s, text: `${why}${ASK}` }
+  }
+  // A close not written by close() (a hand-edited or legacy file) has nothing to put back.
+  if (item.by === undefined) return { session: s, text: `#${item.id} has no close Docket can undo; ask the user to Reopen it in the pane.` }
+  const was = closedHead(item)
+  const next = reopenOne(s, item.id, { reason, was: sanitise(was, 200), ...(cite === undefined ? {} : { cite }) }, now, isPaneUp)
+  return { session: next, text: `Reopened #${item.id}, shown as reopened by Claude; the user can press Keep closed. Ask them about it now.` }
+}
+
+// Why an uncited reopen isn't allowed for this close, or ''.
+function uncitedRefusal(i: Item): string {
+  if (i.by === 'claude') return ''
+  if (i.by === 'claude-tool') {
+    const k = i.closure?.kind
+    return k === 'duplicate' || k === 'done-by-claude' || k === 'stale' ? '' : `#${i.id} was closed at the user's request (${k ?? 'unknown'}); reopening it needs their reply asking for it back.`
+  }
+  if (i.by === 'you' && i.via === undefined && i.superseded === undefined && i.answer !== undefined) {
+    const a = i.answer
+    const isPlain = isBare(a.words) || optionPick(a.words)?.tail === ''
+    if (a.aimed === false && isPlain) return ''
+    const how = a.aimed === undefined ? ', recorded before Docket tracked whom a reply was aimed at' : a.aimed ? ', aimed at it' : ', in their own words'
+    return `#${i.id} was closed by the user's own reply${how}; reopening it needs their later reply asking for it back.`
+  }
+  return `#${i.id} was closed by the user's own act (${i.via ?? i.by ?? 'closed'}); reopening it needs their reply asking for it back.`
 }

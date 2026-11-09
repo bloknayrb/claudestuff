@@ -1,7 +1,7 @@
 // Pure: what a snapshot holds, how it is written and how a file read back is checked. Nothing here
 // takes $. A file on disk is untrusted: every field is rebuilt by hand, and any failure rejects it.
 
-import type { Answer, CarrySource, CarryState, CloseKind, ClosedBy, DocketProc, DocketSession, DocketWriter, Item, ItemKind, ItemStatus, LastCheck, WriteKind } from '../types'
+import type { Answer, CarrySource, CarryState, CloseKind, ClosedBy, Closure, DocketProc, DocketSession, DocketWriter, Item, ItemKind, ItemStatus, LastCheck, Reopened, ReopenPrior, Superseded, WriteKind } from '../types'
 import { freshSession, KEEP_TOOL_ASKED } from './ledger'
 import { clip, redact, sanitise } from './text'
 
@@ -73,14 +73,30 @@ const r = (t: string): string => redact(t)
 
 const rAnswer = (a: Answer): Answer => ({ ...a, words: r(a.words), ...(a.option === undefined ? {} : { option: { key: a.option.key, label: r(a.option.label) } }) })
 
+const rClosure = (c: Closure): Closure => ({ ...c, reason: r(c.reason), ...(c.cite === undefined ? {} : { cite: r(c.cite) }) })
+const rSuperseded = (x: Superseded): Superseded => ({ ...x, correction: r(x.correction), ...(x.note === undefined ? {} : { note: r(x.note) }), ...(x.answer === undefined ? {} : { answer: rAnswer(x.answer) }) })
+// v0.8: Claude's reopen, and the close it undid (kept for Keep closed).
+const rReopened = (x: Reopened): Reopened => {
+  const p = x.prior
+  const prior: ReopenPrior = {
+    ...p,
+    ...(p.note === undefined ? {} : { note: r(p.note) }),
+    ...(p.answer === undefined ? {} : { answer: rAnswer(p.answer) }),
+    ...(p.closure === undefined ? {} : { closure: rClosure(p.closure) }),
+    ...(p.superseded === undefined ? {} : { superseded: rSuperseded(p.superseded) }),
+  }
+  return { ...x, reason: r(x.reason), was: r(x.was), ...(x.cite === undefined ? {} : { cite: r(x.cite) }), prior }
+}
+
 // v0.6: the user's words and Claude's notes, closures and corrections, redacted for the disk.
 export function redactRecords(i: Item): Item {
   return {
     ...i,
     ...(i.answer === undefined ? {} : { answer: rAnswer(i.answer) }),
     ...(i.notes === undefined ? {} : { notes: i.notes.map(n => ({ ...n, text: r(n.text) })) }),
-    ...(i.closure === undefined ? {} : { closure: { ...i.closure, reason: r(i.closure.reason), ...(i.closure.cite === undefined ? {} : { cite: r(i.closure.cite) }) } }),
-    ...(i.superseded === undefined ? {} : { superseded: { ...i.superseded, correction: r(i.superseded.correction), ...(i.superseded.note === undefined ? {} : { note: r(i.superseded.note) }), ...(i.superseded.answer === undefined ? {} : { answer: rAnswer(i.superseded.answer) }) } }),
+    ...(i.closure === undefined ? {} : { closure: rClosure(i.closure) }),
+    ...(i.superseded === undefined ? {} : { superseded: rSuperseded(i.superseded) }),
+    ...(i.reopened === undefined ? {} : { reopened: rReopened(i.reopened) }),
   }
 }
 
@@ -146,7 +162,50 @@ function readAnswer(x: unknown): Answer {
   const option = opt(x, 'option', o => (isObj(o) ? { key: str(o.key, 2), label: str(o.label, 80) } : fail('option')))
   const linked = opt(x, 'linked', bool)
   const seq = opt(x, 'seq', s => int(s, 1))
-  return { words: str(x.words, 2000), ...(option === undefined ? {} : { option }), ...(linked === true ? { linked: true as const } : {}), ...(seq === undefined ? {} : { seq }) }
+  const aimed = opt(x, 'aimed', bool)
+  return { words: str(x.words, 2000), ...(option === undefined ? {} : { option }), ...(linked === true ? { linked: true as const } : {}), ...(seq === undefined ? {} : { seq }), ...(aimed === undefined ? {} : { aimed }) }
+}
+
+function readClosure(x: unknown): Closure {
+  if (!isObj(x)) return fail('closure')
+  const dupOf = opt(x, 'dupOf', d => int(d, 1))
+  const cite = opt(x, 'cite', c => str(c, 2000))
+  return { kind: oneOf(x.kind, KINDS_CLOSE), reason: str(x.reason, 200), ...(dupOf === undefined ? {} : { dupOf }), ...(cite === undefined ? {} : { cite }) }
+}
+
+function readSuperseded(x: unknown): Superseded {
+  if (!isObj(x)) return fail('superseded')
+  const n = opt(x, 'note', y => str(y, 80))
+  const a = opt(x, 'answer', readAnswer)
+  return { at: num(x.at), correction: str(x.correction, 200), ...(n === undefined ? {} : { note: n }), ...(a === undefined ? {} : { answer: a }) }
+}
+
+// v0.8: Claude's reopen record. Unlike every other field, a malformed one is dropped (the item reads as
+// open with no marker) rather than failing the slot: it nests a whole close, which a later change could
+// easily break, and losing it costs only the Keep closed button.
+function readReopened(x: unknown): Reopened | undefined {
+  try {
+    if (!isObj(x) || !isObj(x.prior)) return fail('reopened')
+    const p = x.prior
+    const pNote = opt(p, 'note', y => str(y, 80))
+    const pAnswer = opt(p, 'answer', readAnswer)
+    const pVia = opt(p, 'via', y => oneOf(y, VIAS))
+    const pClosure = opt(p, 'closure', readClosure)
+    const pSup = opt(p, 'superseded', readSuperseded)
+    const prior: ReopenPrior = {
+      by: oneOf(p.by, BYS),
+      ...(pNote === undefined ? {} : { note: pNote }),
+      ...(pAnswer === undefined ? {} : { answer: pAnswer }),
+      ...(pVia === undefined ? {} : { via: pVia }),
+      ...(pClosure === undefined ? {} : { closure: pClosure }),
+      ...(pSup === undefined ? {} : { superseded: pSup }),
+    }
+    const cite = opt(x, 'cite', c => str(c, 200))
+    return { reason: str(x.reason, 200), was: str(x.was, 200), at: num(x.at), ...(cite === undefined ? {} : { cite }), seen: bool(x.seen), prior }
+  } catch (err) {
+    if (err instanceof Bad) return undefined
+    throw err
+  }
 }
 
 export function readItem(v: unknown, sid: string, savedAt: number): Item {
@@ -176,24 +235,22 @@ export function readItem(v: unknown, sid: string, savedAt: number): Item {
   const answer = opt(v, 'answer', readAnswer)
   const via = opt(v, 'via', x => oneOf(x, VIAS))
   const notes = opt(v, 'notes', x => (Array.isArray(x) && x.length <= MAX_NOTES ? x.map(n => (isObj(n) ? { text: str(n.text, 200), at: num(n.at) } : fail('note'))) : fail('notes')))
-  const closure = opt(v, 'closure', x => {
-    if (!isObj(x)) return fail('closure')
-    const dupOf = opt(x, 'dupOf', d => int(d, 1))
-    const cite = opt(x, 'cite', c => str(c, 2000))
-    return { kind: oneOf(x.kind, KINDS_CLOSE), reason: str(x.reason, 200), ...(dupOf === undefined ? {} : { dupOf }), ...(cite === undefined ? {} : { cite }) }
-  })
-  const superseded = opt(v, 'superseded', x => {
-    if (!isObj(x)) return fail('superseded')
-    const n = opt(x, 'note', y => str(y, 80))
-    const a = opt(x, 'answer', readAnswer)
-    return { at: num(x.at), correction: str(x.correction, 200), ...(n === undefined ? {} : { note: n }), ...(a === undefined ? {} : { answer: a }) }
-  })
+  const closure = opt(v, 'closure', readClosure)
+  const superseded = opt(v, 'superseded', readSuperseded)
+  // v0.8
+  const closedAtSeq = opt(v, 'closedAtSeq', x => int(x))
+  const claudeReopens = opt(v, 'claudeReopens', x => int(x))
+  // Only an open item carries a reopen record (any close drops it).
+  const reopened = item.status === 'open' && v.reopened !== undefined ? readReopened(v.reopened) : undefined
   return {
     ...(answer === undefined ? {} : { answer }),
     ...(via === undefined ? {} : { via }),
     ...(notes === undefined ? {} : { notes }),
     ...(closure === undefined ? {} : { closure }),
     ...(superseded === undefined ? {} : { superseded }),
+    ...(closedAtSeq === undefined ? {} : { closedAtSeq }),
+    ...(claudeReopens === undefined ? {} : { claudeReopens }),
+    ...(reopened === undefined ? {} : { reopened }),
     ...item,
     ...(by === undefined ? {} : { by }),
     ...(note === undefined ? {} : { note }),
