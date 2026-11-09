@@ -237,6 +237,7 @@ test('a digit dismisses its row; the keys pause after a change; Reopen brings it
   expect(await ids(ui)).toEqual([1, 2])
   await w.clock.advance(1200)
   await ui.press({ key: 'dismiss-1' })
+  await w.clock.advance(200)
   expect(await ids(ui)).toEqual([2])
   await w.clock.advance(1200)
   await ui.press({ key: 'docket-show-closed' })
@@ -288,6 +289,7 @@ test('a dismiss takes two presses: a fast repeat, a lapsed arm or another row ne
   await w.clock.advance(1200)
   expect(await label(2)).toBe('✕ again?')
   await ui.press({ key: 'dismiss-2' })
+  await w.clock.advance(200)
   expect(await open()).toEqual([1])
   expect(await label(1)).toBe('✕')
   await ui.unmount()
@@ -302,10 +304,81 @@ test("a re-arm outlives the earlier arm's lapse timer", async ($, on) => {
   // A quick repeat re-arms at 300, to lapse at 5300.
   await w.clock.advance(300)
   await ui.press({ key: 'dismiss-1' })
-  // The first arm's timer fires at 5000 and must leave the re-arm live for a confirm at 5200.
+  // The first arm's timer fires at 5000 and must leave the re-arm live for a confirm pressed at 5200;
+  // that confirm settles at 5350, past the re-arm's own lapse at 5300, which must leave it pending.
   await w.clock.advance(4900)
   await ui.press({ key: 'dismiss-1' })
+  await w.clock.advance(200)
   expect(await ui.find({ key: 'item-1' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('v0.8.1: a key pause during the hold check cancels the confirm; another row settles it', async ($, on) => {
+  const w = world(on)
+  await start($)
+  await command($, 'add Renew the domain')
+  await command($, 'add Rotate the key')
+  await command($, 'add Merge the docs PR')
+  const ui = await mountPane($, 'terminal')
+  const open = async () => (await ui.findAll({ type: 'Box' })).map(b => b.key ?? '').filter(k => k.startsWith('item-')).map(k => Number(k.slice(5)))
+  // Held 1: its first repeat sets the confirm pending; Done on row 3 pauses the keys, and the next
+  // repeat, swallowed by the pause, still counts as the key held: no dismiss.
+  await ui.press({ key: 'dismiss-1' })
+  await w.clock.advance(500)
+  await ui.press({ key: 'dismiss-1' })
+  await ui.press({ key: 'done-3' })
+  await w.clock.advance(33)
+  await ui.press({ key: 'dismiss-1' })
+  await w.clock.advance(200)
+  expect(await open()).toEqual([1, 2])
+  expect((await ui.find({ key: 'dismiss-1' }))?.props.label).toBe('✕')
+  // A confirm on 1, then 2 within the hold check: 1 goes now, and the 2 is swallowed by the pause.
+  await w.clock.advance(1200)
+  await ui.press({ key: 'dismiss-1' })
+  await w.clock.advance(600)
+  await ui.press({ key: 'dismiss-1' })
+  await w.clock.advance(50)
+  await ui.press({ key: 'dismiss-2' })
+  expect(await open()).toEqual([2])
+  await w.clock.advance(200)
+  expect((await ui.find({ key: 'dismiss-2' }))?.props.label).toBe('✕')
+  await ui.unmount()
+})
+
+test("v0.8.1: a second press 0.5 s on dismisses 0.15 s later; a held key's first repeat at 0.5 s does not", async ($, on) => {
+  const w = world(on)
+  await start($)
+  await command($, 'add Renew the domain')
+  await command($, 'add Rotate the key')
+  const ui = await mountPane($, 'terminal')
+  const open = async () => (await ui.findAll({ type: 'Box' })).map(b => b.key ?? '').filter(k => k.startsWith('item-')).map(k => Number(k.slice(5)))
+  const label = async (id: number) => (await ui.find({ key: `dismiss-${id}` }))?.props.label
+  // A held key, Windows defaults: the first repeat 500 ms after the press, then one every 33 ms.
+  await ui.press({ key: 'dismiss-1' })
+  await w.clock.advance(500)
+  await ui.press({ key: 'dismiss-1' })
+  for (let t = 0; t < 10; t++) {
+    await w.clock.advance(33)
+    await ui.press({ key: 'dismiss-1' })
+  }
+  await w.clock.advance(200)
+  expect(await open()).toEqual([1, 2])
+  // Released, then a deliberate second press at 0.5 s: ready at 0.5 s, gone 0.15 s after the press.
+  await w.clock.advance(300)
+  expect(await label(1)).toBe('✕ again?')
+  await ui.press({ key: 'dismiss-1' })
+  await w.clock.advance(100)
+  expect(await open()).toEqual([1, 2])
+  await w.clock.advance(100)
+  expect(await open()).toEqual([2])
+  // 0.4 s is still too soon: it only re-arms.
+  await w.clock.advance(1200)
+  await ui.press({ key: 'dismiss-2' })
+  await w.clock.advance(400)
+  await ui.press({ key: 'dismiss-2' })
+  await w.clock.advance(200)
+  expect(await open()).toEqual([2])
+  expect(await label(2)).toBe('✕ wait…')
   await ui.unmount()
 })
 

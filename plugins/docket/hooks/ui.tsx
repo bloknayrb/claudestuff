@@ -16,10 +16,17 @@ export const PANE_COLUMNS = 56
 // cannot dismiss the next row. 1100 ms is above Windows' largest key-repeat delay (1000 ms), as Bridge.
 export const ARM_DELAY_MS = 1100
 
-// v0.7.2: a dismiss takes two presses of the same item, so one stray digit closes nothing. The second
-// must come at least ARM_DELAY_MS after the last press, or it only restarts the arm: a double-tap or a
-// held key (Windows repeats from 250 ms) never confirms. The arm lapses after CONFIRM_MS.
+// v0.7.2: a dismiss takes two presses of the same item, so one stray digit closes nothing. The arm lapses
+// after CONFIRM_MS.
 export const CONFIRM_MS = 5000
+// v0.8.1 (Bryan: "i think .5 second should be enough"): the second press counts from CONFIRM_GAP_MS
+// after the last one; a quicker one only restarts the arm, so a double-tap never confirms. That is below
+// Windows' key-repeat delay (250-1000 ms, 500 by default), so a held key's first repeat can land in the
+// window: a press that would confirm waits HOLD_CHECK_MS, and another press of the same item in that
+// time is the key still held, which re-arms instead. Repeats come every 33-400 ms; past 150 ms (the
+// slowest few repeat-rate settings) a held key can still confirm.
+export const CONFIRM_GAP_MS = 500
+export const HOLD_CHECK_MS = 150
 
 export type Els = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
 
@@ -92,7 +99,10 @@ export function indicatorTree(els: Pick<Els, 'Box' | 'Button' | 'Text'>, below: 
 
 function armOf(s: DocketSession, id: number, now: number): 'off' | 'wait' | 'ready' {
   const a = s.view.armedDismiss
-  if (a === null || a.id !== id || a.until <= now) return 'off'
+  if (a === null || a.id !== id) return 'off'
+  // A confirm in its hold check still dismisses, even past the lapse.
+  if (a.pending !== undefined) return 'ready'
+  if (a.until <= now) return 'off'
   return a.ready ? 'ready' : 'wait'
 }
 

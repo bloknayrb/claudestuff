@@ -82,6 +82,7 @@ test('carry on writes the open items; a close drops one; carry off writes the of
   await ui.press({ key: 'dismiss-1' })
   await w.clock.advance(1200)
   await ui.press({ key: 'dismiss-1' })
+  await w.clock.advance(200)
   await ui.unmount()
   await w.clock.settle()
   expect(carryOf(w, 'sess-1')?.items.map(i => i.text)).toEqual(['Rotate the key'])
