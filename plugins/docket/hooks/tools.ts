@@ -147,6 +147,8 @@ export function reopenByClaude(s: DocketSession, id: number | undefined, rawReas
     const why = uncitedRefusal(item)
     if (why !== '') return { session: s, text: `${why}${ASK}` }
   }
+  // A close not written by close() (a hand-edited or legacy file) has nothing to put back.
+  if (item.by === undefined) return { session: s, text: `#${item.id} has no close Docket can undo; ask the user to Reopen it in the pane.` }
   const was = closedHead(item)
   const next = reopenOne(s, item.id, { reason, was: sanitise(was, 200), ...(cite === undefined ? {} : { cite }) }, now, isPaneUp)
   return { session: next, text: `Reopened #${item.id}, shown as reopened by Claude; the user can press Keep closed. Ask them about it now.` }
@@ -163,7 +165,8 @@ function uncitedRefusal(i: Item): string {
     const a = i.answer
     const isPlain = isBare(a.words) || optionPick(a.words)?.tail === ''
     if (a.aimed === false && isPlain) return ''
-    return `#${i.id} was closed by the user's own reply${a.aimed === false ? ', in their own words' : ', aimed at it'}; reopening it needs their later reply asking for it back.`
+    const how = a.aimed === undefined ? ', recorded before Docket tracked whom a reply was aimed at' : a.aimed ? ', aimed at it' : ', in their own words'
+    return `#${i.id} was closed by the user's own reply${how}; reopening it needs their later reply asking for it back.`
   }
   return `#${i.id} was closed by the user's own act (${i.via ?? i.by ?? 'closed'}); reopening it needs their reply asking for it back.`
 }

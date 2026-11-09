@@ -10,7 +10,8 @@ import { indicatorText, listText, reopenedLines } from '../hooks/ui'
 import { closeGroups } from '../hooks/ledger'
 import type { DocketSession, Item } from '../types'
 import { ITEM_41, ITEM_42, MSG_41 } from './fixtures'
-import { command, mountPane, openIds, start, world } from './world'
+import { command, mountBand, mountPane, openIds, start, world } from './world'
+import { leadHere } from '../hooks/spawn'
 
 // v0.8: Claude's reopen tool. Without the user's words only the #42 shape (a bare reply or plain pick,
 // not aimed at the item, never amended) and Claude's own non-user closes, once per item.
@@ -35,12 +36,15 @@ const two = () => [item(1, { text: ITEM_41 }), item(2, { text: ITEM_42 })]
 const get = (s: DocketSession, id: number) => s.items.find(i => i.id === id) as Item
 const reopen = (s: DocketSession, id: number, cite?: string) => reopenByClaude(s, id, 'that "1" was for the other item', cite, false, 100)
 
-// The #42 shape: a bare pick, closed against a message that doesn't aim it at the item.
+// The close the uncited path allows: a bare pick tied to the item only by the message it answered, not
+// aimed at it (no Reply lead, walk focus or naming). Since v0.7 a pick the message doesn't tie to the
+// item is refused outright (v06.test), so the literal #42 close can't recur; what is left is a pick
+// that may be right or wrong, which is the plan's accepted limit: Claude may reopen it once, visibly.
 function wrongClose(): DocketSession {
   return resolveWith(addUser(session(two(), 2, MSG_41), '1'), [{ id: 1, evidence: '1' }])
 }
 
-test('the #42 shape reopens without a cite; stamps, record, and the same reply cannot close it again', () => {
+test('an unaimed bare pick reopens without a cite; stamps, record, and the same reply cannot close it again', () => {
   const s = wrongClose()
   expect(get(s, 1).status).toBe('resolved')
   expect(get(s, 1).closedAtSeq).toBe(1)
@@ -65,15 +69,17 @@ test('the #42 shape reopens without a cite; stamps, record, and the same reply c
 
 test('a second reopen needs a cite; Keep closed restores the close exactly, with a fresh seq', () => {
   const r = reopen(wrongClose(), 1)
-  const kept = keepClosed(r.session, 1, 200)
+  const typedBetween = addUser(r.session, 'something else entirely')
+  const kept = keepClosed(typedBetween, 1, 200)
   const k = get(kept, 1)
+  expect(k.closeSeq).toBeGreaterThan(get(wrongClose(), 1).closeSeq as number)
+  expect(k.closedAtSeq).toBe(2)
   expect(k.status).toBe('resolved')
   expect(k.by).toBe('you')
   expect(k.answer?.words).toBe('1')
   expect(k.answer?.option?.key).toBe('1')
   expect(k.reopened).toBeUndefined()
   expect(k.claudeReopens).toBe(1)
-  expect(k.closedAtSeq).toBe(1)
   expect((reopen(kept, 1)).text.includes('already reopened #1 once')).toBe(true)
   // A reply typed before Keep closed can't be cited; one after, naming the item, can.
   const typedAfter = addUser(kept, `please bring back ${ITEM_41}`)
@@ -101,12 +107,15 @@ test('refused: the user\'s own acts, typed answers, aimed picks, amended items, 
   // A pick with a tail is typed words too.
   const tail = resolveWith(addUser(session(two(), 2, MSG_41), '1, but only on desktop'), [{ id: 1, evidence: '1, but only on desktop' }])
   expect(reopen(tail, 1).text.includes('needs their later reply')).toBe(true)
-  // Aimed through the walk focus or the reply naming it.
+  // Aimed: the reply names the item, or came through its Reply button.
   const aimed = resolveWith(addUser(session(two(), 2, MSG_41), `${ITEM_41}: keep it`), [{ id: 1, evidence: 'keep it' }])
   expect(reopen(aimed, 1).text.includes('aimed at it')).toBe(true)
+  const led = resolveWith(addUser(session(two(), 2, MSG_41), `${leadHere(two()[0] as Item)}1`), [{ id: 1, evidence: '1' }])
+  expect(get(led, 1).answer?.aimed).toBe(true)
+  expect(reopen(led, 1).text.includes('aimed at it')).toBe(true)
   // A pre-v0.8 answer (no aimed stamp) and a pre-v0.8 close (no closedAtSeq).
   const old = session([item(1, { status: 'resolved', by: 'you', answer: { words: '1', seq: 1 }, closeSeq: 1 })])
-  expect(reopen(old, 1).text.includes('needs their later reply')).toBe(true)
+  expect(reopen(old, 1).text.includes('recorded before Docket tracked')).toBe(true)
   expect(reopen(old, 1, 'anything').text.includes('closed before Docket recorded when')).toBe(true)
   // Claude's close at the user's request carries out their decision.
   const asked = closeByTool(base, 1, { closure: { kind: 'user-asked', reason: 'r', cite: 'x' } }, 1)
@@ -119,6 +128,12 @@ test('refused: the user\'s own acts, typed answers, aimed picks, amended items, 
   expect(reopen(byId, 1, 'reopen #1 please').text.includes("isn't the user's own reply")).toBe(true)
   const bare = addUser(dismiss(base, 1, 5), 'yes')
   expect(reopen(bare, 1, 'yes').text.includes("isn't the user's own reply")).toBe(true)
+  // An option pick that also names the item is still a pick, not an ask to reopen.
+  const pick = addUser(dismiss(base, 1, 5), `1, ${ITEM_41}`)
+  expect(reopen(pick, 1, `1, ${ITEM_41}`).text.includes("isn't the user's own reply")).toBe(true)
+  // A close not written by close() has nothing to restore.
+  const legacy = session([item(1, { status: 'dismissed', closeSeq: 1, closedAtSeq: 0 })])
+  expect(reopen(addUser(legacy, `bring back Item 1`), 1, 'bring back Item 1').text.includes('no close Docket can undo')).toBe(true)
   // Unknown, open, no reason.
   expect(reopen(base, 9).text).toBe("#9 isn't on the Docket.")
   expect(reopen(base, 1).text).toBe('#1 is open; nothing to reopen.')
@@ -200,4 +215,31 @@ test('end to end: Claude closes as stale, reopens it, the pane shows it, Keep cl
   await ui.unmount()
   expect(await openIds($)).toEqual([])
   void w
+})
+
+test('the band names a reopen until the pane is opened', async ($, on) => {
+  world(on)
+  await start($)
+  await command($, 'add Renew the domain')
+  await call($, 'close', { id: '#1', kind: 'stale', reason: 'moved registrar' })
+  await call($, 'reopen', { id: '#1', reason: 'still on the old registrar' })
+  const band = await mountBand($, 'terminal')
+  expect(await band.find({ type: 'Text', text: '◇ 1 for you to decide or do · 1 reopened by Claude · click to show' })).toBeDefined()
+  await band.unmount()
+  await command($, '')
+  const band2 = await mountBand($, 'terminal')
+  expect(await band2.find({ type: 'Text', text: '◇ 1 for you to decide or do · click to hide' })).toBeDefined()
+  await band2.unmount()
+})
+
+test('a one-item clear reads as cleared, with a plain Reopen', async ($, on) => {
+  world(on)
+  await start($)
+  await command($, 'add Renew the domain')
+  await command($, 'clear')
+  const ui = await mountPane($, 'terminal')
+  await ui.press({ key: 'docket-show-closed' })
+  expect(await ui.find({ type: 'Text', text: '↳ cleared' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '#1 Renew the domain' })).toBeDefined()
+  await ui.unmount()
 })

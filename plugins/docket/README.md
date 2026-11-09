@@ -46,8 +46,9 @@ Requires Claude Code 2.1.317 or newer (function-hook mods).
 - **`N closed · show`** at the bottom lists recent closes, each with its #number and the reason (you, Claude, dismissed) and
   a Reopen button each. Reopen is the undo for a wrong close.
 - Since v0.8.0 Claude can reopen a wrong close too (see below). A reopened row shows `↺` by its age,
-  `↺ reopened by Claude: <reason>`, how it had been closed, and a **Keep closed** button that puts that
-  close back exactly. The band says `N reopened by Claude` until you open the panel or type a prompt.
+  `↺ reopened by Claude: <reason>`, how it had been closed, and a **Keep closed** button that records that
+  close again: your answer and who closed it as they were, listed as a new close (a cleared item comes
+  back on its own, not in its batch). The band says `N reopened by Claude` until you open the panel or type a prompt.
 - After any change to the list the digit keys pause for 1.1 s, and each press during the pause
   restarts it, so a list that just reordered cannot turn a press into the wrong dismiss.
 - Since v0.7.2 a dismiss takes two presses. The first arms the row: its ✕ reads `✕ wait…`, then

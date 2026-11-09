@@ -1484,7 +1484,8 @@ function actions($: EngineInterface): Actions {
         'keep-closed',
         (async () => {
           const now = await $.clock.now()
-          await change($, s => keepClosed(s, id, now))
+          // As Reopen does: no arm survives a change of the item's state.
+          await change($, s => keepClosed({ ...s, view: { ...s.view, armedDismiss: null } }, id, now))
           await pauseKeys($)
         })(),
       ),
