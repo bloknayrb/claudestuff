@@ -1,6 +1,6 @@
 {
   "name": "docket",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "description": "A pane listing what Claude has said in prose is yours to decide or do (not AskUserQuestion); each item drops off when you decide or act, Claude reports it done, or you dismiss it.",
   "author": { "name": "bloknayrb" },
   "repository": "https://github.com/bloknayrb/claudestuff",

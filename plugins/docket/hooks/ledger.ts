@@ -1,6 +1,6 @@
 // Pure: the item list and every change to it. Nothing here takes $.
 
-import type { Answer, ClaudeEntry, DocketSession, Item, ToolLine, UserEntry } from '../types'
+import type { Answer, ClaudeEntry, DocketSession, Item, ReopenPrior, ToolLine, UserEntry } from '../types'
 import type { CheckedResolve, Snapshot, Verdict } from './judge'
 import { optionPick, resolvePick } from './options'
 import { leadHere } from './spawn'
@@ -166,11 +166,13 @@ function prune(s: DocketSession): DocketSession {
 function close(s: DocketSession, ids: readonly number[], by: Item['by'], notes: Map<number, string>, now: number, batch?: number, extra: Partial<Item> = {}): DocketSession {
   if (ids.length === 0) return s
   const closeSeq = s.nextCloseSeq
-  const items = s.items.map(i =>
-    ids.includes(i.id) && i.status === 'open'
-      ? { ...i, ...extra, status: (by === 'you' || by === 'claude' ? 'resolved' : 'dismissed') as Item['status'], by, note: notes.get(i.id) ?? '', closedAt: now, closeSeq, ...(batch === undefined ? {} : { batch }) }
-      : i,
-  )
+  // v0.8: every close stamps the last user seq (a reply cited to reopen it must be newer) and drops
+  // Claude's reopen record: whoever closes it now replaces that account. claudeReopens stays.
+  const items = s.items.map(i => {
+    if (!ids.includes(i.id) || i.status !== 'open') return i
+    const { reopened: _re, ...rest } = i
+    return { ...rest, ...extra, status: (by === 'you' || by === 'claude' ? 'resolved' : 'dismissed') as Item['status'], by, note: notes.get(i.id) ?? '', closedAt: now, closedAtSeq: lastSeq(s), closeSeq, ...(batch === undefined ? {} : { batch }) }
+  })
   return prune({ ...s, items, nextCloseSeq: closeSeq + 1 })
 }
 
@@ -199,7 +201,10 @@ export function answerFor(s: DocketSession, e: UserEntry, item: Item): Answer {
   const words = clean(wordsOf(e), 200)
   const pick = optionPick(wordsOf(e))
   const msg = e.answered
-  const base = { words, seq: e.seq }
+  // v0.8: aimed at this item (its Reply lead, the walk focus, or it names it): Claude can't reopen it
+  // without the user's later words.
+  const aimed = e.namedId === item.id || e.focusId === item.id || names(wordsOf(e), item)
+  const base = { words, seq: e.seq, aimed }
   if (pick === undefined || msg === undefined || msg.clipped || e.midTurn === true || !isAboutOnly(s, e, item)) return base
   const option = resolvePick(pick, msg.text)
   return option === undefined ? base : { ...base, option: { key: option.key, label: clean(option.label, 80) } }
@@ -346,18 +351,57 @@ export function clearAll(s: DocketSession, now: number): DocketSession {
   return { ...close(s, ids, 'clear', new Map(), now, s.nextBatch), nextBatch: s.nextBatch + 1 }
 }
 
-const lastSeq = (s: DocketSession): number => s.nextSeq - 1
+export const lastSeq = (s: DocketSession): number => s.nextSeq - 1
+
+// The item without its close's record (v0.6: Claude's notes stay). One list for every reopen.
+function openedFields(i: Item): Item {
+  const { by: _by, note: _note, closedAt: _at, closedAtSeq: _cs, closeSeq: _seq, batch: _batch, answer: _answer, via: _via, closure: _closure, superseded: _sup, reopened: _re, ...rest } = i
+  return { ...rest, status: 'open' }
+}
 
 // Reopens every item of one close (a single item or a clear batch), stamped so the evidence that
 // closed it cannot close it again.
 export function reopen(s: DocketSession, closeSeq: number): DocketSession {
   const items = s.items.map(i => {
     if (i.status === 'open' || i.closeSeq !== closeSeq) return i
-    // v0.6: the close's record goes with it; Claude's notes stay.
-    const { by: _by, note: _note, closedAt: _at, closeSeq: _seq, batch: _batch, answer: _answer, via: _via, closure: _closure, superseded: _sup, ...rest } = i
-    return { ...rest, status: 'open' as const, reopenedAtSeq: lastSeq(s), reopenedAtTurn: s.turn }
+    return { ...openedFields(i), reopenedAtSeq: lastSeq(s), reopenedAtTurn: s.turn }
   })
   return { ...s, items }
+}
+
+// Claude's reopen tool (v0.8): one item, even from a clear batch. It runs inside the turn that
+// turn.complete will count as s.turn + 1, so that turn's own text is stamped out too. What the close
+// recorded is kept for Keep closed; `was` is how it read.
+export function reopenOne(s: DocketSession, id: number, info: { reason: string; was: string; cite?: string }, now: number, isPaneUp: boolean): DocketSession {
+  const item = s.items.find(i => i.id === id)
+  if (item === undefined || item.status === 'open' || item.by === undefined) return s
+  const prior: ReopenPrior = {
+    by: item.by,
+    ...(item.note === undefined ? {} : { note: item.note }),
+    ...(item.answer === undefined ? {} : { answer: item.answer }),
+    ...(item.via === undefined ? {} : { via: item.via }),
+    ...(item.closure === undefined ? {} : { closure: item.closure }),
+    ...(item.superseded === undefined ? {} : { superseded: item.superseded }),
+  }
+  const reopened = { reason: info.reason, was: info.was, at: now, ...(info.cite === undefined ? {} : { cite: info.cite }), seen: isPaneUp, prior }
+  const next: Item = { ...openedFields(item), reopenedAtSeq: lastSeq(s), reopenedAtTurn: s.turn + 1, claudeReopens: (item.claudeReopens ?? 0) + 1, reopened }
+  const armed = s.view.armedDismiss
+  return { ...s, items: s.items.map(i => (i.id === id ? next : i)), view: armed !== null && armed.id === id ? { ...s.view, armedDismiss: null } : s.view }
+}
+
+// The user's undo of Claude's reopen: the close Claude undid, recorded again as a new close (a fresh
+// closeSeq and closedAtSeq: a reply typed before this press can't be cited to reopen it).
+export function keepClosed(s: DocketSession, id: number, now: number): DocketSession {
+  const item = s.items.find(i => i.id === id)
+  if (item === undefined || item.status !== 'open' || item.reopened === undefined) return s
+  const p = item.reopened.prior
+  const extra: Partial<Item> = {
+    ...(p.answer === undefined ? {} : { answer: p.answer }),
+    ...(p.via === undefined ? {} : { via: p.via }),
+    ...(p.closure === undefined ? {} : { closure: p.closure }),
+    ...(p.superseded === undefined ? {} : { superseded: p.superseded }),
+  }
+  return close(s, [id], p.by, new Map([[id, p.note ?? '']]), now, undefined, extra)
 }
 
 export function addManual(s: DocketSession, text: string, now = 0): DocketSession {
@@ -440,8 +484,13 @@ export function addUser(s: DocketSession, text: string, isMidTurn = false): Dock
     pendingUser: [...s.pendingUser, entry].slice(-KEEP_USER),
     userLog: [...s.userLog, logged].slice(-KEEP_USER_LOG),
     nextSeq: s.nextSeq + 1,
+    // v0.8: a prompt typed between turns means the user has seen what Claude reopened.
+    ...(isMidTurn ? {} : { items: markReopenSeen(s.items) }),
   }
 }
+
+export const markReopenSeen = (items: readonly Item[]): Item[] =>
+  items.map(i => (i.reopened !== undefined && !i.reopened.seen ? { ...i, reopened: { ...i.reopened, seen: true } } : i))
 
 // Appends one turn's material, oldest dropped past the caps.
 export function addTurn(s: DocketSession, claude: readonly ClaudeEntry[], tools: readonly ToolLine[]): DocketSession {

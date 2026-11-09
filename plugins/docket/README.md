@@ -45,6 +45,9 @@ Requires Claude Code 2.1.317 or newer (function-hook mods).
 - Tab onto an item to see the words of Claude's it came from.
 - **`N closed · show`** at the bottom lists recent closes, each with its #number and the reason (you, Claude, dismissed) and
   a Reopen button each. Reopen is the undo for a wrong close.
+- Since v0.8.0 Claude can reopen a wrong close too (see below). A reopened row shows `↺` by its age,
+  `↺ reopened by Claude: <reason>`, how it had been closed, and a **Keep closed** button that puts that
+  close back exactly. The band says `N reopened by Claude` until you open the panel or type a prompt.
 - After any change to the list the digit keys pause for 1.1 s, and each press during the pause
   restarts it, so a list that just reordered cannot turn a press into the wrong dismiss.
 - Since v0.7.2 a dismiss takes two presses. The first arms the row: its ✕ reads `✕ wait…`, then
@@ -93,8 +96,8 @@ docket.
 
 ## Claude's corrections
 
-Claude has three tools for fixing the docket. Whatever they do is shown as Claude's, never as yours,
-and you can Reopen anything Claude closed.
+Claude has four tools for fixing the docket. Whatever they do is shown as Claude's, never as yours;
+you can Reopen anything Claude closed, and Keep closed undoes anything Claude reopened.
 
 - **`annotate`** puts a note on an item, open or closed: `Claude's note: …`.
 - **`amend`** corrects what Docket recorded for an item your reply closed. Claude has to quote your
@@ -110,6 +113,17 @@ and you can Reopen anything Claude closed.
     3-per-reply limit left the item open from, and a bare "yes" or "1" can't be cited;
   - `done-by-claude`;
   - `stale`.
+- **`reopen`** (v0.8.0) reopens a closed item, shown as `reopened by Claude: <reason>` with how it had
+  been closed. Without your words, only once per item, and only for:
+  - a close by a bare reply ("yes", "1", a plain option pick) that wasn't aimed at the item: not typed
+    through its Reply button, not the item Claude was walking you through, not naming it. That is the
+    case of a "1" meant for the item before it;
+  - Claude's own close as a duplicate, done or stale, or the judge reading Claude's text as done.
+
+  Anything else (an answer you typed out, Done, ✕, clear, a close Claude made at your request, an
+  amended item, a second reopen) needs Claude to cite your reply, typed after the close, that names
+  the item by its text or was sent through its Reply button; a bare `#4` doesn't count. The row then
+  shows that whole reply.
 
 Claude can't add items. The judge reads asks out of Claude's own words, and `/docket add` is yours.
 
@@ -225,8 +239,12 @@ they can any plugin's model call.
 - **An answer typed while Claude is still working** on the turn that asked doesn't close that ask,
   because it was written before the item existed. Claude usually reports such an answer back, which
   closes it; otherwise use Done.
-- **The judge can miss an ask or misread an answer.** Reopen undoes a wrong close; `/docket add`
-  covers a miss.
+- **The judge can miss an ask or misread an answer.** Reopen undoes a wrong close (and Claude can
+  reopen a bare-reply close it spots); `/docket add` covers a miss.
+- **Claude's reopen checks who a cited reply is from, when, and that it names the item, not what it
+  asks.** "Don't reopen X" names X. The row shows the whole reply, and Keep closed undoes it.
+- **A carry starts each item fresh**: a reopen's record and Keep closed stay in the session they
+  happened in.
 - **The panel never opens by itself.** A mod cannot see other mods' panels, so opening unasked could
   cover a Bridge decision card.
 - **The button is drawn on terminal and desktop only.** Elsewhere, use `/docket`.

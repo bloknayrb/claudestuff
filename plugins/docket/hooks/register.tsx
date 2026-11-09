@@ -7,8 +7,8 @@ import { CARRY_MAX_AGE_MS, carryEnvelope, carryText, claimers, claimText, folder
 import type { CarryFile } from './carry'
 import { buildPrompt, parseVerdict, RULES } from './judge'
 import type { Mode } from './judge'
-import { annotate, amend, closeByClaude, parseId } from './tools'
-import { addManual, addToolAsked, addTurn, addUser, applyVerdict, clearAll, closableBy, closeByTool, closedForJudge, closeGroups, consumeReply, dismiss, failReply, failWaiting, freshSession, handOff, isBlocked, isWalking, isWalkLive, judgeable, markDone, MAX_RESOLVES, normalize, openItems, present, reopen } from './ledger'
+import { annotate, amend, closeByClaude, parseId, reopenByClaude } from './tools'
+import { addManual, addToolAsked, addTurn, addUser, applyVerdict, clearAll, closableBy, closeByTool, closedForJudge, closeGroups, consumeReply, dismiss, failReply, failWaiting, freshSession, handOff, isBlocked, isWalking, isWalkLive, judgeable, keepClosed, markDone, markReopenSeen, MAX_RESOLVES, normalize, openItems, present, reopen } from './ledger'
 import { envelope, freshProc, freshWriter, isRealSid, isSafeSid, ledgerText, normProc, normWriter, parseSlot, pickSlot, restore, RETAIN_MS, slotName, tombstone, withKey, withoutKey, writeKey } from './persist'
 import { blankText, btwQuestion, contextBlock, HANDOFF_MAX_AGE_MS, isBtwText, isNonce, isRootSafe, label, launchScript, leadHere, leadNew, newNonce, parseHandoff, parseNewArgs, replyRefusal, tailAfter, takenText, waitingText, wtArgv } from './spawn'
 import { clip } from './text'
@@ -1240,6 +1240,7 @@ const LIST_SCHEMA = {
 const ANNOTATE_TOOL = 'mcp__docket__annotate'
 const AMEND_TOOL = 'mcp__docket__amend'
 const CLOSE_TOOL = 'mcp__docket__close'
+const REOPEN_TOOL = 'mcp__docket__reopen'
 const NEVER = "Never use it for an item the user skipped or hasn't answered, and never instead of asking them."
 const ID_PROP = { type: 'string', description: "The item's #id, e.g. \"#4\"." }
 const WRITE_TOOLS = [
@@ -1250,13 +1251,18 @@ const WRITE_TOOLS = [
   },
   {
     name: 'amend',
-    description: `Correct the resolution Docket recorded for an item the user's reply closed, when it's wrong: for example their "1" recorded as option 2, or a reply typed for another item. evidence is the user's own reply that really answered this item, quoted exactly (the whole reply, or at least 8 characters of it); Docket checks it against the prompts the user typed and shows their full words, your correction, and the replaced reading. If the user never answered the item, don't amend: annotate it and ask them to Reopen it in the pane. ${NEVER}`,
+    description: `Correct the resolution Docket recorded for an item the user's reply closed, when it's wrong: for example their "1" recorded as option 2, or a reply typed for another item. evidence is the user's own reply that really answered this item, quoted exactly (the whole reply, or at least 8 characters of it); Docket checks it against the prompts the user typed and shows their full words, your correction, and the replaced reading. If the user never answered the item, don't amend: reopen it (mcp__docket__reopen) and ask them. ${NEVER}`,
     inputSchema: { type: 'object', properties: { id: ID_PROP, text: { type: 'string', description: 'The corrected resolution, in your words (shown as your correction).' }, evidence: { type: 'string', description: "The user's reply, verbatim." } }, required: ['id', 'text', 'evidence'], additionalProperties: false },
   },
   {
     name: 'close',
     description: `Close an open Docket item yourself, shown as "closed by Claude: <reason>", never as the user's. kind: duplicate-of:#N (the same ask as #N); settled-earlier (cite #N, an item the user's reply already closed that settles this one); user-asked (the user asked you to close it: cite their reply verbatim; it must name the item, or be a reply whose check left it over Docket's ${MAX_RESOLVES}-per-reply limit); done-by-claude (you did the work it asks); stale (the question no longer applies). ${NEVER} The user can Reopen it in the pane.`,
     inputSchema: { type: 'object', properties: { id: ID_PROP, kind: { type: 'string', description: 'duplicate-of:#N, settled-earlier, user-asked, done-by-claude or stale.' }, reason: { type: 'string', description: 'Why, at most 200 characters.' }, cite: { type: 'string', description: "For settled-earlier: #N. For user-asked: the user's reply, verbatim." } }, required: ['id', 'kind', 'reason'], additionalProperties: false },
+  },
+  {
+    name: 'reopen',
+    description: `Reopen a closed Docket item that closed wrongly, shown as "reopened by Claude: <reason>" with how it had been closed; the user can press Keep closed to undo it. Use it when a bare reply ("1", "yes") closed an item it wasn't for, or when your own close was wrong, and ask the user about the item in the same reply. Never to re-ask something the user answered. An item the user closed themselves (a reply aimed at it, Done, ✕, clear, or one you closed at their request) needs cite: their own reply, typed after it closed, asking for it back and naming the item by its text or through its Reply button (a bare #id doesn't count). Each item can be reopened once without a cite.`,
+    inputSchema: { type: 'object', properties: { id: ID_PROP, reason: { type: 'string', description: 'Why, at most 200 characters.' }, cite: { type: 'string', description: "Only when needed: the user's reply asking for it back, verbatim." } }, required: ['id', 'reason'], additionalProperties: false },
   },
 ] as const
 
@@ -1266,12 +1272,17 @@ async function writeTool($: EngineInterface, name: string, input: Record<string,
   const now = await $.clock.now()
   const id = parseId(input.id)
   const out = await transact($, s => {
+    // Each tool by its own name: an unknown one changes nothing.
     const r =
       name === ANNOTATE_TOOL
         ? annotate(s, id, input.note, now)
         : name === AMEND_TOOL
           ? amend(s, id, input.text, input.evidence, now)
-          : closeByClaude(s, id, input.kind, input.reason, input.cite, now, (cur, n, extra) => closeByTool(cur, n, extra, now))
+          : name === CLOSE_TOOL
+            ? closeByClaude(s, id, input.kind, input.reason, input.cite, now, (cur, n, extra) => closeByTool(cur, n, extra, now))
+            : name === REOPEN_TOOL
+              ? reopenByClaude(s, id, input.reason, input.cite, s.view.isPaneUp, now)
+              : { session: s, text: 'unknown tool.' }
     return { session: r.session, out: r.text }
   })
   await pauseKeys($)
@@ -1466,6 +1477,17 @@ function actions($: EngineInterface): Actions {
           await pauseKeys($)
         })(),
       ),
+    // v0.8: the user's undo of Claude's reopen: the close it undid, recorded again.
+    keepClosed: id =>
+      void guard(
+        $,
+        'keep-closed',
+        (async () => {
+          const now = await $.clock.now()
+          await change($, s => keepClosed(s, id, now))
+          await pauseKeys($)
+        })(),
+      ),
     toggleClosed: () => void guard($, 'toggle', change($, s => ({ ...s, view: { ...s.view, showAllClosed: !s.view.showAllClosed } })).then(() => undefined)),
     toggleCarry: () =>
       void guard(
@@ -1499,6 +1521,10 @@ async function togglePane($: EngineInterface): Promise<string> {
   const shown = await readSession($)
   if (shown.carriedNotice !== null && !shown.carriedNotice.isSeen) {
     await markSession($, shown.sid, x => (x.carriedNotice === null ? x : { ...x, carriedNotice: { ...x.carriedNotice, isSeen: true } }))
+  }
+  // v0.8: the pane shows what Claude reopened, so the band stops naming it.
+  if (opened.isPlaced && shown.items.some(i => i.reopened !== undefined && !i.reopened.seen)) {
+    await markSession($, shown.sid, x => ({ ...x, items: markReopenSeen(x.items) }))
   }
   await setPaneUp($, opened.isPlaced)
   if (!opened.isPlaced) return `Docket: the pane could not be placed (${opened.reason}).`
@@ -1854,7 +1880,7 @@ export const register: Register = (on, options) => {
 
   // v0.6: Claude's corrections, one hook per tool (the matcher takes one literal name).
   const WRITE_FAILED = 'Docket could not change its list (its hook failed).'
-  for (const tool of [ANNOTATE_TOOL, AMEND_TOOL, CLOSE_TOOL] as const) {
+  for (const tool of [ANNOTATE_TOOL, AMEND_TOOL, CLOSE_TOOL, REOPEN_TOOL] as const) {
     on('tool.call', { tool }, async ($, e) => ({ result: await writeTool($, tool, e as unknown as Record<string, unknown>) })).catch(async ($, e, next) => {
       await fail($, 'tool.call', next.error.message ?? next.error.kind)
       return next.called ? next(e) : { deny: WRITE_FAILED }
