@@ -221,8 +221,8 @@ test('a digit dismisses its row; the keys pause after a change; Reopen brings it
   await turn($, w, 't1', [`${ASK} Also, run gh auth login when you can.`])
   for (const surface of SURFACES) {
     const ui = await mountPane($, surface)
-    expect((await ui.find({ key: 'dismiss-1' }))?.props.hotkey).toBe('1')
-    expect((await ui.find({ key: 'dismiss-2' }))?.props.hotkey).toBe('2')
+    expect((await ui.find({ key: 'dismiss-1' }))?.props.hotkey).toBeUndefined()
+    expect((await ui.find({ key: 'dismiss-2' }))?.props.hotkey).toBeUndefined()
     await ui.unmount()
   }
   // The verdict just changed the list: a press now only restarts the pause.
@@ -262,7 +262,7 @@ test('a dismiss takes two presses: a fast repeat, a lapsed arm or another row ne
   await ui.press({ key: 'dismiss-1' })
   expect(await open()).toEqual([1, 2])
   expect(await label(1)).toBe('✕ wait…')
-  expect((await btn(1))?.hotkey).toBe('1')
+  expect((await btn(1))?.hotkey).toBeUndefined()
   // A double-tap: too soon, it only restarts the arm.
   await w.clock.advance(300)
   await ui.press({ key: 'dismiss-1' })
@@ -409,7 +409,7 @@ test('a cleared batch names whole ids within 40 columns, then how many more', ()
   expect(batchLine(items([101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111]))).toBe('cleared 11 items: #101, #102, +9 more')
 })
 
-test('decisions are listed before actions, and the digit keys follow that order', async ($, on) => {
+test('decisions are listed before actions, each row led by its own #id', async ($, on) => {
   const w = world(on)
   await start($)
   await command($, 'add Renew the domain')
@@ -418,8 +418,11 @@ test('decisions are listed before actions, and the digit keys follow that order'
   for (const surface of SURFACES) {
     const ui = await mountPane($, surface)
     // Item 2 (a decision) comes first though it is newer; item 1 (a do) is second.
-    expect((await ui.find({ key: 'dismiss-2' }))?.props.hotkey).toBe('1')
-    expect((await ui.find({ key: 'dismiss-1' }))?.props.hotkey).toBe('2')
+    expect((await ui.find({ key: 'dismiss-2' }))?.props.hotkey).toBeUndefined()
+    expect((await ui.find({ key: 'dismiss-1' }))?.props.hotkey).toBeUndefined()
+    // v0.9: rows lead with their own #id, decision first; the pane opened by mount selects nothing.
+    const order = (await ui.findAll({ type: 'Text' })).map(t => t.text).filter(x => /^ ?›?▸?#\d+$/.test(x.trim()))
+    expect(order.map(x => x.trim())).toEqual(['#2', '#1'])
     expect(await ui.find({ type: 'Text', text: 'Decide' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: 'Do' })).toBeDefined()
     await ui.unmount()

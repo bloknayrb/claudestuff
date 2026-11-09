@@ -1,6 +1,6 @@
 import type { Elements } from 'claude-code'
 
-import type { DocketSession, Item, Reopened } from '../types'
+import type { ButtonKind, DocketSession, Item, Reopened } from '../types'
 import { folderName, wallAge } from './carry'
 import type { CloseGroup } from './ledger'
 import { isWalkLive, MAX_RESOLVES } from './ledger'
@@ -32,6 +32,25 @@ export type Els = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
 
 export type WalkKind = Item['kind']
 
+// v0.9: the pane's vim keys (Bryan: "use vim keybindings in the docket panel to move the selection
+// around"). Hotkeys are one lowercase letter (d.ts), so there is no G: g goes to the top, and a lone g on
+// the top row goes to the end.
+export type VimKey = 'j' | 'k' | 'h' | 'l' | 'g' | 'o' | 'd'
+export const VIM_KEYS: readonly { key: VimKey; label: string }[] = [
+  { key: 'j', label: '↓' },
+  { key: 'k', label: '↑' },
+  { key: 'h', label: '←' },
+  { key: 'l', label: '→' },
+  { key: 'g', label: 'top' },
+  { key: 'o', label: 'press' },
+  { key: 'd', label: '✕ (dd)' },
+]
+
+// A row's buttons in the order drawn: what h and l walk.
+export function rowKinds(item: Item, canReplyNew: boolean): ButtonKind[] {
+  return ['reply', ...(canReplyNew ? (['replynew'] as const) : []), 'btw', 'done', 'dismiss', ...(item.reopened !== undefined ? (['keep'] as const) : [])]
+}
+
 export type Actions = {
   reply: (id: number) => void
   replyNew: (id: number) => void
@@ -41,6 +60,9 @@ export type Actions = {
   done: (id: number) => void
   dismiss: (id: number) => void
   reopen: (closeSeq: number) => void
+  // v0.9: a vim key from the key row, and the button that turns the keys back on after a fill.
+  vim: (key: VimKey) => void
+  keysOn: () => void
   // v0.8: undo Claude's reopen of this item.
   keepClosed: (id: number) => void
   toggleClosed: () => void
@@ -103,18 +125,16 @@ function armOf(s: DocketSession, id: number, now: number): 'off' | 'wait' | 'rea
   // A confirm in its hold check still dismisses, even past the lapse.
   if (a.pending !== undefined) return 'ready'
   if (a.until <= now) return 'off'
-  return a.ready ? 'ready' : 'wait'
+  // v0.9: a d-armed row takes the second d at once.
+  return a.ready || a.viaD === true ? 'ready' : 'wait'
 }
 
-function row(els: Els, item: Item, n: number, turn: number, act: Actions, isFocusedItem: boolean, live: Live, isWalkItem: boolean, arm: 'off' | 'wait' | 'ready') {
+function row(els: Els, item: Item, turn: number, act: Actions, isSelected: boolean, live: Live, isWalkItem: boolean, arm: 'off' | 'wait' | 'ready') {
   const { Box, Text, Button } = els
   const { isResolving, now } = live
-  const isKeyed = n < 9
-  // The item Claude is walking the user through right now.
-  const digit = isKeyed ? String(n + 1) : '·'
-  const pos = isWalkItem ? `▸${digit}` : digit
-  const showQuote = isFocusedItem || isWalkItem
-  // Short: a plain Button draws its hotkey before the label (`1: ✕ again?`), and the row is 56 columns.
+  // v0.9: the item's own number, as Claude and the list name it; ▸ marks the walk item, › the selection.
+  const pos = `${isSelected ? '›' : ' '}${isWalkItem ? '▸' : ''}#${item.id}`
+  const showQuote = isSelected || isWalkItem
   // Until a second press would count it says wait, so a quick press doesn't look ignored.
   const armedLabel = arm === 'ready' ? '✕ again?' : '✕ wait…'
   // A carried item's age is wall-clock from when it first appeared, wherever it was raised.
@@ -134,11 +154,11 @@ function row(els: Els, item: Item, n: number, turn: number, act: Actions, isFocu
         <Button key={`btw-${item.id}`} plain label="/btw" onPress={() => act.btw(item.id)} />
         <Button key={`done-${item.id}`} plain label="Done" onPress={() => act.done(item.id)} />
         {arm !== 'off' ? (
-          <Button key={`dismiss-${item.id}`} plain label={armedLabel} {...(isKeyed ? { hotkey: String(n + 1) } : {})} onPress={() => act.dismiss(item.id)}>
+          <Button key={`dismiss-${item.id}`} plain label={armedLabel} onPress={() => act.dismiss(item.id)}>
             <Text color="warning">{armedLabel}</Text>
           </Button>
         ) : (
-          <Button key={`dismiss-${item.id}`} plain label="✕" {...(isKeyed ? { hotkey: String(n + 1) } : {})} onPress={() => act.dismiss(item.id)} />
+          <Button key={`dismiss-${item.id}`} plain label="✕" onPress={() => act.dismiss(item.id)} />
         )}
       </Box>
       {item.reopened !== undefined && reopenedLines(item.reopened).map((line, k) => (
@@ -156,12 +176,12 @@ function row(els: Els, item: Item, n: number, turn: number, act: Actions, isFocu
           <Text key={`quote-${item.id}`} dimColor>{`↳ Claude: "${clip(item.quote, 160)}"`}</Text>
         </Box>
       )}
-      {isFocusedItem && item.carriedAt !== undefined && (
+      {isSelected && item.carriedAt !== undefined && (
         <Box paddingLeft={2}>
           <Text dimColor>{`↳ from the ${dayLabel(item.firstSeenAt ?? item.carriedAt)} session`}</Text>
         </Box>
       )}
-      {isFocusedItem && item.source === 'manual' && (
+      {isSelected && item.source === 'manual' && (
         <Box paddingLeft={2}>
           <Text dimColor>↳ added by you</Text>
         </Box>
@@ -331,7 +351,7 @@ function section(els: Els, title: string, kind: WalkKind, items: readonly Item[]
   return (
     <Box key={`section-${groupKey}-${title}`} flexDirection="column" marginTop={1}>
       <Text bold color="warning">{title}</Text>
-      {items.map((item, i) => row(els, item, offset + i, s.turn, act, s.view.focusedId === item.id, live, walking && s.walkFocus?.id === item.id, armOf(s, item.id, live.now)))}
+      {items.map(item => row(els, item, s.turn, act, s.view.selected?.id === item.id, live, walking && s.walkFocus?.id === item.id, armOf(s, item.id, live.now)))}
       {walkTotal !== null && !walking && (
         <Button key={`docket-walk-${kind}`} plain label={walkLabel(kind, walkTotal)} onPress={() => act.walk(kind)} />
       )}
@@ -367,6 +387,10 @@ export function paneTree(els: Els, s: DocketSession, open: readonly Item[], grou
   const { Box, Text, Button } = els
   const grouped = originGroups(open, s.sid, live.now)
   const list = grouped.flatMap(g => [...g.decide, ...g.doItems])
+  // v0.9: the › row: the selected item, or, once it closed, the row now at its index (where j/k go from).
+  const sel = s.view.selected
+  const markedId = sel === null || list.length === 0 ? null : list.some(i => i.id === sel.id) ? sel.id : (list[Math.min(Math.max(s.view.selectedIdx, 0), list.length - 1)] as Item).id
+  const drawn: DocketSession = markedId === null || sel === null ? s : { ...s, view: { ...s.view, selected: { id: markedId, kind: sel.kind } } }
   let offset = 0
   const decideTotal = grouped.reduce((n, g) => n + g.decide.length, 0)
   const doTotal = grouped.reduce((n, g) => n + g.doItems.length, 0)
@@ -378,19 +402,31 @@ export function paneTree(els: Els, s: DocketSession, open: readonly Item[], grou
     return (
       <Box key={`group-${g.key}`} flexDirection="column" marginTop={g.label === null ? 0 : 1}>
         {g.label !== null && <Text bold>{g.label}</Text>}
-        {section(els, 'Decide', 'decide', g.decide, start, s, live, act, g.key, g.key === firstDecide ? decideTotal : null)}
-        {section(els, 'Do', 'do', g.doItems, start + g.decide.length, s, live, act, g.key, g.key === firstDo ? doTotal : null)}
+        {section(els, 'Decide', 'decide', g.decide, start, drawn, live, act, g.key, g.key === firstDecide ? decideTotal : null)}
+        {section(els, 'Do', 'do', g.doItems, start + g.decide.length, drawn, live, act, g.key, g.key === firstDo ? doTotal : null)}
       </Box>
     )
   })
   const isPaused = s.view.keysPausedUntil !== null
-  const keys = !live.isFocused
-    ? 'ctrl+x tab gives this pane the keys'
-    : isPaused
-      ? 'keys paused a moment: the list changed'
-      : list.length > 0
-        ? `${list.length === 1 ? '1' : `1-${Math.min(9, list.length)}`} dismiss, then again to confirm · Tab moves`
-        : ''
+  // v0.9: the key row. Its hotkey Buttons are the vim keys, drawn only while the pane has the keys and no
+  // fill left them there; the pause notice sits beside them, never instead (movement is never paused).
+  const keyRow = list.length === 0 ? null : !live.isFocused ? (
+    <Text key="docket-keys-hint" dimColor>ctrl+x tab for keys: j/k move, dd dismiss</Text>
+  ) : s.view.keysOff ? (
+    <Box key="docket-keys-off" flexDirection="row" gap={2}>
+      <Text dimColor>Esc to type your reply</Text>
+      <Button key="docket-keys-on" plain label="keys" onPress={() => act.keysOn()} />
+    </Box>
+  ) : (
+    <Box key="docket-keys" flexDirection="column">
+      <Box flexDirection="row" gap={2}>
+        {VIM_KEYS.map(k => (
+          <Button key={`vim-${k.key}`} plain hotkey={k.key} label={k.label} onPress={() => act.vim(k.key)} />
+        ))}
+      </Box>
+      {isPaused && <Text dimColor>d and o paused a moment: the list changed</Text>}
+    </Box>
+  )
   // The footer only speaks when there is something to know.
   const footer = !s.lastCheck.ok ? `last check failed: ${s.lastCheck.reason}` : live.isChecking ? 'checking…' : (overCapLine(s, true) ?? '')
   const byClaude = groups.filter(g => g.items[0]?.by === 'claude-tool').length
@@ -401,7 +437,7 @@ export function paneTree(els: Els, s: DocketSession, open: readonly Item[], grou
       ) : (
         <Text key="docket-count" bold>{`${list.length} for you to decide or do${isWalkLive(s) ? ' · walking with Claude' : ''}`}</Text>
       )}
-      {keys !== '' && <Text dimColor>{keys}</Text>}
+      {keyRow}
       {body}
       {groups.length > 0 && (
         <Box key="docket-closed" flexDirection="column" marginTop={1}>

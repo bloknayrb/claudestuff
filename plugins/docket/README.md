@@ -26,7 +26,8 @@ Requires Claude Code 2.1.317 or newer (function-hook mods).
   this conversation's docket and turns carry off (see Files).
 - **Your docket survives quitting.** Come back with `claude --resume`, `--continue` or `/resume` and
   the list is as you left it.
-- **The panel** lists open items under **Decide** and **Do**, each with its age in turns (`now`,
+- **The panel** lists open items under **Decide** and **Do**, each led by its own `#number` (the order
+  Docket first saw it, the number Claude uses) and with its age in turns (`now`,
   `2t`). Once items have been carried in, it groups them by the session they were first raised in:
   **This session** first, then `From Nov 1 session (↪ 2d)` and so on, newest first, each with its own
   Decide and Do. Each item has these buttons:
@@ -40,17 +41,33 @@ Requires Claude Code 2.1.317 or newer (function-hook mods).
     answers on the side, even mid-turn, and the answer neither enters the conversation nor closes the
     item. It needs an empty box, or that item's own Reply lead with nothing typed after it.
   - **Done** closes it as handled by you, for things you did outside the chat.
-  - **✕** dismisses it, after a second press to confirm. The digit keys `1`-`9` do the same, in the
-    order shown, while the panel has the keys (`ctrl+x tab`).
-- Tab onto an item to see the words of Claude's it came from.
+  - **✕** dismisses it, after a second press to confirm.
+- **Vim keys** (v0.9.0). `ctrl+x tab` gives the panel the keys, and a key row at the top shows them:
+  - `j` / `k` move the selection (`›` before the `#number`) down and up; `h` / `l` move between the
+    selected row's buttons.
+  - `g` goes to the top row; `gg` stays there; a lone `g` on the top row goes to the bottom. (Keys are
+    lowercase only, so there is no `G`.)
+  - `o` presses the selected button; Enter presses the one the focus ring is on. Tab moves the ring, and
+    the selection with it where the engine reports the move.
+  - When the selected item closes, `›` moves to the row that took its place; `o` and `d` then only land
+    there, so they never act on a row that just moved under the marker.
+  - `dd` dismisses the selected item: the first `d` arms it (`✕ again?`), the second confirms, at any
+    speed. A held `d` never confirms. ✕ pressed with `o`, Enter or the mouse keeps the 0.5 s rule below.
+    After a dismiss, `d` and `o` pause for 1.1 s (the list just changed), so a quick `dd j dd` dismisses
+    only the first; the second `dd` needs the pause to pass.
+  - After Reply here, Reply new or /btw fills your prompt box, the letter keys switch off (`Esc to type
+    your reply`) so your reply can't fire them. They come back when you send it, press `keys`, or the
+    panel loses the keys.
+  - The selected item shows the words of Claude's it came from. Pressing any button on a row selects it.
+- The digit keys `1`-`9` are gone (v0.9.0).
 - **`N closed · show`** at the bottom lists recent closes, each with its #number and the reason (you, Claude, dismissed) and
   a Reopen button each. Reopen is the undo for a wrong close.
 - Since v0.8.0 Claude can reopen a wrong close too (see below). A reopened row shows `↺` by its age,
   `↺ reopened by Claude: <reason>`, how it had been closed, and a **Keep closed** button that records that
   close again: your answer and who closed it as they were, listed as a new close (a cleared item comes
   back on its own, not in its batch). The band says `N reopened by Claude` until you open the panel or type a prompt.
-- After any change to the list the digit keys pause for 1.1 s, and each press during the pause
-  restarts it, so a list that just reordered cannot turn a press into the wrong dismiss.
+- After any change to the list `d`, `o` and ✕ pause for 1.1 s (movement doesn't), and each press during
+  the pause restarts it, so a list that just reordered cannot turn a press into the wrong dismiss.
 - Since v0.7.2 a dismiss takes two presses. The first arms the row: its ✕ reads `✕ wait…`, then
   `✕ again?` once a second press of the same key would count (0.5 s to 5 s later, since v0.8.1) and
   dismiss it. A quicker repeat only restarts the arm, another row's key moves it, and after 5 s it

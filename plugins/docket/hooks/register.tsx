@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { CarrySource, ClearCapture, DocketProc, DocketSession, DocketWriter, Item, PendingWrite, WriteKind } from '../types'
+import type { ButtonKind, CarrySource, ClearCapture, DocketProc, DocketSession, DocketWriter, Item, PendingWrite, WriteKind } from '../types'
 import { bashInput, material, turnSlice } from './capture'
 import { CARRY_MAX_AGE_MS, carryEnvelope, carryText, claimers, claimText, folderName, MAX_HOPS, normRoot, parseCarry, pickCarry, rootKey, takeInto } from './carry'
 import type { CarryFile } from './carry'
@@ -12,7 +12,8 @@ import { addManual, addToolAsked, addTurn, addUser, applyVerdict, clearAll, clos
 import { envelope, freshProc, freshWriter, isRealSid, isSafeSid, ledgerText, normProc, normWriter, parseSlot, pickSlot, restore, RETAIN_MS, slotName, tombstone, withKey, withoutKey, writeKey } from './persist'
 import { blankText, btwQuestion, contextBlock, HANDOFF_MAX_AGE_MS, isBtwText, isNonce, isRootSafe, label, launchScript, leadHere, leadNew, newNonce, parseHandoff, parseNewArgs, replyRefusal, tailAfter, takenText, waitingText, wtArgv } from './spawn'
 import { clip } from './text'
-import { ARM_DELAY_MS, CONFIRM_GAP_MS, CONFIRM_MS, HOLD_CHECK_MS, indicatorText, indicatorTree, listText, overCapLine, PANE_COLUMNS, PANE_ID, PANE_TITLE, paneTree } from './ui'
+import type { VimKey } from './ui'
+import { ARM_DELAY_MS, CONFIRM_GAP_MS, CONFIRM_MS, displayOrder, HOLD_CHECK_MS, indicatorText, rowKinds, indicatorTree, listText, overCapLine, PANE_COLUMNS, PANE_ID, PANE_TITLE, paneTree } from './ui'
 import type { Actions, WalkKind } from './ui'
 
 const MODELS = ['haiku', 'sonnet', 'opus'] as const
@@ -1048,23 +1049,24 @@ async function checkReplyNew($: EngineInterface): Promise<void> {
 
 // Reply new: "/docket new #<id> (<label>) — " in an empty box, or in place of this item's own Reply
 // here lead (its typed tail kept). Anything else in the box stays: the command has to start it.
-async function replyNewTo($: EngineInterface, id: number): Promise<void> {
+async function replyNewTo($: EngineInterface, id: number): Promise<boolean> {
   const item = (await readSession($)).items.find(i => i.id === id && i.status === 'open')
-  if (item === undefined) return
+  if (item === undefined) return false
   const lead = leadNew(item)
   const box = await $.prompt.read()
   const tail = box.text.trim() === '' ? '' : (tailAfter(box.text, leadHere(item)) ?? tailAfter(box.text, lead))
   // A tail holding another item's reply ("Re: A — yes\nRe: B — no") would carry B's answer away too.
   if (tail === undefined || tail.includes('\nRe: ')) {
     $.ui.toast('Docket: Reply new needs an empty box; send or clear your draft first.')
-    return
+    return false
   }
   const filled = await $.prompt.fill({ text: `${lead}${tail}` })
   if (!filled.isFilled) {
     $.ui.toast(NOT_TAKING)
-    return
+    return false
   }
   $.ui.toast('Docket: type your reply after the dash; Enter opens it in a new window.')
+  return true
 }
 
 // /docket new: every check first, then the handoff file, then the close, then the launch.
@@ -1391,9 +1393,9 @@ async function listAnswer($: EngineInterface, rawPresenting: unknown, isMain: bo
 
 // Puts "Re: <item> — " in the prompt box, after any draft already there, so the reply names the item.
 // The box holding this item's Reply new lead instead: swapped, the typed tail kept.
-async function replyTo($: EngineInterface, id: number): Promise<void> {
+async function replyTo($: EngineInterface, id: number): Promise<boolean> {
   const item = (await readSession($)).items.find(i => i.id === id && i.status === 'open')
-  if (item === undefined) return
+  if (item === undefined) return false
   // The new conversation knows nothing of a carried item: the reply brings Claude's words with it.
   const lead = leadHere(item)
   const box = await $.prompt.read()
@@ -1403,7 +1405,7 @@ async function replyTo($: EngineInterface, id: number): Promise<void> {
   // would send the reply as a side question that never closes the item.
   if (!isOwnBtw && isBtwText(box.text)) {
     $.ui.toast('Docket: the box holds a /btw question; send or clear it first.')
-    return
+    return false
   }
   const swapped = isOwnBtw ? '' : tailAfter(box.text, leadNew(item))
   const filled =
@@ -1413,36 +1415,214 @@ async function replyTo($: EngineInterface, id: number): Promise<void> {
         ? await $.prompt.fill({ text: lead })
         : await $.prompt.fill({ text: `\n${lead}`, mode: 'append' })
   if (!filled.isFilled) $.ui.toast(NOT_TAKING)
+  return filled.isFilled
 }
 
 // Puts "/btw <what is this item?>" in the prompt box; he presses Enter. A plugin can't run the command
 // itself: a plugin's prompt is never a slash command, and it waits for the turn to end, which /btw exists
 // not to do. /btw has to start the box, so only an empty box, this item's own lead with nothing typed
 // after it, or this item's question already is replaced; any other draft stays and the press toasts.
-async function btwTo($: EngineInterface, id: number): Promise<void> {
+async function btwTo($: EngineInterface, id: number): Promise<boolean> {
   const item = (await readSession($)).items.find(i => i.id === id && i.status === 'open')
-  if (item === undefined) return
+  if (item === undefined) return false
   const question = btwQuestion(item)
   const box = (await $.prompt.read()).text
   const isOurs = (lead: string) => tailAfter(box, lead)?.trim() === ''
   if (box.trim() !== '' && box.trim() !== question && !isOurs(leadHere(item)) && !isOurs(leadNew(item))) {
     $.ui.toast('Docket: /btw needs an empty box; send or clear your draft first.')
-    return
+    return false
   }
   const filled = await $.prompt.fill({ text: question })
   if (!filled.isFilled) {
     $.ui.toast(NOT_TAKING)
-    return
+    return false
   }
   // The press leaves the keys in the pane, where Enter would press /btw again: Esc gives them back.
   $.ui.toast('Docket: press Esc, then Enter to ask; the answer leaves the item open.')
+  return true
+}
+
+// v0.9: a fill leaves the keys in the pane, so the letter keys go off until the next prompt, the keys
+// button, or the pane losing the keys: a reply typed before Esc can't fire o or d.
+async function fillThen($: EngineInterface, id: number, kind: ButtonKind, fill: Promise<boolean>): Promise<void> {
+  await select($, id, kind)
+  if (await fill) await change($, s => ({ ...s, view: { ...s.view, keysOff: true } }))
+}
+
+// The selection follows any press on a row, so the › marker shows what dd and o act on.
+async function select($: EngineInterface, id: number, kind: ButtonKind): Promise<void> {
+  const now = await $.clock.now()
+  await change($, s => {
+    const idx = displayOrder(openItems(s), s.sid, now).findIndex(i => i.id === id)
+    if (idx < 0) return s
+    return s.view.selected?.id === id && s.view.selected.kind === kind && s.view.selectedIdx === idx ? s : { ...s, view: { ...s.view, selected: { id, kind }, selectedIdx: idx } }
+  })
+}
+
+let keysOnQueued = false
+// v0.9: vim keys run one after another, so "jo" presses on the row j moved to.
+let vimQueue: Promise<unknown> = Promise.resolve()
+
+// When the last g came (gg keeps the top; a lone g on the top row goes to the end).
+let lastG = 0
+const GG_MS = 500
+
+// One vim key. The selection is resolved against the list as it is now: an item that closed hands it to
+// whatever sits at its old index.
+async function vimKey($: EngineInterface, key: VimKey): Promise<void> {
+  const now = await $.clock.now()
+  const s = await readSession($)
+  const list = displayOrder(openItems(s), s.sid, now)
+  if (list.length === 0) return
+  const canNew = (await readProc($)).canReplyNew
+  const cur = s.view.selected
+  const kindsAt = (i: number) => rowKinds(list[i] as Item, canNew)
+  // No selection (a fresh pane, a resume): any key only lands on the top row.
+  if (cur === null) return moveTo($, (list[0] as Item).id, 0, 'reply')
+  let idx = list.findIndex(i => i.id === cur.id)
+  // The selected item closed: the row now at its index is the selection, as the pane draws it.
+  const isLost = idx < 0
+  if (isLost) idx = Math.min(Math.max(s.view.selectedIdx, 0), list.length - 1)
+  let kind: ButtonKind = isLost ? 'reply' : cur.kind
+  if (!kindsAt(idx).includes(kind)) kind = 'reply'
+  if (key === 'o' || key === 'd') {
+    const item = list[idx] as Item
+    // On a lost selection o and d only land: the item they would act on just moved under the marker.
+    if (isLost) return moveTo($, item.id, idx, kind)
+    if (key === 'd') return dismissByD($, item.id)
+    if (await isDebounced($, item.id)) return
+    // Awaited, so the next key in the queue sees what this press did (a fill's keysOff, a close).
+    const id = item.id
+    const press =
+      kind === 'reply' ? fillThen($, id, 'reply', replyTo($, id))
+      : kind === 'replynew' ? fillThen($, id, 'replynew', replyNewTo($, id))
+      : kind === 'btw' ? fillThen($, id, 'btw', btwTo($, id))
+      : kind === 'done' ? donePress($, id)
+      : kind === 'dismiss' ? dismissPress($, id)
+      : keepClosedPress($, id)
+    await guard($, 'press', press)
+    return
+  }
+  let next = idx
+  if (key === 'j') next = Math.min(idx + 1, list.length - 1)
+  else if (key === 'k') next = Math.max(idx - 1, 0)
+  else if (key === 'g') {
+    const isGg = now - lastG < GG_MS
+    lastG = now
+    next = !isGg && idx === 0 && !isLost ? list.length - 1 : 0
+  } else {
+    const kinds = kindsAt(idx)
+    const at = Math.max(kinds.indexOf(kind), 0)
+    kind = kinds[key === 'l' ? Math.min(at + 1, kinds.length - 1) : Math.max(at - 1, 0)] as ButtonKind
+  }
+  if (!kindsAt(next).includes(kind)) kind = 'reply'
+  await moveTo($, (list[next] as Item).id, next, kind)
+}
+
+async function moveTo($: EngineInterface, id: number, idx: number, kind: ButtonKind): Promise<void> {
+  await change($, s => ({ ...s, view: { ...s.view, selected: { id, kind }, selectedIdx: idx } }))
+  // Outside ui.render. A refusal (the pane lost the keys) leaves the marker, which the next key re-focuses.
+  await $.ui.focus({ requestId: PANE_ID, key: `${kind}-${id}` })
+}
+
+// dd (v0.9): a second d on an armed row confirms at any speed, still behind the hold check. A held d
+// streams repeats: a d during the check marks the arm held, and while held a d under HOLD_CHECK_MS after
+// the last one is the key still down. After release, a fresh dd works again.
+async function dismissByD($: EngineInterface, id: number): Promise<void> {
+  if (await isDebounced($, id)) return
+  const now = await $.clock.now()
+  const step = await transact<{ pending: number } | { until: number } | 'held' | 'settled' | 'gone'>($, s => {
+    const a = s.view.armedDismiss
+    // Another row's confirm in its hold check: that key was released, so its dismiss stands now, and
+    // this press is swallowed by the pause that follows, as with ✕.
+    if (a !== null && a.pending !== undefined && a.id !== id) {
+      const cleared = { ...s, view: { ...s.view, armedDismiss: null } }
+      const isOpen = s.items.some(i => i.id === a.id && i.status === 'open')
+      return { session: isOpen ? dismiss(cleared, a.id, now) : cleared, out: isOpen ? ('settled' as const) : ('gone' as const) }
+    }
+    const fresh = { id, at: now, until: now + CONFIRM_MS, ready: true, viaD: true as const, lastD: now }
+    const put = (armedDismiss: NonNullable<typeof a>) => ({ ...s, view: { ...s.view, armedDismiss } })
+    if (a !== null && a.id === id) {
+      if (a.pending !== undefined) return { session: put({ ...fresh, held: true }), out: { until: fresh.until } }
+      if (a.held === true) {
+        if (now - (a.lastD ?? 0) < HOLD_CHECK_MS) return { session: put({ ...a, lastD: now }), out: 'held' as const }
+        return { session: put(fresh), out: { until: fresh.until } }
+      }
+      if (now < a.until) return { session: put({ ...a, pending: now, lastD: now }), out: { pending: now } }
+    }
+    return { session: put(fresh), out: { until: fresh.until } }
+  })
+  if (step === 'held' || step === 'gone') return
+  if (step === 'settled') return pauseKeys($)
+  if ('pending' in step) {
+    $.clock.after(HOLD_CHECK_MS, () => void guard($, 'dismiss', confirmDismiss($, id, step.pending)))
+    return
+  }
+  $.clock.after(CONFIRM_MS, () => void guard($, 'disarm', disarm($, step.until)))
+}
+
+// v0.9: the row presses as functions, so `o` can wait for one before the next vim key runs.
+async function donePress($: EngineInterface, id: number): Promise<void> {
+  const now = await $.clock.now()
+  await select($, id, 'done')
+  await change($, s => markDone(s, id, now))
+  await pauseKeys($)
+}
+
+async function dismissPress($: EngineInterface, id: number): Promise<void> {
+  if (await isDebounced($, id)) return
+  await select($, id, 'dismiss')
+  const now = await $.clock.now()
+  // A second press of the same item, after the gap and before the arm lapses, confirms once no
+  // further press follows within HOLD_CHECK_MS; a press while one is pending is a held key, and
+  // anything else (re)arms this item. The armed state is changed in one transaction.
+  const step = await transact<{ pending: number } | { until: number } | 'settled' | 'gone'>($, s => {
+    const a = s.view.armedDismiss
+    // Another row's key during a confirm's hold check: the first key was released, so that
+    // dismiss stands now, and this press is swallowed as the pause after a change would.
+    if (a !== null && a.pending !== undefined && a.id !== id) {
+      const cleared = { ...s, view: { ...s.view, armedDismiss: null } }
+      const isOpen = s.items.some(i => i.id === a.id && i.status === 'open')
+      return { session: isOpen ? dismiss(cleared, a.id, now) : cleared, out: isOpen ? ('settled' as const) : ('gone' as const) }
+    }
+    if (a !== null && a.id === id && a.pending === undefined && now - a.at >= CONFIRM_GAP_MS && now < a.until) {
+      return { session: { ...s, view: { ...s.view, armedDismiss: { ...a, pending: now } } }, out: { pending: now } }
+    }
+    const armed = { id, at: now, until: now + CONFIRM_MS, ready: false }
+    return { session: { ...s, view: { ...s.view, armedDismiss: armed } }, out: { until: armed.until } }
+  })
+  if (step === 'settled') {
+    await pauseKeys($)
+    return
+  }
+  // The pending item closed meanwhile: nothing changed, so this press is simply dropped.
+  if (step === 'gone') return
+  if ('pending' in step) {
+    $.clock.after(HOLD_CHECK_MS, () => void guard($, 'dismiss', confirmDismiss($, id, step.pending)))
+    return
+  }
+  // The row invites the second press only once one would count, then the arm lapses.
+  $.clock.after(CONFIRM_GAP_MS, () => void guard($, 'arm', readyArm($, step.until)))
+  $.clock.after(CONFIRM_MS, () => void guard($, 'disarm', disarm($, step.until)))
+}
+
+async function keepClosedPress($: EngineInterface, id: number): Promise<void> {
+  await select($, id, 'keep')
+  const now = await $.clock.now()
+  // As Reopen does: no arm survives a change of the item's state.
+  await change($, s => keepClosed({ ...s, view: { ...s.view, armedDismiss: null } }, id, now))
+  await pauseKeys($)
 }
 
 function actions($: EngineInterface): Actions {
   return {
-    reply: id => void guard($, 'reply', replyTo($, id)),
-    replyNew: id => void guard($, 'reply', replyNewTo($, id)),
-    btw: id => void guard($, 'btw', btwTo($, id)),
+    reply: id => void guard($, 'reply', fillThen($, id, 'reply', replyTo($, id))),
+    replyNew: id => void guard($, 'reply', fillThen($, id, 'replynew', replyNewTo($, id))),
+    btw: id => void guard($, 'btw', fillThen($, id, 'btw', btwTo($, id))),
+    vim: key => {
+      vimQueue = vimQueue.then(() => guard($, 'vim', vimKey($, key)))
+    },
+    keysOn: () => void guard($, 'keys', change($, s => ({ ...s, view: { ...s.view, keysOff: false } })).then(() => undefined)),
     walk: kind =>
       void guard(
         $,
@@ -1452,56 +1632,8 @@ function actions($: EngineInterface): Actions {
           if (!line.startsWith('Docket: asking')) $.ui.toast(line)
         }),
       ),
-    done: id =>
-      void guard(
-        $,
-        'done',
-        (async () => {
-          const now = await $.clock.now()
-          await change($, s => markDone(s, id, now))
-          await pauseKeys($)
-        })(),
-      ),
-    dismiss: id =>
-      void guard(
-        $,
-        'dismiss',
-        (async () => {
-          if (await isDebounced($, id)) return
-          const now = await $.clock.now()
-          // A second press of the same item, after the gap and before the arm lapses, confirms once no
-          // further press follows within HOLD_CHECK_MS; a press while one is pending is a held key, and
-          // anything else (re)arms this item. The armed state is changed in one transaction.
-          const step = await transact<{ pending: number } | { until: number } | 'settled' | 'gone'>($, s => {
-            const a = s.view.armedDismiss
-            // Another row's key during a confirm's hold check: the first key was released, so that
-            // dismiss stands now, and this press is swallowed as the pause after a change would.
-            if (a !== null && a.pending !== undefined && a.id !== id) {
-              const cleared = { ...s, view: { ...s.view, armedDismiss: null } }
-              const isOpen = s.items.some(i => i.id === a.id && i.status === 'open')
-              return { session: isOpen ? dismiss(cleared, a.id, now) : cleared, out: isOpen ? ('settled' as const) : ('gone' as const) }
-            }
-            if (a !== null && a.id === id && a.pending === undefined && now - a.at >= CONFIRM_GAP_MS && now < a.until) {
-              return { session: { ...s, view: { ...s.view, armedDismiss: { ...a, pending: now } } }, out: { pending: now } }
-            }
-            const armed = { id, at: now, until: now + CONFIRM_MS, ready: false }
-            return { session: { ...s, view: { ...s.view, armedDismiss: armed } }, out: { until: armed.until } }
-          })
-          if (step === 'settled') {
-            await pauseKeys($)
-            return
-          }
-          // The pending item closed meanwhile: nothing changed, so this press is simply dropped.
-          if (step === 'gone') return
-          if ('pending' in step) {
-            $.clock.after(HOLD_CHECK_MS, () => void guard($, 'dismiss', confirmDismiss($, id, step.pending)))
-            return
-          }
-          // The row invites the second press only once one would count, then the arm lapses.
-          $.clock.after(CONFIRM_GAP_MS, () => void guard($, 'arm', readyArm($, step.until)))
-          $.clock.after(CONFIRM_MS, () => void guard($, 'disarm', disarm($, step.until)))
-        })(),
-      ),
+    done: id => void guard($, 'done', donePress($, id)),
+    dismiss: id => void guard($, 'dismiss', dismissPress($, id)),
     reopen: closeSeq =>
       void guard(
         $,
@@ -1513,17 +1645,7 @@ function actions($: EngineInterface): Actions {
         })(),
       ),
     // v0.8: the user's undo of Claude's reopen: the close it undid, recorded again.
-    keepClosed: id =>
-      void guard(
-        $,
-        'keep-closed',
-        (async () => {
-          const now = await $.clock.now()
-          // As Reopen does: no arm survives a change of the item's state.
-          await change($, s => keepClosed({ ...s, view: { ...s.view, armedDismiss: null } }, id, now))
-          await pauseKeys($)
-        })(),
-      ),
+    keepClosed: id => void guard($, 'keep-closed', keepClosedPress($, id)),
     toggleClosed: () => void guard($, 'toggle', change($, s => ({ ...s, view: { ...s.view, showAllClosed: !s.view.showAllClosed } })).then(() => undefined)),
     toggleCarry: () =>
       void guard(
@@ -1564,8 +1686,13 @@ async function togglePane($: EngineInterface): Promise<string> {
   }
   await setPaneUp($, opened.isPlaced)
   if (!opened.isPlaced) return `Docket: the pane could not be placed (${opened.reason}).`
+  const at = await $.clock.now()
+  await change($, s => {
+    const first = displayOrder(openItems(s), s.sid, at)[0]
+    return s.view.selected !== null || first === undefined ? s : { ...s, view: { ...s.view, selected: { id: first.id, kind: 'reply' }, selectedIdx: 0 } }
+  })
   const count = openItems(await readSession($)).length
-  return count === 0 ? 'Docket: nothing waiting on you.' : `Docket: ${count} open. A digit dismisses, then again to confirm; Reopen undoes.`
+  return count === 0 ? 'Docket: nothing waiting on you.' : `Docket: ${count} open. ctrl+x tab for keys: j/k move, dd dismisses; Reopen undoes.`
 }
 
 export const register: Register = (on, options) => {
@@ -1615,7 +1742,7 @@ export const register: Register = (on, options) => {
       // it. The indicator lives above the prompt now.
       $.ui.status(undefined)
       const isUp = (await $.ui.panes()).some(p => p.id === PANE_ID)
-      await change($, cur => ({ ...cur, view: { ...cur.view, keysPausedUntil: null, armedDismiss: null, isPaneUp: isUp } }))
+      await change($, cur => ({ ...cur, view: { ...cur.view, keysPausedUntil: null, armedDismiss: null, isPaneUp: isUp, selected: null, keysOff: false } }))
     } catch (err) {
       await fail($, 'session.start', err)
     }
@@ -1720,6 +1847,7 @@ export const register: Register = (on, options) => {
   on('prompt.submit', async ($, e, next) => {
     try {
       await lazyRehome($)
+      if ((await readSession($)).view.keysOff) await change($, s => ({ ...s, view: { ...s.view, keysOff: false } }))
       // Items carried in: said once, at the first prompt after the take (or this one, if its own
       // landing just took them).
       const n0 = (await readSession($)).carriedNotice
@@ -1821,6 +1949,12 @@ export const register: Register = (on, options) => {
     try {
       const s = await readSession($)
       const live = { isChecking: inFlight, isResolving, isFocused: e.props.isFocused, now: await $.clock.now(), canReplyNew: (await readProc($)).canReplyNew }
+      // v0.9: once the pane has lost the keys after a fill, the letter keys come back (scheduled, never
+      // written from inside the drawing).
+      if (s.view.keysOff && e.surface === 'terminal' && !e.props.isFocused && !keysOnQueued) {
+        keysOnQueued = true
+        $.clock.after(0, () => void guard($, 'keys', change($, x => ({ ...x, view: { ...x.view, keysOff: false } })).then(() => undefined).finally(() => { keysOnQueued = false })))
+      }
       return paneTree($.ui.resolve(e), s, openItems(s), closeGroups(s), live, actions($))
     } catch (err) {
       void fail($, 'pane', err)
@@ -1852,9 +1986,8 @@ export const register: Register = (on, options) => {
     const r = await next(e)
     if (e.component !== 'Pane' || e.requestId !== PANE_ID) return r
     try {
-      const m = /^(?:reply|replynew|btw|done|dismiss)-(\d+)$/.exec(e.element ?? '')
-      const focusedId = m?.[1] === undefined ? null : Number(m[1])
-      await change($, s => (s.view.focusedId === focusedId ? s : { ...s, view: { ...s.view, focusedId } }))
+      const m = /^(reply|replynew|btw|done|dismiss|keep)-(\d+)$/.exec(e.element ?? '')
+      if (m?.[1] !== undefined && m[2] !== undefined) await select($, Number(m[2]), m[1] as ButtonKind)
     } catch (err) {
       await fail($, 'ui.focus', err)
     }
