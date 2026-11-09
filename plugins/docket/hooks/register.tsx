@@ -1444,9 +1444,9 @@ async function btwTo($: EngineInterface, id: number): Promise<boolean> {
 
 // v0.9: a fill leaves the keys in the pane, so the letter keys go off until the next prompt, the keys
 // button, or the pane losing the keys: a reply typed before Esc can't fire o or d.
-async function fillThen($: EngineInterface, id: number, kind: ButtonKind, fill: Promise<boolean>): Promise<void> {
+async function fillThen($: EngineInterface, id: number, kind: ButtonKind, fill: () => Promise<boolean>): Promise<void> {
   await select($, id, kind)
-  if (await fill) await change($, s => ({ ...s, view: { ...s.view, keysOff: true } }))
+  if (await fill()) await change($, s => ({ ...s, view: { ...s.view, keysOff: true } }))
 }
 
 // The selection follows any press on a row, so the › marker shows what dd and o act on.
@@ -1494,9 +1494,9 @@ async function vimKey($: EngineInterface, key: VimKey): Promise<void> {
     // Awaited, so the next key in the queue sees what this press did (a fill's keysOff, a close).
     const id = item.id
     const press =
-      kind === 'reply' ? fillThen($, id, 'reply', replyTo($, id))
-      : kind === 'replynew' ? fillThen($, id, 'replynew', replyNewTo($, id))
-      : kind === 'btw' ? fillThen($, id, 'btw', btwTo($, id))
+      kind === 'reply' ? fillThen($, id, 'reply', () => replyTo($, id))
+      : kind === 'replynew' ? fillThen($, id, 'replynew', () => replyNewTo($, id))
+      : kind === 'btw' ? fillThen($, id, 'btw', () => btwTo($, id))
       : kind === 'done' ? donePress($, id)
       : kind === 'dismiss' ? dismissPress($, id)
       : keepClosedPress($, id)
@@ -1525,21 +1525,30 @@ async function moveTo($: EngineInterface, id: number, idx: number, kind: ButtonK
   await $.ui.focus({ requestId: PANE_ID, key: `${kind}-${id}` })
 }
 
+// What a dismiss press did: started a hold check, (re)armed, held, or settled another row's confirm
+// ('gone' when that row had closed meanwhile).
+type DismissStep = { pending: number } | { until: number } | 'held' | 'settled' | 'gone'
+
+// Another row's confirm in its hold check when this press came: that key was released, so its dismiss
+// stands now, and this press is swallowed by the pause that follows. Shared by ✕ and dd. Null otherwise.
+function settleOther(s: DocketSession, id: number, now: number): { session: DocketSession; out: DismissStep } | null {
+  const a = s.view.armedDismiss
+  if (a === null || a.pending === undefined || a.id === id) return null
+  const cleared = { ...s, view: { ...s.view, armedDismiss: null } }
+  const isOpen = s.items.some(i => i.id === a.id && i.status === 'open')
+  return { session: isOpen ? dismiss(cleared, a.id, now) : cleared, out: isOpen ? 'settled' : 'gone' }
+}
+
 // dd (v0.9): a second d on an armed row confirms at any speed, still behind the hold check. A held d
 // streams repeats: a d during the check marks the arm held, and while held a d under HOLD_CHECK_MS after
 // the last one is the key still down. After release, a fresh dd works again.
 async function dismissByD($: EngineInterface, id: number): Promise<void> {
   if (await isDebounced($, id)) return
   const now = await $.clock.now()
-  const step = await transact<{ pending: number } | { until: number } | 'held' | 'settled' | 'gone'>($, s => {
+  const step = await transact<DismissStep>($, s => {
     const a = s.view.armedDismiss
-    // Another row's confirm in its hold check: that key was released, so its dismiss stands now, and
-    // this press is swallowed by the pause that follows, as with ✕.
-    if (a !== null && a.pending !== undefined && a.id !== id) {
-      const cleared = { ...s, view: { ...s.view, armedDismiss: null } }
-      const isOpen = s.items.some(i => i.id === a.id && i.status === 'open')
-      return { session: isOpen ? dismiss(cleared, a.id, now) : cleared, out: isOpen ? ('settled' as const) : ('gone' as const) }
-    }
+    const other = settleOther(s, id, now)
+    if (other !== null) return other
     const fresh = { id, at: now, until: now + CONFIRM_MS, ready: true, viaD: true as const, lastD: now }
     const put = (armedDismiss: NonNullable<typeof a>) => ({ ...s, view: { ...s.view, armedDismiss } })
     if (a !== null && a.id === id) {
@@ -1576,15 +1585,10 @@ async function dismissPress($: EngineInterface, id: number): Promise<void> {
   // A second press of the same item, after the gap and before the arm lapses, confirms once no
   // further press follows within HOLD_CHECK_MS; a press while one is pending is a held key, and
   // anything else (re)arms this item. The armed state is changed in one transaction.
-  const step = await transact<{ pending: number } | { until: number } | 'settled' | 'gone'>($, s => {
+  const step = await transact<DismissStep>($, s => {
     const a = s.view.armedDismiss
-    // Another row's key during a confirm's hold check: the first key was released, so that
-    // dismiss stands now, and this press is swallowed as the pause after a change would.
-    if (a !== null && a.pending !== undefined && a.id !== id) {
-      const cleared = { ...s, view: { ...s.view, armedDismiss: null } }
-      const isOpen = s.items.some(i => i.id === a.id && i.status === 'open')
-      return { session: isOpen ? dismiss(cleared, a.id, now) : cleared, out: isOpen ? ('settled' as const) : ('gone' as const) }
-    }
+    const other = settleOther(s, id, now)
+    if (other !== null) return other
     if (a !== null && a.id === id && a.pending === undefined && now - a.at >= CONFIRM_GAP_MS && now < a.until) {
       return { session: { ...s, view: { ...s.view, armedDismiss: { ...a, pending: now } } }, out: { pending: now } }
     }
@@ -1595,8 +1599,9 @@ async function dismissPress($: EngineInterface, id: number): Promise<void> {
     await pauseKeys($)
     return
   }
-  // The pending item closed meanwhile: nothing changed, so this press is simply dropped.
-  if (step === 'gone') return
+  // The pending item closed meanwhile: nothing changed, so this press is simply dropped. (✕ never
+  // returns 'held', which only dd's own hold tracking does.)
+  if (step === 'gone' || step === 'held') return
   if ('pending' in step) {
     $.clock.after(HOLD_CHECK_MS, () => void guard($, 'dismiss', confirmDismiss($, id, step.pending)))
     return
@@ -1616,11 +1621,12 @@ async function keepClosedPress($: EngineInterface, id: number): Promise<void> {
 
 function actions($: EngineInterface): Actions {
   return {
-    reply: id => void guard($, 'reply', fillThen($, id, 'reply', replyTo($, id))),
-    replyNew: id => void guard($, 'reply', fillThen($, id, 'replynew', replyNewTo($, id))),
-    btw: id => void guard($, 'btw', fillThen($, id, 'btw', btwTo($, id))),
+    reply: id => void guard($, 'reply', fillThen($, id, 'reply', () => replyTo($, id))),
+    replyNew: id => void guard($, 'reply', fillThen($, id, 'replynew', () => replyNewTo($, id))),
+    btw: id => void guard($, 'btw', fillThen($, id, 'btw', () => btwTo($, id))),
     vim: key => {
-      vimQueue = vimQueue.then(() => guard($, 'vim', vimKey($, key)))
+      // guard reports and swallows a failure; the catch keeps the chain alive whatever happens.
+      vimQueue = vimQueue.then(() => guard($, 'vim', vimKey($, key))).catch(() => undefined)
     },
     keysOn: () => void guard($, 'keys', change($, s => ({ ...s, view: { ...s.view, keysOff: false } })).then(() => undefined)),
     walk: kind =>

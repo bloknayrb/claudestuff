@@ -134,8 +134,6 @@ export type ViewState = {
   selected: { id: number; kind: ButtonKind } | null
   selectedIdx: number
   keysOff: boolean
-  // The item whose button holds the pane's focus ring: its Claude quote is shown.
-  focusedId: number | null
 }
 
 export type DocketSession = {

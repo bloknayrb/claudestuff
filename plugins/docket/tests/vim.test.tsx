@@ -2,6 +2,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { command, mountPane, say, start, world } from './world'
+import { rowKinds } from '../hooks/ui'
 
 // v0.9: vim keys in the pane (Bryan: "use vim keybindings in the docket panel to move the selection
 // around"; dismiss by "dd or moving the selection over the the delete button and hitting o twice or enter
@@ -214,5 +215,14 @@ test('after the selected item closes, d only lands on the row that took its plac
   await vim(ui, 'd')
   expect(await marked(ui)).toEqual(['›#2'])
   expect((await ui.find({ key: 'dismiss-2' }))?.props.label).toBe('✕')
+  await ui.unmount()
+})
+
+test('rowKinds names the buttons a row draws, in the order drawn (what h and l walk)', async ($, on) => {
+  world(on)
+  const ui = await setUp($, 1)
+  const drawn = (await ui.findAll({ type: 'Button' })).map(b => b.key ?? '').filter(k => /^(reply|replynew|btw|done|dismiss|keep)-1$/.test(k)).map(k => k.split('-')[0])
+  const item = { id: 1, kind: 'do', text: 'x', quote: '', singleRec: false, source: 'manual', openedTurn: 0, status: 'open' } as const
+  expect(drawn).toEqual(rowKinds(item, true))
   await ui.unmount()
 })
